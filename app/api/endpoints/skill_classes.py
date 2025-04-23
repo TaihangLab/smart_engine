@@ -29,15 +29,13 @@ def get_skill_classes(
     if enabled is not None:
         # 通过服务层筛选获取启用/禁用的技能类
         if enabled:
-            result = skill_class_service.get_all_enabled(db)
-            skill_classes = result.get("skill_classes", [])
+            skill_classes = skill_class_service.get_all_enabled(db)
         else:
             # 获取所有技能类并筛选禁用的
-            result = skill_class_service.get_all(db)
-            skill_classes = [cls for cls in result.get("skill_classes", []) if not cls.get('enabled', True)]
+            all_classes = skill_class_service.get_all(db)
+            skill_classes = [cls for cls in all_classes if not cls.get('enabled', True)]
     else:
-        result = skill_class_service.get_all(db)
-        skill_classes = result.get("skill_classes", [])
+        skill_classes = skill_class_service.get_all(db)
     
     return skill_classes
 

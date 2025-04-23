@@ -34,6 +34,12 @@ class SkillClassService:
             # 获取关联的模型
             models = SkillClassDAO.get_models(skill_class.id, db)
             model_ids = [model.id for model in models]
+            model_names = [model.name for model in models if hasattr(model, 'name')]
+            
+            # 获取关联的实例
+            instances = SkillInstanceDAO.get_by_class_id(skill_class.id, db)
+            skill_instance_ids = [instance.id for instance in instances]
+            skill_instance_names = [instance.name for instance in instances if hasattr(instance, 'name')]
             
             class_data = {
                 "id": skill_class.id,
@@ -46,7 +52,11 @@ class SkillClassService:
                 "enabled": skill_class.enabled,
                 "created_at": skill_class.created_at.isoformat() if skill_class.created_at else None,
                 "updated_at": skill_class.updated_at.isoformat() if skill_class.updated_at else None,
-                "model_ids": model_ids
+                "model_ids": model_ids,
+                "model_names": model_names,
+                "skill_instance_ids": skill_instance_ids,
+                "skill_instance_names": skill_instance_names,
+                "instance_count": len(instances)
             }
             result.append(class_data)
         
@@ -72,6 +82,12 @@ class SkillClassService:
             # 获取关联的模型
             models = SkillClassDAO.get_models(skill_class.id, db)
             model_ids = [model.id for model in models]
+            model_names = [model.name for model in models if hasattr(model, 'name')]
+            
+            # 获取关联的实例
+            instances = SkillInstanceDAO.get_by_class_id(skill_class.id, db)
+            skill_instance_ids = [instance.id for instance in instances]
+            skill_instance_names = [instance.name for instance in instances if hasattr(instance, 'name')]
             
             class_data = {
                 "id": skill_class.id,
@@ -84,7 +100,11 @@ class SkillClassService:
                 "enabled": skill_class.enabled,
                 "created_at": skill_class.created_at.isoformat() if skill_class.created_at else None,
                 "updated_at": skill_class.updated_at.isoformat() if skill_class.updated_at else None,
-                "model_ids": model_ids
+                "model_ids": model_ids,
+                "model_names": model_names,
+                "skill_instance_ids": skill_instance_ids,
+                "skill_instance_names": skill_instance_names,
+                "instance_count": len(instances)
             }
             result.append(class_data)
         
@@ -110,10 +130,12 @@ class SkillClassService:
         # 获取关联的模型
         models = SkillClassDAO.get_models(skill_class_id, db)
         model_ids = [model.id for model in models]
+        model_names = [model.name for model in models if hasattr(model, 'name')]
         
         # 获取关联的实例
         instances = SkillInstanceDAO.get_by_skill_class(skill_class_id, db)
         instance_ids = [instance.id for instance in instances]
+        instance_names = [instance.name for instance in instances if hasattr(instance, 'name')]
         
         # 转换为字典并移除SQLAlchemy内部属性
         skill_class_dict = {k: v for k, v in skill_class.__dict__.items() 
@@ -121,38 +143,50 @@ class SkillClassService:
         
         # 添加关联信息
         skill_class_dict["model_ids"] = model_ids
+        skill_class_dict["model_names"] = model_names
         skill_class_dict["instance_ids"] = instance_ids
+        skill_class_dict["instance_names"] = instance_names
         skill_class_dict["instance_count"] = len(instances)
         
         return skill_class_dict
     
     @staticmethod
-    def get_by_name(name: str, db: Session) -> Optional[Dict[str, Any]]:
+    def get_by_name(skill_class_name: str, db: Session) -> Optional[Dict[str, Any]]:
         """
         根据名称获取技能类
         
         Args:
-            name: 技能类名称
+            skill_class_name: 技能类名称
             db: 数据库会话
             
         Returns:
             技能类字典或None
         """
-        logger.info(f"根据名称获取技能类: name={name}")
-        skill_class = SkillClassDAO.get_by_name(name, db)
+        logger.info(f"获取技能类: name={skill_class_name}")
+        skill_class = SkillClassDAO.get_by_name(skill_class_name, db)
         if not skill_class:
             return None
-        
+            
         # 获取关联的模型
         models = SkillClassDAO.get_models(skill_class.id, db)
         model_ids = [model.id for model in models]
+        model_names = [model.name for model in models if hasattr(model, 'name')]
+        
+        # 获取关联的实例
+        instances = SkillInstanceDAO.get_by_skill_class(skill_class.id, db)
+        instance_ids = [instance.id for instance in instances]
+        instance_names = [instance.name for instance in instances if hasattr(instance, 'name')]
         
         # 转换为字典并移除SQLAlchemy内部属性
         skill_class_dict = {k: v for k, v in skill_class.__dict__.items() 
-                        if not k.startswith('_')}
+                          if not k.startswith('_')}
         
         # 添加关联信息
         skill_class_dict["model_ids"] = model_ids
+        skill_class_dict["model_names"] = model_names
+        skill_class_dict["instance_ids"] = instance_ids
+        skill_class_dict["instance_names"] = instance_names
+        skill_class_dict["instance_count"] = len(instances)
         
         return skill_class_dict
     

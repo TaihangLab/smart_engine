@@ -38,16 +38,14 @@ def get_skill_instances(
     elif status is not None:
         # 获取特定状态的实例
         if status:
-            result = skill_instance_service.get_all_enabled(db)
-            instances = result.get("skill_instances", [])
+            instances = skill_instance_service.get_all_enabled(db)
         else:
             # 获取所有实例并筛选禁用的
-            result = skill_instance_service.get_all(db)
-            instances = [inst for inst in result.get("skill_instances", []) if not inst.get("status", True)]
+            all_instances = skill_instance_service.get_all(db)
+            instances = [inst for inst in all_instances if not inst.get("status", True)]
     else:
         # 获取所有实例
-        result = skill_instance_service.get_all(db)
-        instances = result.get("skill_instances", [])
+        instances = skill_instance_service.get_all(db)
     
     return instances
 
@@ -188,7 +186,8 @@ def delete_skill_instance(instance_id: int, db: Session = Depends(get_db)):
         )
     
     # 检查是否有AI任务使用此技能实例
-    tasks = AITaskService.get_tasks_by_skill_instance(instance_id, db)["tasks"]
+    ai_task_result = AITaskService.get_tasks_by_skill_instance(instance_id, db)
+    tasks = ai_task_result.get("tasks", [])
     if tasks:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -216,21 +215,13 @@ def clone_skill_instance(
     Returns:
         克隆的技能实例
     """
-    # 获取源实例
-    source_instance = skill_instance_service.get_by_id(instance_id, db)
-    if not source_instance:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"技能实例不存在: ID={instance_id}"
-        )
-    
     # 克隆实例
     try:
         cloned = skill_instance_service.clone(instance_id, new_name, db)
         if not cloned:
             raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="克隆技能实例失败"
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"技能实例不存在: ID={instance_id}"
             )
         return cloned
     except Exception as e:
