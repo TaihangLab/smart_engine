@@ -33,7 +33,9 @@ class SkillClassDAO:
         Returns:
             已启用的技能类列表
         """
-        return db.query(SkillClass).filter(SkillClass.enabled == True).all()
+        return db.query(SkillClass).filter(SkillClass.status == True).all()
+        
+
         
     @staticmethod
     def get_by_id(skill_class_id: int, db: Session) -> Optional[SkillClass]:

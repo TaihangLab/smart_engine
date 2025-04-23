@@ -17,7 +17,7 @@ class SkillClass(Base):
     description = Column(String(512))  # 技能类描述
     python_class = Column(String(128))  # 对应的Python类名
     default_config = Column(JSON)  # 默认配置模板
-    enabled = Column(Boolean, default=True)  # 是否启用
+    status = Column(Boolean, default=True)  # 是否启用
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     

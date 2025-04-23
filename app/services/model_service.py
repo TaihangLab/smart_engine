@@ -496,7 +496,7 @@ class ModelService:
             return {
                 "model_name": model_name,
                 "skill_classes": [],
-                "status": {"ready": triton_client.is_model_ready(model_name)}
+                "model_id": None
             }
         
         # 使用DAO层查找关联的技能类
@@ -508,13 +508,76 @@ class ModelService:
             "name": sc.name,
             "name_zh": sc.name_zh,
             "type": sc.type,
-            "description": sc.description
+            "description": sc.description,
+            "enabled": sc.enabled  # 添加技能类的启用状态
         } for sc in skill_classes]
         
         return {
             "model_name": model_name,
             "model_id": model.id,
             "skill_classes": skill_class_data,
-            "skill_class_count": len(skill_class_data),
-            "status": {"ready": triton_client.is_model_ready(model_name)}
+            "skill_class_count": len(skill_class_data)
+        }
+
+    @staticmethod
+    def get_model_instances(model_name: str, db: Session) -> Dict[str, Any]:
+        """
+        获取使用指定模型的所有技能实例，按技能类分组
+        
+        Args:
+            model_name: 模型名称
+            db: 数据库会话
+            
+        Returns:
+            Dict[str, Any]: 包含使用该模型的所有技能实例信息，按技能类分组
+        """
+        from app.db.model_dao import ModelDAO
+        from app.db.skill_class_dao import SkillClassDAO
+        from app.services.skill_instance_service import skill_instance_service
+        
+        # 查找模型
+        model = ModelDAO.get_model_by_name(model_name, db)
+        if not model:
+            # 如果找不到模型，返回None，由API层处理404错误
+            return None
+        
+        # 使用DAO层查找关联的技能类
+        skill_classes = SkillClassDAO.get_by_model_id(model.id, db)
+        
+        # 获取每个技能类的实例信息
+        result_data = []
+        total_instances = 0
+        
+        for skill_class in skill_classes:
+            # 获取该技能类的所有实例
+            instances = skill_instance_service.get_by_class_id(skill_class.id, db)
+            
+            # 组织数据
+            class_data = {
+                "skill_class": {
+                    "id": skill_class.id,
+                    "name": skill_class.name,
+                    "name_zh": skill_class.name_zh,
+                    "type": skill_class.type,
+                    "description": skill_class.description,
+                    "enabled": skill_class.enabled
+                },
+                "instances": instances,
+                "instance_count": len(instances),
+                "has_enabled_instances": any(instance.get("status", False) for instance in instances)
+            }
+            
+            result_data.append(class_data)
+            total_instances += len(instances)
+        
+        return {
+            "model_name": model_name,
+            "model_id": model.id,
+            "skill_classes": result_data,
+            "skill_class_count": len(skill_classes),
+            "total_instances": total_instances,
+            "has_instances": total_instances > 0,
+            "has_enabled_instances": any(
+                class_data["has_enabled_instances"] for class_data in result_data
+            )
         } 

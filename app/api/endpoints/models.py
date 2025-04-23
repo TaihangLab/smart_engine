@@ -381,3 +381,35 @@ def get_model_usage(model_name: str, db: Session = Depends(get_db)):
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取模型使用情况失败: {str(e)}"
         )
+
+@router.get("/{model_name}/instances", response_model=Dict[str, Any])
+def get_model_instances(model_name: str, db: Session = Depends(get_db)):
+    """
+    获取使用指定模型的所有技能实例
+    
+    Args:
+        model_name: 模型名称
+        db: 数据库会话
+        
+    Returns:
+        Dict: 包含使用该模型的所有技能实例信息，按技能类分组
+    """
+    try:
+        # 调用服务层获取模型实例信息
+        result = ModelService.get_model_instances(model_name, db)
+        
+        if not result:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"模型 {model_name} 不存在"
+            )
+            
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取模型实例信息失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"获取模型实例信息失败: {str(e)}"
+        )
