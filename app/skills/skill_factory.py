@@ -183,22 +183,20 @@ class SkillFactory:
                 config["type"] = db_skill_class.type
                 config["name_zh"] = db_skill_class.name_zh
                 
-                # 创建技能实例
-                skill_instance = skill_class(config=config)
+                # 创建技能实例 - 不使用关键字参数，直接传递配置对象
+                skill_instance = skill_class(config)
                 
                 # 获取技能类关联的模型
                 db_models = SkillClassDAO.get_models(db_skill_class.id, db)
                 
                 # 检查技能所需的模型是否已注册
-                skill_requirements = skill_instance.get_requirements()
-                if skill_requirements and "models" in skill_requirements:
-                    model_names = skill_requirements["models"]
-                    db_model_names = [model.name for model in db_models]
-                    
-                    # 检查是否所有必需的模型都已关联
-                    missing_models = [name for name in model_names if name not in db_model_names]
-                    if missing_models:
-                        logger.warning(f"技能类 {db_skill_class.name} 缺少必需的模型: {', '.join(missing_models)}")
+                required_models = skill_instance.get_required_models()
+                db_model_names = [model.name for model in db_models]
+                
+                # 检查是否所有必需的模型都已关联
+                missing_models = [name for name in required_models if name not in db_model_names]
+                if missing_models:
+                    logger.warning(f"技能类 {db_skill_class.name} 缺少必需的模型: {', '.join(missing_models)}")
                 
                 return skill_instance
             except Exception as e:
@@ -226,7 +224,7 @@ class SkillFactory:
             
         try:
             # 创建临时实例并验证配置
-            temp_instance = skill_class(config=config)
+            temp_instance = skill_class(config)
             result = temp_instance.validate_config()
             if not result[0]:
                 return False, result[1]
