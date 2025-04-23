@@ -15,7 +15,7 @@ class SkillInstanceService:
     """技能实例服务"""
     
     @staticmethod
-    def get_all(db: Session) -> Dict[str, Any]:
+    def get_all(db: Session) -> List[Dict[str, Any]]:
         """
         获取所有技能实例
         
@@ -23,15 +23,15 @@ class SkillInstanceService:
             db: 数据库会话
             
         Returns:
-            技能实例列表及总数
+            技能实例列表
         """
         logger.info("获取所有技能实例")
         instances = SkillInstanceDAO.get_all(db)
         result = [_convert_instance_to_dict(instance) for instance in instances]
-        return {"skill_instances": result, "total": len(result)}
+        return result
     
     @staticmethod
-    def get_all_enabled(db: Session) -> Dict[str, Any]:
+    def get_all_enabled(db: Session) -> List[Dict[str, Any]]:
         """
         获取所有已启用的技能实例
         
@@ -39,12 +39,12 @@ class SkillInstanceService:
             db: 数据库会话
             
         Returns:
-            已启用的技能实例列表及总数
+            已启用的技能实例列表
         """
         logger.info("获取所有已启用的技能实例")
         instances = SkillInstanceDAO.get_all_enabled(db)
         result = [_convert_instance_to_dict(instance) for instance in instances]
-        return {"skill_instances": result, "total": len(result)}
+        return result
     
     @staticmethod
     def get_by_id(instance_id: int, db: Session) -> Optional[Dict[str, Any]]:

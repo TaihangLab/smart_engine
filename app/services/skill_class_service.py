@@ -15,7 +15,7 @@ class SkillClassService:
     """技能类服务"""
     
     @staticmethod
-    def get_all(db: Session) -> Dict[str, Any]:
+    def get_all(db: Session) -> List[Dict[str, Any]]:
         """
         获取所有技能类
         
@@ -23,7 +23,7 @@ class SkillClassService:
             db: 数据库会话
             
         Returns:
-            技能类列表及总数
+            技能类列表
         """
         logger.info("获取所有技能类")
         skill_classes = SkillClassDAO.get_all(db)
@@ -50,10 +50,10 @@ class SkillClassService:
             }
             result.append(class_data)
         
-        return {"skill_classes": result, "total": len(result)}
+        return result
     
     @staticmethod
-    def get_all_enabled(db: Session) -> Dict[str, Any]:
+    def get_all_enabled(db: Session) -> List[Dict[str, Any]]:
         """
         获取所有已启用的技能类
         
@@ -61,7 +61,7 @@ class SkillClassService:
             db: 数据库会话
             
         Returns:
-            已启用的技能类列表及总数
+            已启用的技能类列表
         """
         logger.info("获取所有已启用的技能类")
         skill_classes = SkillClassDAO.get_all_enabled(db)
@@ -88,7 +88,7 @@ class SkillClassService:
             }
             result.append(class_data)
         
-        return {"skill_classes": result, "total": len(result)}
+        return result
     
     @staticmethod
     def get_by_id(skill_class_id: int, db: Session) -> Optional[Dict[str, Any]]:
