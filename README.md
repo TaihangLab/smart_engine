@@ -37,6 +37,24 @@ app/
     └── skill_manager.py          # 技能管理器，负责管理技能生命周期
 ```
 
+## 核心依赖
+
+项目主要依赖以下包：
+
+```
+fastapi             # Web框架
+SQLAlchemy          # ORM数据库
+uvicorn             # ASGI服务器
+python-jose         # JWT认证
+python-dotenv       # 环境变量管理
+opencv-python       # 图像处理
+numpy               # 数学计算
+grpcio              # gRPC支持
+tritonclient        # Triton推理服务客户端
+```
+
+完整依赖列表请查看`requirements.txt`文件。
+
 ## 安装
 
 1. 克隆项目
@@ -45,8 +63,19 @@ git clone <repository-url>
 cd smart_engine
 ```
 
-2. 创建Conda环境
+2. 创建虚拟环境
+```bash
+# 使用conda（推荐）
+conda create -n smart_engine python=3.9
+conda activate smart_engine
 
+# 或使用venv
+python -m venv venv
+# Windows
+venv\Scripts\activate
+# Linux/Mac
+source venv/bin/activate
+```
 
 3. 安装依赖
 ```bash
@@ -54,16 +83,38 @@ pip install -r requirements.txt
 ```
 
 4. 配置环境变量
+
+复制`.env.example`文件为`.env`并根据需要修改配置：
+```bash
+cp .env.example .env
 ```
-E:\coderepository\smart_engine\app\core\config.py
+
+主要配置项：
+```
+DATABASE_URL=mysql+mysqlclient://user:password@localhost/smart_engine
+TRITON_SERVER_URL=localhost:8001
+JWT_SECRET_KEY=your-secret-key
+```
+
+## 数据库初始化
+
+初始化数据库结构：
+```bash
+python -m scripts.init_db
 ```
 
 ## 运行
 
 启动API服务：
 ```bash
+# 开发模式
 python -m app.main
+
+# 生产模式
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
+
+访问API文档：http://localhost:8000/docs
 
 ## 技能系统
 
@@ -118,16 +169,34 @@ class MyCustomSkill(BaseSkill):
 - `DELETE /api/v1/cameras/{id}` - 删除摄像头
 
 ### 技能接口
-- `GET /api/v1/skills/classes` - 获取技能类列表
-- `GET /api/v1/skills/instances` - 获取技能实例列表
-- `POST /api/v1/skills/instances` - 创建技能实例
-- `PUT /api/v1/skills/instances/{id}` - 更新技能实例
-- `DELETE /api/v1/skills/instances/{id}` - 删除技能实例
+- `GET /api/v1/skill-classes` - 获取技能类列表
+- `GET /api/v1/skill-instances` - 获取技能实例列表
+- `POST /api/v1/skill-instances` - 创建技能实例
+- `PUT /api/v1/skill-instances/{id}` - 更新技能实例
+- `DELETE /api/v1/skill-instances/{id}` - 删除技能实例
+- `POST /api/v1/skill-instances/{id}/clone` - 克隆技能实例
+- `POST /api/v1/skill-instances/{id}/enable` - 启用技能实例
+- `POST /api/v1/skill-instances/{id}/disable` - 禁用技能实例
 
 ### 模型接口
 - `GET /api/v1/models` - 获取模型列表
 - `GET /api/v1/models/{id}` - 获取特定模型信息
 - `GET /api/v1/models/sync` - 从Triton同步模型
+
+## 技能实例测试
+
+项目提供了自动化测试脚本用于验证技能实例API功能：
+
+```bash
+# 运行技能实例API测试
+python tests/test_skill_instances.py
+```
+
+测试脚本会执行以下操作：
+1. 验证API服务可用性
+2. 获取所有技能实例和技能类
+3. 测试创建、更新、启用/禁用、克隆和删除技能实例
+4. 测试各种错误处理情况
 
 ## 系统健康检查
 
@@ -141,7 +210,8 @@ GET /health
 ```json
 {
   "status": "healthy",
-  "triton_server": true
+  "triton_server": true,
+  "database": true
 }
 ```
 
@@ -162,6 +232,12 @@ GET /health
 DEBUG=1 python -m app.main
 ```
 
-## 许可证
+### 性能优化
+
+- 推理服务使用批处理模式提高性能
+- 使用连接池优化数据库性能
+- 定期清理不使用的技能实例和任务记录
+
+## 许可证 
 
 MIT 

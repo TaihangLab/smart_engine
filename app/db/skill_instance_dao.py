@@ -161,4 +161,26 @@ class SkillInstanceDAO:
             "description": f"Cloned from {source.name} (ID: {source.id})"
         }
         
-        return SkillInstanceDAO.create(new_data, db) 
+        return SkillInstanceDAO.create(new_data, db)
+    
+    @staticmethod
+    def set_status(instance_id: int, status: bool, db: Session) -> bool:
+        """
+        设置技能实例状态（启用/禁用）
+        
+        Args:
+            instance_id: 技能实例ID
+            status: 状态值 (True: 启用, False: 禁用)
+            db: 数据库会话
+            
+        Returns:
+            是否成功设置状态
+        """
+        instance = SkillInstanceDAO.get_by_id(instance_id, db)
+        if not instance:
+            return False
+            
+        instance.status = status
+        db.commit()
+        db.refresh(instance)
+        return True 

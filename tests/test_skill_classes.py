@@ -292,5 +292,5 @@ def main():
     
     print(f"\n测试完成: {success_count}/{len(tests)} 个测试通过")
 
-if __name__ == "__main__":
+if __name__ == "__main__": 
     main() 

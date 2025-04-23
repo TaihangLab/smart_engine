@@ -4,11 +4,14 @@
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
+import logging
 
 from app.db.session import get_db
 from app.services.skill_instance_service import skill_instance_service
 from app.services.skill_class_service import skill_class_service
 from app.services.ai_task_service import AITaskService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -186,7 +189,9 @@ def delete_skill_instance(instance_id: int, db: Session = Depends(get_db)):
         )
     
     # 检查是否有AI任务使用此技能实例
+    print(f"检查是否有AI任务使用此技能实例: instance_id={instance_id}")
     ai_task_result = AITaskService.get_tasks_by_skill_instance(instance_id, db)
+    print(f"AI任务结果: {ai_task_result}")
     tasks = ai_task_result.get("tasks", [])
     if tasks:
         raise HTTPException(
@@ -217,6 +222,7 @@ def clone_skill_instance(
     """
     # 克隆实例
     try:
+        logger.info(f"克隆技能实例: instance_id={instance_id}, new_name={new_name}")
         cloned = skill_instance_service.clone(instance_id, new_name, db)
         if not cloned:
             raise HTTPException(
@@ -225,6 +231,7 @@ def clone_skill_instance(
             )
         return cloned
     except Exception as e:
+        logger.error(f"克隆技能实例失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"克隆技能实例失败: {str(e)}"
