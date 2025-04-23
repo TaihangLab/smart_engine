@@ -84,26 +84,26 @@ class BaseSkill(ABC):
         "params": {}        # 技能具体参数
     }
     
-    def __init__(self, config_or_name: Union[Dict[str, Any], str] = None):
+    def __init__(self, config: Union[Dict[str, Any], str] = None):
         """
         初始化技能
         
         Args:
-            config_or_name: 技能配置字典或者技能名称字符串
+            config: 技能配置字典
         """
         # 支持两种初始化方式：通过配置字典或者直接给名称
-        if isinstance(config_or_name, dict):
+        if isinstance(config, dict):
             # 合并默认配置和传入的配置
             self.config = self.get_default_config()
             # 如果传入的配置中有params，则合并params而不是覆盖
-            if "params" in config_or_name and "params" in self.config:
-                self.config["params"].update(config_or_name.get("params", {}))
-                config_copy = config_or_name.copy()
+            if "params" in config and "params" in self.config:
+                self.config["params"].update(config.get("params", {}))
+                config_copy = config.copy()
                 if "params" in config_copy:
                     del config_copy["params"]
                 self.config.update(config_copy)
             else:
-                self.config.update(config_or_name)
+                self.config.update(config)
                 
             self.name = self.config.get("name", self.__class__.__name__)
             self.name_zh = self.config.get("name_zh", "")
@@ -113,7 +113,7 @@ class BaseSkill(ABC):
         else:
             # 使用默认配置
             self.config = self.get_default_config()
-            self.name = config_or_name if config_or_name else self.config.get("name", self.__class__.__name__)
+            self.name = config if config else self.config.get("name", self.__class__.__name__)
             self.name_zh = self.config.get("name_zh", "")
             self.description = self.config.get("description", "")
             self.status = self.config.get("status", True)
