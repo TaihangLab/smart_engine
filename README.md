@@ -45,12 +45,8 @@ git clone <repository-url>
 cd smart_engine
 ```
 
-2. 创建虚拟环境
-```bash
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-venv\Scripts\activate     # Windows
-```
+2. 创建Conda环境
+
 
 3. 安装依赖
 ```bash
@@ -58,15 +54,8 @@ pip install -r requirements.txt
 ```
 
 4. 配置环境变量
-创建`.env`文件，配置以下环境变量：
 ```
-MYSQL_SERVER=192.168.1.107
-MYSQL_USER=root
-MYSQL_PASSWORD=root
-MYSQL_DB=smart_vision
-MYSQL_PORT=3306
-WVP_API_URL=http://192.168.1.107:18080
-TRITON_SERVER_URL=192.168.1.111:8001
+E:\coderepository\smart_engine\app\core\config.py
 ```
 
 ## 运行

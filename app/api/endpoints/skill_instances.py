@@ -6,10 +6,9 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
-from app.db.skill_instance_dao import SkillInstanceDAO
-from app.db.skill_class_dao import SkillClassDAO
-from app.models.skill import SkillInstance
-from app.models.ai_task import AITask
+from app.services.skill_instance_service import skill_instance_service
+from app.services.skill_class_service import skill_class_service
+from app.services.ai_task_service import AITaskService
 
 router = APIRouter()
 
@@ -30,15 +29,26 @@ def get_skill_instances(
     Returns:
         技能实例列表
     """
-    query = db.query(SkillInstance)
-    
-    # 应用过滤条件
     if skill_class_id is not None:
-        query = query.filter(SkillInstance.skill_class_id == skill_class_id)
-    if status is not None:
-        query = query.filter(SkillInstance.status == status)
+        # 获取特定技能类的实例
+        instances = skill_instance_service.get_by_class_id(skill_class_id, db)
+        # 如果需要进一步按状态过滤
+        if status is not None:
+            instances = [inst for inst in instances if inst.get("status") == status]
+    elif status is not None:
+        # 获取特定状态的实例
+        if status:
+            result = skill_instance_service.get_all_enabled(db)
+            instances = result.get("skill_instances", [])
+        else:
+            # 获取所有实例并筛选禁用的
+            result = skill_instance_service.get_all(db)
+            instances = [inst for inst in result.get("skill_instances", []) if not inst.get("status", True)]
+    else:
+        # 获取所有实例
+        result = skill_instance_service.get_all(db)
+        instances = result.get("skill_instances", [])
     
-    instances = query.all()
     return instances
 
 @router.get("/{instance_id}", response_model=Dict[str, Any])
@@ -53,26 +63,15 @@ def get_skill_instance(instance_id: int, db: Session = Depends(get_db)):
     Returns:
         技能实例详情
     """
-    instance = SkillInstanceDAO.get_by_id(instance_id, db)
+    instance = skill_instance_service.get_by_id(instance_id, db)
     if not instance:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"技能实例不存在: ID={instance_id}"
         )
     
-    # 加载关联的技能类信息
-    skill_class = SkillClassDAO.get_by_id(instance.skill_class_id, db)
-    if not skill_class:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"技能类不存在: ID={instance.skill_class_id}"
-        )
-    
-    # 返回详细信息
-    return {
-        **instance.__dict__,
-        "skill_class": skill_class
-    }
+    # 实例已经包含了技能类信息
+    return instance
 
 @router.post("", response_model=Dict[str, Any])
 def create_skill_instance(
@@ -97,7 +96,7 @@ def create_skill_instance(
             detail="缺少必要参数: skill_class_id"
         )
         
-    skill_class = SkillClassDAO.get_by_id(skill_class_id, db)
+    skill_class = skill_class_service.get_by_id(skill_class_id, db)
     if not skill_class:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -106,7 +105,7 @@ def create_skill_instance(
     
     # 创建技能实例
     try:
-        created = SkillInstanceDAO.create(instance, db)
+        created = skill_instance_service.create(instance, db)
         return created
     except ValueError as e:
         raise HTTPException(
@@ -137,7 +136,7 @@ def update_skill_instance(
         更新后的技能实例
     """
     # 检查技能实例是否存在
-    existing = SkillInstanceDAO.get_by_id(instance_id, db)
+    existing = skill_instance_service.get_by_id(instance_id, db)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -145,8 +144,8 @@ def update_skill_instance(
         )
     
     # 如果更新技能类ID，检查新技能类是否存在
-    if "skill_class_id" in instance and instance["skill_class_id"] != existing.skill_class_id:
-        skill_class = SkillClassDAO.get_by_id(instance["skill_class_id"], db)
+    if "skill_class_id" in instance and instance["skill_class_id"] != existing.get("skill_class_id"):
+        skill_class = skill_class_service.get_by_id(instance["skill_class_id"], db)
         if not skill_class:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -155,7 +154,12 @@ def update_skill_instance(
     
     # 更新技能实例
     try:
-        updated = SkillInstanceDAO.update(instance_id, instance, db)
+        updated = skill_instance_service.update(instance_id, instance, db)
+        if not updated:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"更新技能实例失败: ID={instance_id}"
+            )
         return updated
     except Exception as e:
         raise HTTPException(
@@ -176,7 +180,7 @@ def delete_skill_instance(instance_id: int, db: Session = Depends(get_db)):
         删除结果
     """
     # 检查技能实例是否存在
-    existing = SkillInstanceDAO.get_by_id(instance_id, db)
+    existing = skill_instance_service.get_by_id(instance_id, db)
     if not existing:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -184,7 +188,7 @@ def delete_skill_instance(instance_id: int, db: Session = Depends(get_db)):
         )
     
     # 检查是否有AI任务使用此技能实例
-    tasks = db.query(AITask).filter(AITask.skill_instance_id == instance_id).all()
+    tasks = AITaskService.get_tasks_by_skill_instance(instance_id, db)["tasks"]
     if tasks:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -192,7 +196,7 @@ def delete_skill_instance(instance_id: int, db: Session = Depends(get_db)):
         )
     
     # 删除技能实例
-    success = SkillInstanceDAO.delete(instance_id, db)
+    success = skill_instance_service.delete(instance_id, db)
     return {"success": success, "message": "技能实例已删除"}
 
 @router.post("/{instance_id}/clone", response_model=Dict[str, Any])
@@ -212,14 +216,28 @@ def clone_skill_instance(
     Returns:
         克隆的技能实例
     """
-    cloned = SkillInstanceDAO.clone(instance_id, new_name, db)
-    if not cloned:
+    # 获取源实例
+    source_instance = skill_instance_service.get_by_id(instance_id, db)
+    if not source_instance:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"技能实例不存在: ID={instance_id}"
         )
     
-    return cloned
+    # 克隆实例
+    try:
+        cloned = skill_instance_service.clone(instance_id, new_name, db)
+        if not cloned:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="克隆技能实例失败"
+            )
+        return cloned
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"克隆技能实例失败: {str(e)}"
+        )
 
 @router.post("/{instance_id}/enable", response_model=Dict[str, Any])
 def enable_skill_instance(instance_id: int, db: Session = Depends(get_db)):
@@ -233,17 +251,25 @@ def enable_skill_instance(instance_id: int, db: Session = Depends(get_db)):
     Returns:
         更新后的技能实例
     """
-    instance = SkillInstanceDAO.get_by_id(instance_id, db)
+    instance = skill_instance_service.get_by_id(instance_id, db)
     if not instance:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"技能实例不存在: ID={instance_id}"
         )
     
-    if instance.status:
+    if instance.get("status", False):
         return instance  # 已经是启用状态
     
-    updated = SkillInstanceDAO.update(instance_id, {"status": True}, db)
+    success = skill_instance_service.enable(instance_id, db)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="启用技能实例失败"
+        )
+    
+    # 获取更新后的实例
+    updated = skill_instance_service.get_by_id(instance_id, db)
     return updated
 
 @router.post("/{instance_id}/disable", response_model=Dict[str, Any])
@@ -258,15 +284,23 @@ def disable_skill_instance(instance_id: int, db: Session = Depends(get_db)):
     Returns:
         更新后的技能实例
     """
-    instance = SkillInstanceDAO.get_by_id(instance_id, db)
+    instance = skill_instance_service.get_by_id(instance_id, db)
     if not instance:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"技能实例不存在: ID={instance_id}"
         )
     
-    if not instance.status:
+    if not instance.get("status", True):
         return instance  # 已经是禁用状态
     
-    updated = SkillInstanceDAO.update(instance_id, {"status": False}, db)
+    success = skill_instance_service.disable(instance_id, db)
+    if not success:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="禁用技能实例失败"
+        )
+    
+    # 获取更新后的实例
+    updated = skill_instance_service.get_by_id(instance_id, db)
     return updated 
