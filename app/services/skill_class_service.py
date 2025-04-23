@@ -37,7 +37,7 @@ class SkillClassService:
             model_names = [model.name for model in models if hasattr(model, 'name')]
             
             # 获取关联的实例
-            instances = SkillInstanceDAO.get_by_class_id(skill_class.id, db)
+            instances = SkillInstanceDAO.get_by_skill_class(skill_class.id, db)
             skill_instance_ids = [instance.id for instance in instances]
             skill_instance_names = [instance.name for instance in instances if hasattr(instance, 'name')]
             
@@ -85,7 +85,7 @@ class SkillClassService:
             model_names = [model.name for model in models if hasattr(model, 'name')]
             
             # 获取关联的实例
-            instances = SkillInstanceDAO.get_by_class_id(skill_class.id, db)
+            instances = SkillInstanceDAO.get_by_skill_class(skill_class.id, db)
             skill_instance_ids = [instance.id for instance in instances]
             skill_instance_names = [instance.name for instance in instances if hasattr(instance, 'name')]
             

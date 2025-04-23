@@ -97,7 +97,7 @@ class SkillInstanceService:
             技能实例列表
         """
         logger.info(f"获取技能类的实例: class_id={class_id}")
-        instances = SkillInstanceDAO.get_by_class_id(class_id, db)
+        instances = SkillInstanceDAO.get_by_skill_class(class_id, db)
         return [_convert_instance_to_dict(instance) for instance in instances]
     
     @staticmethod

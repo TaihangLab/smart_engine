@@ -56,6 +56,11 @@ def test_get_all_skill_classes():
     print_result(True, f"成功获取到 {len(data)} 个技能类")
     if data:
         print(f"示例技能类: 名称={data[0].get('name')}, 类型={data[0].get('type')}")
+        # 格式化输出data，按照json格式
+        print("技能类数据示例:")
+
+        formatted_json = json.dumps(data[0], indent=4, ensure_ascii=False)
+        print(formatted_json)
 
 def test_get_skill_class_by_id():
     """测试通过ID获取技能类"""
@@ -72,7 +77,7 @@ def test_get_skill_class_by_id():
         return
     
     # 获取第一个技能类的ID
-    skill_class_id = skill_classes[0]["id"]
+    skill_class_id = skill_classes[1]["id"] # 使用第二个技能类
     
     # 获取特定技能类详情
     response = requests.get(f"{API_BASE_URL}/skill-classes/{skill_class_id}")
@@ -86,8 +91,15 @@ def test_get_skill_class_by_id():
         return
     
     print_result(True, f"成功获取技能类详情，名称: {data['name']}")
-    if "models" in data:
-        print(f"该技能类关联了 {len(data['models'])} 个模型")
+    # 检查是否有模型和实例关联信息
+    if "model_ids" in data:
+        print(f"该技能类关联了 {len(data['model_ids'])} 个模型")
+    if "instance_ids" in data:
+        print(f"该技能类关联了 {len(data['instance_ids'])} 个实例")
+    # 格式化输出data，按照json格式
+    print("技能类数据示例:")
+    formatted_json = json.dumps(data, indent=4, ensure_ascii=False)
+    print(formatted_json)
 
 def test_create_update_delete_flow():
     """测试创建、更新和删除技能类的完整流程"""
@@ -123,6 +135,10 @@ def test_create_update_delete_flow():
     
     skill_id = created_skill["id"]
     print_result(True, f"创建技能类成功，ID: {skill_id}, 名称: {created_skill['name']}")
+    # 格式化输出created_skill，按照json格式
+    print("创建的技能类数据示例:")
+    formatted_json = json.dumps(created_skill, indent=4, ensure_ascii=False)
+    print(formatted_json)
     
     # 2. 更新技能类
     print("2. 更新技能类...")
@@ -145,7 +161,12 @@ def test_create_update_delete_flow():
         return
     
     print_result(True, f"更新技能类成功，新中文名称: {updated_skill['name_zh']}")
+    # 格式化输出updated_skill，按照json格式
+    print("更新的技能类数据示例:")
+    formatted_json = json.dumps(updated_skill, indent=4, ensure_ascii=False)
+    print(formatted_json)
     
+
     # 3. 删除技能类
     print("3. 删除技能类...")
     response = requests.delete(f"{API_BASE_URL}/skill-classes/{skill_id}")
@@ -158,11 +179,21 @@ def test_create_update_delete_flow():
         print_result(False, "删除技能类失败，响应表示失败")
         return
     
+    # 格式化输出result，按照json格式
+    print("删除技能类结果示例:")
+    formatted_json = json.dumps(result, indent=4, ensure_ascii=False)
+    print(formatted_json)
+    
     # 验证删除成功
     response = requests.get(f"{API_BASE_URL}/skill-classes/{skill_id}")
     if response.status_code != 404:
         print_result(False, f"验证删除失败，技能类仍然存在，状态码: {response.status_code}")
         return
+    
+    # 格式化输出response，按照json格式
+    print("验证删除结果示例:")
+    formatted_json = json.dumps(response.json(), indent=4, ensure_ascii=False)
+    print(formatted_json)
     
     print_result(True, "删除技能类成功并验证不存在")
 
@@ -193,12 +224,19 @@ def test_error_handling():
     print("\n正在测试错误处理...")
     
     # 测试获取不存在的技能类
+    print("测试获取不存在的技能类...")
     response = requests.get(f"{API_BASE_URL}/skill-classes/99999")
     if response.status_code != 404:
         print_result(False, f"获取不存在技能类返回意外状态码: {response.status_code}，应为404")
         return
     
+    # 格式化输出response，按照json格式
+    print("获取不存在技能类结果示例:")
+    formatted_json = json.dumps(response.json(), indent=4, ensure_ascii=False)
+    print(formatted_json)
+    
     # 测试创建名称重复的技能类
+    print("测试创建名称重复的技能类...")
     # 首先获取现有技能类
     response = requests.get(f"{API_BASE_URL}/skill-classes")
     if response.status_code != 200 or not response.json():
@@ -223,7 +261,10 @@ def test_error_handling():
     if response.status_code != 409:  # 冲突
         print_result(False, f"创建重复名称技能类返回意外状态码: {response.status_code}，应为409")
         return
-    
+    print("创建重复名称技能类结果示例:")
+    formatted_json = json.dumps(response.json(), indent=4, ensure_ascii=False)
+    print(formatted_json)
+
     print_result(True, "错误处理测试通过")
 
 def main():
