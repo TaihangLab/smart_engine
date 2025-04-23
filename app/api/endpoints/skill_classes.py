@@ -243,4 +243,37 @@ def get_skill_types(db: Session = Depends(get_db)):
         技能类型列表
     """
     types = skill_class_service.get_skill_types(db)
-    return types 
+    return types
+
+@router.get("/{skill_class_id}/instances", response_model=Dict[str, Any])
+def get_skill_class_instances(skill_class_id: int, db: Session = Depends(get_db)):
+    """
+    获取指定技能类的所有技能实例
+    
+    Args:
+        skill_class_id: 技能类ID
+        db: 数据库会话
+        
+    Returns:
+        技能实例列表
+    """
+    # 检查技能类是否存在
+    skill_class = skill_class_service.get_by_id(skill_class_id, db)
+    if not skill_class:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"技能类不存在: ID={skill_class_id}"
+        )
+    
+    # 获取该技能类的所有实例
+    instances = skill_instance_service.get_by_class_id(skill_class_id, db)
+    
+    return {
+        "skill_class": {
+            "id": skill_class["id"],
+            "name": skill_class["name"],
+            "name_zh": skill_class["name_zh"]
+        },
+        "instances": instances,
+        "total": len(instances)
+    } 

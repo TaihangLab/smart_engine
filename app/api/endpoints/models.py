@@ -360,14 +360,17 @@ async def upload_model_files(
 @router.get("/{model_name}/usage", response_model=Dict[str, Any])
 def get_model_usage(model_name: str, db: Session = Depends(get_db)):
     """
-    获取使用指定模型的所有技能类和技能实例
+    获取使用指定模型的所有技能类
     
     Args:
         model_name: 模型名称
         db: 数据库会话
         
     Returns:
-        Dict: 包含使用该模型的所有技能类和技能实例信息
+        Dict: 包含使用该模型的所有技能类信息
+        
+    Note:
+        如需获取技能类的实例信息，请使用 /api/v1/skill-classes/{skill_class_id}/instances 接口
     """
     try:
         # 调用服务层获取模型使用情况

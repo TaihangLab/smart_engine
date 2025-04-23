@@ -216,4 +216,28 @@ class SkillClassDAO:
         ).all()
         
         model_ids = [scm.model_id for scm in skill_class_models]
-        return db.query(Model).filter(Model.id.in_(model_ids)).all() 
+        return db.query(Model).filter(Model.id.in_(model_ids)).all()
+        
+    @staticmethod
+    def get_by_model_id(model_id: int, db: Session) -> List[SkillClass]:
+        """
+        获取与指定模型关联的所有技能类
+        
+        Args:
+            model_id: 模型ID
+            db: 数据库会话
+            
+        Returns:
+            技能类列表
+        """
+        # 查找使用此模型的所有技能类
+        from sqlalchemy.orm import joinedload
+        
+        skill_classes = db.query(SkillClass).join(
+            SkillClassModel, 
+            SkillClassModel.skill_class_id == SkillClass.id
+        ).filter(
+            SkillClassModel.model_id == model_id
+        ).all()
+        
+        return skill_classes 

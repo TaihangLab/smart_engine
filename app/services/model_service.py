@@ -477,45 +477,30 @@ class ModelService:
     @staticmethod
     def get_model_usage(model_name: str, db: Session) -> Dict[str, Any]:
         """
-        获取使用指定模型的所有技能类和技能实例
+        获取使用指定模型的所有技能类
         
         Args:
             model_name: 模型名称
             db: 数据库会话
             
         Returns:
-            Dict[str, Any]: 包含使用该模型的所有技能类和技能实例信息
+            Dict[str, Any]: 包含使用该模型的所有技能类信息
         """
-        from app.models.model import Model
-        from app.models.skill import SkillClass, SkillClassModel, SkillInstance
-        from app.services.triton_client import triton_client
+        from app.db.model_dao import ModelDAO
+        from app.db.skill_class_dao import SkillClassDAO
         
-        # 首先查找模型
-        model = db.query(Model).filter(Model.name == model_name).first()
+        # 查找模型
+        model = ModelDAO.get_model_by_name(model_name, db)
         if not model:
             # 如果找不到模型，返回空结果
             return {
                 "model_name": model_name,
                 "skill_classes": [],
-                "skill_instances": [],
                 "status": {"ready": triton_client.is_model_ready(model_name)}
             }
         
-        # 查找使用此模型的所有技能类
-        skill_classes = db.query(SkillClass).join(
-            SkillClassModel, 
-            SkillClassModel.skill_class_id == SkillClass.id
-        ).filter(
-            SkillClassModel.model_id == model.id
-        ).all()
-        
-        # 查找基于这些技能类的所有技能实例
-        skill_class_ids = [sc.id for sc in skill_classes]
-        skill_instances = []
-        if skill_class_ids:
-            skill_instances = db.query(SkillInstance).filter(
-                SkillInstance.skill_class_id.in_(skill_class_ids)
-            ).all()
+        # 使用DAO层查找关联的技能类
+        skill_classes = SkillClassDAO.get_by_model_id(model.id, db)
         
         # 构造返回数据
         skill_class_data = [{
@@ -526,21 +511,10 @@ class ModelService:
             "description": sc.description
         } for sc in skill_classes]
         
-        skill_instance_data = [{
-            "id": si.id,
-            "name": si.name,
-            "skill_class_id": si.skill_class_id,
-            "skill_class_name": next((sc.name for sc in skill_classes if sc.id == si.skill_class_id), None),
-            "status": si.status,
-            "description": si.description
-        } for si in skill_instances]
-        
         return {
             "model_name": model_name,
             "model_id": model.id,
             "skill_classes": skill_class_data,
-            "skill_instances": skill_instance_data,
             "skill_class_count": len(skill_class_data),
-            "skill_instance_count": len(skill_instance_data),
             "status": {"ready": triton_client.is_model_ready(model_name)}
         } 
