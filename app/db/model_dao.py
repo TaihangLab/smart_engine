@@ -1,7 +1,7 @@
 """
 模型数据访问对象(DAO)模块，负责模型相关的数据库操作
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from app.models.model import Model
 import logging
@@ -23,6 +23,27 @@ class ModelDAO:
             List[Model]: 模型列表
         """
         return db.query(Model).all()
+    
+    @staticmethod
+    def get_models_paginated(skip: int = 0, limit: int = 100, db: Session = None) -> Tuple[List[Model], int]:
+        """
+        分页获取模型列表
+        
+        Args:
+            skip: 跳过的记录数
+            limit: 返回的记录数量限制
+            db: 数据库会话
+            
+        Returns:
+            Tuple[List[Model], int]: 模型列表和总记录数
+        """
+        # 获取总记录数
+        total = db.query(Model).count()
+        
+        # 获取分页数据
+        models = db.query(Model).offset(skip).limit(limit).all()
+        
+        return models, total
     
     @staticmethod
     def get_model_by_id(model_id: int, db: Session) -> Optional[Model]:

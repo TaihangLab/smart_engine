@@ -102,19 +102,24 @@ class ModelService:
     """模型服务类，提供模型相关的业务逻辑处理"""
     
     @staticmethod
-    def get_all_models(db: Session) -> Dict[str, Any]:
+    def get_all_models(db: Session, page: int = 1, limit: int = 100) -> Dict[str, Any]:
         """
         获取所有模型
         
         Args:
             db: 数据库会话
+            page: 当前页码，从1开始
+            limit: 每页记录数
             
         Returns:
             Dict[str, Any]: 模型列表及总数
         """
-        # 获取数据库中的所有模型
-        logger.info("获取所有模型")
-        db_models = ModelDAO.get_all_models(db)
+        # 计算跳过的记录数
+        skip = (page - 1) * limit
+        
+        # 获取数据库中的模型（分页）
+        logger.info(f"获取模型，页码={page}，每页数量={limit}")
+        db_models, total = ModelDAO.get_models_paginated(skip=skip, limit=limit, db=db)
         
         # 获取Triton中加载的模型，以检查状态
         try:
@@ -127,7 +132,15 @@ class ModelService:
         models = []
         for db_model in db_models:
             # 检查模型在Triton中的状态
-            is_loaded = db_model.name in triton_models
+            #print(f"triton_models: {triton_models}")
+            #triton_models: {'yolo11_coco': {'status': 'ready', 'version': '1', 'state': 'READY'}, 'yolo11_helmet': {'status': 'ready', 'version': '1', 'state': 'READY'}, 'yolo11_safebelts': {'status': 'ready', 'version': '1', 'state': 'READY'}}
+            existing_in_triton = db_model.name in triton_models
+            if not existing_in_triton:
+                triton_status = "unknown"
+                logger.warning(f"模型 {db_model.name} 未在Triton中找到")
+                continue
+
+            #获取技能状态
             triton_status = triton_models.get(db_model.name, {}).get("status", "unknown")
             
             # 根据Triton状态判断模型是否就绪
@@ -138,25 +151,34 @@ class ModelService:
                 logger.info(f"模型 {db_model.name} 状态不一致，数据库状态={db_model.status}，Triton状态={is_ready}，更新数据库状态")
                 ModelDAO.update_model(db_model.id, {"status": is_ready}, db)
                 db_model.status = is_ready
+
             
+
+            #usage_status
+            model_instances = ModelService.get_model_instances(db_model.name, db)
+            usage_status = model_instances.get("has_instances",False)
+
             model_data = {
                 "id": db_model.id,
                 "name": db_model.name,
                 "version": db_model.version,
                 "description": db_model.description,
-                "status": db_model.status,
-                "config": db_model.config,
-                "triton_config": db_model.triton_config,
+                "model_status": db_model.status,
                 "created_at": db_model.created_at.isoformat() if db_model.created_at else None,
                 "updated_at": db_model.updated_at.isoformat() if db_model.updated_at else None,
-                "triton_status": {
-                    "is_loaded": is_loaded,
-                    "status": triton_status
-                }
+                "usage_status": usage_status,
+                "config": db_model.config,
+                "triton_config": db_model.triton_config,
             }
             models.append(model_data)
         
-        return {"models": models, "total": len(models)}
+        return {
+            "models": models,  #模型列表
+            "total": total,    #总记录数
+            "page": page,      #当前页码
+            "limit": limit,    #每页记录数
+            "pages": (total + limit - 1) // limit if total > 0 else 0  #总页数
+        }
     
     @staticmethod
     def _get_triton_models() -> Dict[str, Any]:
@@ -576,8 +598,8 @@ class ModelService:
             "skill_classes": result_data,
             "skill_class_count": len(skill_classes),
             "total_instances": total_instances,
-            "has_instances": total_instances > 0,
+            "has_instances": total_instances > 0, #是否存在技能实例
             "has_enabled_instances": any(
-                class_data["has_enabled_instances"] for class_data in result_data
-            )
+                class_data["has_enabled_instances"] for class_data in result_data 
+            )  #是否存在启用技能实例
         } 
