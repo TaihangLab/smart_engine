@@ -17,22 +17,27 @@ class CameraService:
     """摄像头服务类，提供摄像头相关的业务逻辑处理"""
     
     @staticmethod
-    def get_ai_cameras(db: Session) -> Dict[str, Any]:
+    def get_ai_cameras(db: Session, page: int = 1, limit: int = 10) -> Dict[str, Any]:
         """
         获取视觉AI平台数据库中已添加的摄像头
         
         Args:
             db: 数据库会话
+            page: 当前页码，从1开始
+            limit: 每页记录数
             
         Returns:
             Dict[str, Any]: 摄像头列表及总数
         """
+        # 计算跳过的记录数
+        skip = (page - 1) * limit
+        
         # 存储AI平台的设备
         cameras = []
         
-        # 获取视觉AI平台数据库中的所有摄像头
-        logger.info("从AI平台数据库获取摄像头")
-        db_cameras = CameraDAO.get_all_ai_cameras(db)
+        # 获取视觉AI平台数据库中的摄像头（分页）
+        logger.info(f"从AI平台数据库获取摄像头，页码={page}，每页数量={limit}")
+        db_cameras, total = CameraDAO.get_ai_cameras_paginated(skip=skip, limit=limit, db=db)
         
         for db_camera in db_cameras:
             # 解析tags从JSON字符串
@@ -103,8 +108,15 @@ class CameraService:
             
             cameras.append(camera)
         
-        logger.info(f"在AI平台数据库中找到{len(db_cameras)}个摄像头")
-        return {"cameras": cameras, "total": len(cameras)}
+        logger.info(f"在AI平台数据库中找到{len(db_cameras)}个摄像头，总共{total}个")
+        
+        return {
+            "cameras": cameras,  # 摄像头列表
+            "total": total,      # 总记录数
+            "page": page,        # 当前页码
+            "limit": limit,      # 每页记录数
+            "pages": (total + limit - 1) // limit if total > 0 else 0  # 总页数
+        }
     
     @staticmethod
     def get_gb28181_devices(page: int = 1, count: int = 100, query: str = "", status: bool = True) -> Dict[str, Any]:

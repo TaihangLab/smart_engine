@@ -63,6 +63,66 @@ class SkillClassService:
         return result
     
     @staticmethod
+    def get_all_paginated(db: Session, page: int = 1, limit: int = 10, enabled: Optional[bool] = None) -> Dict[str, Any]:
+        """
+        分页获取技能类列表
+        
+        Args:
+            db: 数据库会话
+            page: 当前页码，从1开始
+            limit: 每页记录数
+            enabled: 是否只获取启用的技能类
+            
+        Returns:
+            Dict[str, Any]: 包含技能类列表、总数和分页信息的字典
+        """
+        # 计算跳过的记录数
+        skip = (page - 1) * limit
+        
+        logger.info(f"分页获取技能类，页码={page}，每页数量={limit}，启用状态={enabled}")
+        skill_classes, total = SkillClassDAO.get_paginated(db, skip=skip, limit=limit, enabled=enabled)
+        
+        # 构建响应数据
+        result = []
+        for skill_class in skill_classes:
+            # 获取关联的模型
+            models = SkillClassDAO.get_models(skill_class.id, db)
+            model_ids = [model.id for model in models]
+            model_names = [model.name for model in models if hasattr(model, 'name')]
+            
+            # 获取关联的实例
+            instances = SkillInstanceDAO.get_by_skill_class(skill_class.id, db)
+            skill_instance_ids = [instance.id for instance in instances]
+            skill_instance_names = [instance.name for instance in instances if hasattr(instance, 'name')]
+            
+            class_data = {
+                "id": skill_class.id,
+                "name": skill_class.name,
+                "name_zh": skill_class.name_zh,
+                "type": skill_class.type,
+                "description": skill_class.description,
+                "python_class": skill_class.python_class,
+                "default_config": skill_class.default_config,
+                "status": skill_class.status,
+                "created_at": skill_class.created_at.isoformat() if skill_class.created_at else None,
+                "updated_at": skill_class.updated_at.isoformat() if skill_class.updated_at else None,
+                "model_ids": model_ids,
+                "model_names": model_names,
+                "skill_instance_ids": skill_instance_ids,
+                "skill_instance_names": skill_instance_names,
+                "instance_count": len(instances)
+            }
+            result.append(class_data)
+        
+        return {
+            "skill_classes": result,  # 技能类列表
+            "total": total,           # 总记录数
+            "page": page,             # 当前页码
+            "limit": limit,           # 每页记录数
+            "pages": (total + limit - 1) // limit if total > 0 else 0  # 总页数
+        }
+    
+    @staticmethod
     def get_all_enabled(db: Session) -> List[Dict[str, Any]]:
         """
         获取所有已启用的技能类

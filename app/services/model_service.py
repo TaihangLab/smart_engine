@@ -164,11 +164,9 @@ class ModelService:
                 "version": db_model.version,
                 "description": db_model.description,
                 "model_status": db_model.status,
+                "usage_status": usage_status,
                 "created_at": db_model.created_at.isoformat() if db_model.created_at else None,
                 "updated_at": db_model.updated_at.isoformat() if db_model.updated_at else None,
-                "usage_status": usage_status,
-                "config": db_model.config,
-                "triton_config": db_model.triton_config,
             }
             models.append(model_data)
         
@@ -234,10 +232,8 @@ class ModelService:
         # 检查模型在Triton中的状态
         try:
             is_ready = triton_client.is_model_ready(model.name)
-            triton_status = "ready" if is_ready else "not_ready"
         except Exception as e:
             logger.error(f"检查模型{model.name}在Triton中的状态失败: {str(e)}")
-            triton_status = "unknown"
             is_ready = False
             
         # 如果数据库状态与Triton状态不一致，更新数据库
@@ -246,15 +242,14 @@ class ModelService:
             ModelDAO.update_model(model_id, {"status": is_ready}, db)
             model.status = is_ready
         
-        # 获取模型元数据
-        try:
-            if is_ready:
-                metadata = triton_client.get_model_metadata(model.name)
-            else:
-                metadata = None
-        except Exception as e:
-            logger.error(f"获取模型{model.name}元数据失败: {str(e)}")
-            metadata = None
+
+        #usage_status
+        model_instances = ModelService.get_model_instances(model.name, db)
+        usage_status = model_instances.get("has_instances",False)
+
+        #获取技能类
+        skill_classes = ModelService.get_model_skill_classes(model.name, db)    
+
 
         # 获取模型配置和元数据
         try:
@@ -263,25 +258,38 @@ class ModelService:
                 # 尝试获取模型配置
                 model_config = triton_client.get_model_config(model.name)
                 # 尝试获取模型元数据
-                metadata = triton_client.get_model_metadata(model.name)
+                model_metadata = triton_client.get_model_metadata(model.name)
+                # 尝试获取服务器元数据
+                server_metadata = triton_client.get_server_metadata()
+
                 
                 # 如果数据库中的配置与当前配置不一致，更新数据库
-                if model_config != model.triton_config:
-                    logger.info(f"更新模型 {model.name} 的Triton配置")
-                    ModelDAO.update_model(model_id, {"triton_config": model_config}, db)
-                    model.triton_config = model_config
+                if model_config != model.model_config:
+                    logger.info(f"更新模型 {model.name} 的配置")
+                    ModelDAO.update_model(model_id, {"model_config": model_config}, db)
+                    model.model_config = model_config
                     
                 # 如果数据库中的元数据与当前元数据不一致，更新数据库
-                if metadata != model.config:
+                if model_metadata != model.model_metadata:
                     logger.info(f"更新模型 {model.name} 的元数据")
-                    ModelDAO.update_model(model_id, {"config": metadata}, db)
-                    model.config = metadata
+                    ModelDAO.update_model(model_id, {"model_metadata": model_metadata}, db)
+                    model.model_metadata = model_metadata
+                    
+                # 如果数据库中的服务器元数据与当前服务器元数据不一致，更新数据库
+                if server_metadata != model.server_metadata:
+                    logger.info(f"更新模型 {model.name} 的服务器元数据")
+                    ModelDAO.update_model(model_id, {"server_metadata": server_metadata}, db)
+                    model.server_metadata = server_metadata
             else:
-                metadata = None
+                server_metadata = None
+                model_metadata = None
+                model_config = None
                 logger.warning(f"模型 {model.name} 未就绪，无法获取配置和元数据")
         except Exception as e:
             logger.error(f"获取模型 {model.name} 配置或元数据失败: {str(e)}")
-            metadata = None
+            model_metadata = None
+            model_config = None
+            server_metadata = None
         
         # 构建响应数据
         model_data = {
@@ -290,15 +298,13 @@ class ModelService:
             "version": model.version,
             "description": model.description,
             "status": model.status,
-            "config": model.config,
-            "triton_config": model.triton_config,
+            "usage_status": usage_status,
+            "skill_classes": skill_classes,
             "created_at": model.created_at.isoformat() if model.created_at else None,
             "updated_at": model.updated_at.isoformat() if model.updated_at else None,
-            "triton_status": {
-                "is_ready": is_ready,
-                "status": triton_status,
-                "metadata": metadata
-            }
+            "model_config": model.model_config,
+            "model_metadata": model.model_metadata,
+            "server_metadata": model.server_metadata,
         }
         
         return model_data
@@ -329,8 +335,9 @@ class ModelService:
             "version": new_model.version,
             "description": new_model.description,
             "status": new_model.status,
-            "config": new_model.config,
-            "triton_config": new_model.triton_config,
+            "model_config": new_model.model_config,
+            "model_metadata": new_model.model_metadata,
+            "server_metadata": new_model.server_metadata,
             "created_at": new_model.created_at.isoformat() if new_model.created_at else None,
             "updated_at": new_model.updated_at.isoformat() if new_model.updated_at else None
         }
@@ -364,8 +371,9 @@ class ModelService:
             "version": updated_model.version,
             "description": updated_model.description,
             "status": updated_model.status,
-            "config": updated_model.config,
-            "triton_config": updated_model.triton_config,
+            "model_config": updated_model.model_config,
+            "model_metadata": updated_model.model_metadata,
+            "server_metadata": updated_model.server_metadata,
             "created_at": updated_model.created_at.isoformat() if updated_model.created_at else None,
             "updated_at": updated_model.updated_at.isoformat() if updated_model.updated_at else None
         }
@@ -390,10 +398,25 @@ class ModelService:
         is_used, skill_names = ModelService.check_model_used_by_skills(model_id, db)
         if is_used:
             logger.warning(f"模型正在被以下技能使用，无法删除: {', '.join(skill_names)}")
-            return False
+            return {"success": False, "reason": f"模型正在被以下技能使用，无法删除: {', '.join(skill_names)}"}
+        # 检查模型是否有相关技能类
+        model_name = ModelDAO.get_model_by_id(model_id, db).name
+        skill_classes = ModelService.get_model_skill_classes(model_name, db)
+
+        if skill_classes.get("skill_class_count",0) > 0:
+            skill_class_names = [sc.get("name", "") for sc in skill_classes.get("skill_classes", [])]
+            reason = f"模型 {model_id} 有相关技能类: {', '.join(skill_class_names)}"
+            logger.warning(reason)
+            return {"success": False, "reason": reason}
         
+        result = ModelDAO.delete_model(model_id, db)
+        if result:
+            return {"success": True, "reason": "模型删除成功"}
+        else:
+            return {"success": False, "reason": "模型删除失败，请检查数据库操作"}
+
         # 使用DAO删除模型
-        return ModelDAO.delete_model(model_id, db)
+
     
     @staticmethod
     def load_model_to_triton(model_id: int, db: Session) -> Dict[str, Any]:
@@ -417,7 +440,7 @@ class ModelService:
         # 检查是否已加载
         try:
             if triton_client.is_model_ready(model.name):
-                return {"success": True, "message": "模型已加载", "status": "ready"}
+                return {"success": True, "message": "模型已加载", "status": True}
         except Exception as e:
             logger.error(f"检查模型状态失败: {str(e)}")
             return {"success": False, "message": f"检查模型状态失败: {str(e)}"}
@@ -427,9 +450,9 @@ class ModelService:
             success = triton_client.load_model(model.name)
             
             if success:
-                return {"success": True, "message": "模型加载成功", "status": "ready"}
+                return {"success": True, "message": "模型加载成功", "status": True}
             else:
-                return {"success": False, "message": "模型加载失败", "status": "not_ready"}
+                return {"success": False, "message": "模型加载失败", "status": False}
         except Exception as e:
             logger.error(f"加载模型到Triton失败: {str(e)}")
             return {"success": False, "message": f"加载模型到Triton失败: {str(e)}"}
@@ -458,15 +481,15 @@ class ModelService:
         if is_used:
             logger.warning(f"模型正在被以下技能使用，不建议卸载: {', '.join(skill_names)}")
             # 这里可以选择是否继续卸载
-        
+            return {"success": False, "message": "模型正在被以下技能使用，不建议卸载: " + ', '.join(skill_names)}
         # 从Triton卸载模型
         try:
             success = triton_client.unload_model(model.name)
             
             if success:
-                return {"success": True, "message": "模型卸载成功", "status": "not_ready"}
+                return {"success": True, "message": "模型卸载成功", "status": False}
             else:
-                return {"success": False, "message": "模型卸载失败", "status": "ready"}
+                return {"success": False, "message": "模型卸载失败", "status": True}
         except Exception as e:
             logger.error(f"从Triton卸载模型失败: {str(e)}")
             return {"success": False, "message": f"从Triton卸载模型失败: {str(e)}"}
@@ -488,16 +511,14 @@ class ModelService:
         if not model:
             return False, []
         
-        # 获取关联的技能
-        skills = model.skills
+        # 获取使用该模型的技能实例
+        skill_instances = ModelService.get_model_instances(model.name, db)
         
-        # 获取技能名称
-        skill_names = [skill.name for skill in skills]
-        
-        return len(skills) > 0, skill_names
+        return skill_instances.get("has_enabled_instances",False),skill_instances.get("skill_classes",[])
+    
     
     @staticmethod
-    def get_model_usage(model_name: str, db: Session) -> Dict[str, Any]:
+    def get_model_skill_classes(model_name: str, db: Session) -> Dict[str, Any]:
         """
         获取使用指定模型的所有技能类
         

@@ -1,7 +1,7 @@
 """
 摄像头数据访问对象(DAO)模块，负责摄像头相关的数据库操作
 """
-from typing import List, Dict, Any, Optional
+from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from app.models.camera import Camera
 import json
@@ -25,6 +25,27 @@ class CameraDAO:
             List[Camera]: 摄像头列表
         """
         return db.query(Camera).all()
+    
+    @staticmethod
+    def get_ai_cameras_paginated(skip: int = 0, limit: int = 100, db: Session = None) -> Tuple[List[Camera], int]:
+        """
+        分页获取AI平台摄像头列表
+        
+        Args:
+            skip: 跳过的记录数
+            limit: 返回的记录数量限制
+            db: 数据库会话
+            
+        Returns:
+            Tuple[List[Camera], int]: 摄像头列表和总记录数
+        """
+        # 获取总记录数
+        total = db.query(Camera).count()
+        
+        # 获取分页数据
+        cameras = db.query(Camera).offset(skip).limit(limit).all()
+        
+        return cameras, total
     
     @staticmethod
     def get_ai_camera_by_id(camera_id: int, db: Session) -> Optional[Camera]:

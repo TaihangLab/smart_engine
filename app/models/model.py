@@ -11,8 +11,9 @@ class Model(Base):
     version = Column(String(32), nullable=False)
     description = Column(String(512))
     status = Column(Boolean, default=True)
-    config = Column(JSON)  # 模型配置
-    triton_config = Column(JSON)  # Triton配置
+    model_config = Column(JSON)  # 模型配置
+    model_metadata = Column(JSON)  # 模型元数据
+    server_metadata = Column(JSON)  # 服务器元数据
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 

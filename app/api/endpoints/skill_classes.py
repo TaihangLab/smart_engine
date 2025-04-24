@@ -2,7 +2,7 @@
 技能类API端点，负责技能类的管理
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 
 from app.db.session import get_db
@@ -11,33 +11,27 @@ from app.services.skill_instance_service import skill_instance_service
 
 router = APIRouter()
 
-@router.get("", response_model=List[Dict[str, Any]])
+@router.get("", response_model=Dict[str, Any])
 def get_skill_classes(
+    page: int = Query(1, description="当前页码", ge=1),
+    limit: int = Query(10, description="每页数量", ge=1, le=100),
     enabled: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
     """
-    获取所有技能类
+    获取技能类列表，支持分页
     
     Args:
+        page: 当前页码，从1开始
+        limit: 每页记录数，最大100条
         enabled: 过滤启用/禁用的技能类
         db: 数据库会话
         
     Returns:
-        技能类列表
+        Dict[str, Any]: 技能类列表、总数、分页信息
     """
-    if enabled is not None:
-        # 通过服务层筛选获取启用/禁用的技能类
-        if enabled:
-            skill_classes = skill_class_service.get_all_enabled(db)
-        else:
-            # 获取所有技能类并筛选禁用的
-            all_classes = skill_class_service.get_all(db)
-            skill_classes = [cls for cls in all_classes if not cls.get('enabled', True)]
-    else:
-        skill_classes = skill_class_service.get_all(db)
-    
-    return skill_classes
+    # 使用分页查询方法获取数据
+    return skill_class_service.get_all_paginated(db, page=page, limit=limit, enabled=enabled)
 
 @router.get("/{skill_class_id}", response_model=Dict[str, Any])
 def get_skill_class(skill_class_id: int, db: Session = Depends(get_db)):

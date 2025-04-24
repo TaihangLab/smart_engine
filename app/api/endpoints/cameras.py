@@ -15,16 +15,25 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/ai/list", response_model=Dict[str, Any])
-def list_ai_cameras(db: Session = Depends(get_db)):
+def list_ai_cameras(
+    page: int = Query(1, description="当前页码", ge=1),
+    limit: int = Query(10, description="每页数量", ge=1, le=100),
+    db: Session = Depends(get_db)
+):
     """
-    获取视觉AI平台中已添加的摄像头列表
+    获取视觉AI平台中已添加的摄像头列表，支持分页
     
+    Args:
+        page: 当前页码，从1开始
+        limit: 每页记录数，最大100条
+        db: 数据库会话
+        
     Returns:
-        Dict[str, Any]: 摄像头列表及总数
+        Dict[str, Any]: 摄像头列表、总数、分页信息
     """
     try:
         # 调用服务层获取AI平台摄像头列表
-        return CameraService.get_ai_cameras(db)
+        return CameraService.get_ai_cameras(db, page=page, limit=limit)
     except Exception as e:
         logger.error(f"获取AI平台摄像头列表失败: {str(e)}", exc_info=True)
         raise HTTPException(

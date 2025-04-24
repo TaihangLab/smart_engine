@@ -77,7 +77,7 @@ def get_model(model_id: int, db: Session = Depends(get_db)):
             detail=str(e)
         )
 
-@router.post("", response_model=Dict[str, Any])
+# @router.post("", response_model=Dict[str, Any])
 def add_model(model_data: Dict[str, Any], db: Session = Depends(get_db)):
     """
     添加新模型
@@ -118,7 +118,7 @@ def update_model(model_id: int, model_data: Dict[str, Any], db: Session = Depend
         model_data: 新的模型数据
         
     Returns:
-        Dict[str, Any]: 更新后的模型信息
+        Dict[str, Any], bool: 更新后的模型信息, 是否成功
     """
     try:
         # 调用服务层更新模型
@@ -163,13 +163,11 @@ def delete_model(model_id: int, db: Session = Depends(get_db)):
         # 调用服务层删除模型
         result = ModelService.delete_model(model_id, db)
         
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Model not found"
-            )
+        if result.get("success"):
+            return {"success": True, "message": f"Successfully deleted model {model_id}"}
+        else:
+            return {"success": False, "message": result.get("reason")}
         
-        return {"success": True, "message": f"Successfully deleted model {model_id}"}
     except HTTPException:
         raise
     except Exception as e:
@@ -223,64 +221,9 @@ def unload_model(model_id: int, db: Session = Depends(get_db)):
             detail=str(e)
         )
 
-@router.get("/{model_id}/info", response_model=Dict[str, Any])
-def get_model_info(model_id: int, db: Session = Depends(get_db)):
-    """
-    获取模型详细元数据信息
-    
-    Args:
-        model_id: 模型ID
-        
-    Returns:
-        Dict[str, Any]: 模型元数据信息
-    """
-    try:
-        # 检查模型是否存在
-        model = db.query(Model).filter(Model.id == model_id).first()
-        if not model:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Model not found"
-            )
-        
-        # 检查Triton服务器是否就绪
-        if not triton_client.is_server_ready():
-            raise HTTPException(
-                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                detail="Triton服务器未就绪"
-            )
-        
-        # 检查模型是否已加载
-        model_name = model.name
-        if not triton_client.is_model_ready(model_name):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"模型 {model_name} 未加载"
-            )
-        
-        # 获取模型元数据
-        model_config = triton_client.get_model_config(model_name)
-        model_metadata = triton_client.get_model_metadata(model_name)
-        
-        # 构建响应
-        response = {
-            "name": model_name,
-            "version": model.version,
-            "config": model_config,
-            "metadata": model_metadata
-        }
-        
-        return {"model_info": response}
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取模型信息失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取模型信息失败: {str(e)}"
-        )
 
-@router.post("/sync", response_model=Dict[str, Any])
+
+# @router.post("/sync", response_model=Dict[str, Any])
 def sync_models(db: Session = Depends(get_db)):
     """
     同步Triton服务器中的模型到数据库
@@ -300,7 +243,7 @@ def sync_models(db: Session = Depends(get_db)):
             detail=f"同步模型失败: {str(e)}"
         )
 
-@router.post("/upload", response_model=Dict[str, Any])
+# @router.post("/upload", response_model=Dict[str, Any])
 async def upload_model_files(
     name: str = Form(..., description="模型名称"),
     version: str = Form(..., description="模型版本"),
@@ -366,8 +309,8 @@ async def upload_model_files(
             detail=f"上传模型文件失败: {str(e)}"
         )
 
-@router.get("/{model_name}/usage", response_model=Dict[str, Any])
-def get_model_usage(model_name: str, db: Session = Depends(get_db)):
+@router.get("/{model_name}/skill_classes", response_model=Dict[str, Any])
+def get_model_skill_classes(model_name: str, db: Session = Depends(get_db)):
     """
     获取使用指定模型的所有技能类
     
@@ -380,10 +323,11 @@ def get_model_usage(model_name: str, db: Session = Depends(get_db)):
         
     Note:
         如需获取技能类的实例信息，请使用 /api/v1/skill-classes/{skill_class_id}/instances 接口
+        如需获取模型实例信息，请使用 /api/v1/models/{model_name}/instances 接口
     """
     try:
         # 调用服务层获取模型使用情况
-        return ModelService.get_model_usage(model_name, db)
+        return ModelService.get_model_skill_classes(model_name, db)
     except Exception as e:
         logger.error(f"获取模型使用情况失败: {str(e)}", exc_info=True)
         raise HTTPException(

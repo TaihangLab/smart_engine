@@ -1,7 +1,7 @@
 """
 技能类数据访问对象，提供对技能类数据的增删改查操作
 """
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional, Union, Tuple
 from sqlalchemy.orm import Session
 from app.models.skill import SkillClass, SkillClassModel
 from app.models.model import Model
@@ -21,6 +21,35 @@ class SkillClassDAO:
             技能类列表
         """
         return db.query(SkillClass).all()
+        
+    @staticmethod
+    def get_paginated(db: Session, skip: int = 0, limit: int = 100, enabled: Optional[bool] = None) -> Tuple[List[SkillClass], int]:
+        """
+        分页获取技能类列表
+        
+        Args:
+            db: 数据库会话
+            skip: 跳过的记录数
+            limit: 返回的记录数量限制
+            enabled: 是否只返回启用的技能类
+            
+        Returns:
+            Tuple[List[SkillClass], int]: 技能类列表和总记录数
+        """
+        # 构建查询
+        query = db.query(SkillClass)
+        
+        # 如果指定了 enabled 参数，添加过滤条件
+        if enabled is not None:
+            query = query.filter(SkillClass.status == enabled)
+        
+        # 获取总记录数
+        total = query.count()
+        
+        # 获取分页数据
+        skill_classes = query.offset(skip).limit(limit).all()
+        
+        return skill_classes, total
         
     @staticmethod
     def get_all_enabled(db: Session) -> List[SkillClass]:
