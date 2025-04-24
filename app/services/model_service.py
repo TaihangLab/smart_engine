@@ -509,7 +509,7 @@ class ModelService:
             "name_zh": sc.name_zh,
             "type": sc.type,
             "description": sc.description,
-            "enabled": sc.enabled  # 添加技能类的启用状态
+            "enabled": sc.status  # 添加技能类的启用状态
         } for sc in skill_classes]
         
         return {
@@ -560,7 +560,7 @@ class ModelService:
                     "name_zh": skill_class.name_zh,
                     "type": skill_class.type,
                     "description": skill_class.description,
-                    "enabled": skill_class.enabled
+                    "status": skill_class.status
                 },
                 "instances": instances,
                 "instance_count": len(instances),
