@@ -22,6 +22,8 @@ router = APIRouter()
 def list_models(
     page: int = Query(1, description="当前页码", ge=1),
     limit: int = Query(10, description="每页数量", ge=1, le=100),
+    query_name: str = Query(None, description="模型名称"),
+    query_used: bool = Query(None, description="是否使用"),
     db: Session = Depends(get_db)
 ):
     """
@@ -30,6 +32,8 @@ def list_models(
     Args:
         page: 当前页码，从1开始
         limit: 每页记录数，最大100条
+        query_name: 按模型名称筛选
+        query_used: 按模型使用状态筛选
         db: 数据库会话
         
     Returns:
@@ -37,7 +41,7 @@ def list_models(
     """
     try:
         # 调用服务层获取模型列表
-        return ModelService.get_all_models(db, page=page, limit=limit)
+            return ModelService.get_all_models(db, page=page, limit=limit, query_name=query_name, query_used=query_used)
     except Exception as e:
         logger.error(f"获取模型列表失败: {str(e)}", exc_info=True)
         raise HTTPException(

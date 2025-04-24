@@ -102,7 +102,7 @@ class ModelService:
     """模型服务类，提供模型相关的业务逻辑处理"""
     
     @staticmethod
-    def get_all_models(db: Session, page: int = 1, limit: int = 100) -> Dict[str, Any]:
+    def get_all_models(db: Session, page: int = 1, limit: int = 100, query_name: str = None, query_used: bool = None) -> Dict[str, Any]:
         """
         获取所有模型
         
@@ -119,7 +119,7 @@ class ModelService:
         
         # 获取数据库中的模型（分页）
         logger.info(f"获取模型，页码={page}，每页数量={limit}")
-        db_models, total = ModelDAO.get_models_paginated(skip=skip, limit=limit, db=db)
+        db_models, total = ModelDAO.get_models_paginated(skip=skip, limit=limit, query_name=query_name, query_used=query_used, db=db)
         
         # 获取Triton中加载的模型，以检查状态
         try:
@@ -157,6 +157,10 @@ class ModelService:
             #usage_status
             model_instances = ModelService.get_model_instances(db_model.name, db)
             usage_status = model_instances.get("has_instances",False)
+
+
+
+
 
             model_data = {
                 "id": db_model.id,
@@ -381,7 +385,7 @@ class ModelService:
         return model_data
     
     @staticmethod
-    def delete_model(model_id: int, db: Session) -> bool:
+    def delete_model(model_id: int, db: Session) -> Dict[str, Any]:
         """
         删除模型
         
@@ -390,15 +394,21 @@ class ModelService:
             db: 数据库会话
             
         Returns:
-            bool: 是否成功删除
+            Dict[str, Any]: 删除结果
         """
         logger.info(f"删除模型: id={model_id}")
         
+        # 获取模型信息
+        model = ModelDAO.get_model_by_id(model_id, db)
+        if not model:
+            return {"success": False, "reason": f"模型不存在: ID={model_id}"}
+            
         # 检查模型是否被技能使用
         is_used, skill_names = ModelService.check_model_used_by_skills(model_id, db)
         if is_used:
             logger.warning(f"模型正在被以下技能使用，无法删除: {', '.join(skill_names)}")
             return {"success": False, "reason": f"模型正在被以下技能使用，无法删除: {', '.join(skill_names)}"}
+        
         # 检查模型是否有相关技能类
         model_name = ModelDAO.get_model_by_id(model_id, db).name
         skill_classes = ModelService.get_model_skill_classes(model_name, db)
@@ -409,14 +419,12 @@ class ModelService:
             logger.warning(reason)
             return {"success": False, "reason": reason}
         
+        # 删除模型
         result = ModelDAO.delete_model(model_id, db)
         if result:
             return {"success": True, "reason": "模型删除成功"}
         else:
             return {"success": False, "reason": "模型删除失败，请检查数据库操作"}
-
-        # 使用DAO删除模型
-
     
     @staticmethod
     def load_model_to_triton(model_id: int, db: Session) -> Dict[str, Any]:

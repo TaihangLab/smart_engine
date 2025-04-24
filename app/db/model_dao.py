@@ -25,23 +25,64 @@ class ModelDAO:
         return db.query(Model).all()
     
     @staticmethod
-    def get_models_paginated(skip: int = 0, limit: int = 100, db: Session = None) -> Tuple[List[Model], int]:
+    def get_models_paginated(skip: int = 0, limit: int = 100, query_name: str = None, query_used: bool = None, db: Session = None) -> Tuple[List[Model], int]:
         """
         分页获取模型列表
         
         Args:
             skip: 跳过的记录数
             limit: 返回的记录数量限制
+            query_name: 按名称搜索模型
+            query_used: 是否被技能实例使用（True=被实例使用，False=未被实例使用，None=不过滤）
             db: 数据库会话
             
         Returns:
             Tuple[List[Model], int]: 模型列表和总记录数
         """
+        # 构建基础查询
+        query = db.query(Model)
+        
+        # 按名称过滤
+        if query_name:
+            query = query.filter(Model.name.like(f"%{query_name}%"))
+        
+        # 按是否被技能实例使用过滤
+        if query_used is not None:
+            from app.models.skill import SkillClassModel, SkillClass, SkillInstance
+            
+            if query_used:
+                # 被技能实例使用的模型：
+                # 1. 先找到关联的技能类
+                # 2. 然后查找这些技能类是否有实例
+                subquery = (
+                    db.query(SkillClassModel.model_id)
+                    .distinct()
+                    .join(SkillClass, SkillClass.id == SkillClassModel.skill_class_id)
+                    .join(SkillInstance, SkillInstance.skill_class_id == SkillClass.id)
+                    .subquery()
+                )
+                query = query.filter(Model.id.in_(subquery))
+            else:
+                # 未被技能实例使用的模型：
+                # 1. 先找到所有已创建实例的技能类
+                # 2. 然后找到这些技能类关联的模型
+                # 3. 最后找到不在这个集合中的模型
+                skill_classes_with_instances = db.query(SkillClass.id).join(
+                    SkillInstance, SkillInstance.skill_class_id == SkillClass.id
+                ).distinct().subquery()
+                
+                models_with_instances = db.query(SkillClassModel.model_id).join(
+                    skill_classes_with_instances,
+                    skill_classes_with_instances.c.id == SkillClassModel.skill_class_id
+                ).distinct().subquery()
+                
+                query = query.filter(~Model.id.in_(models_with_instances))
+        
         # 获取总记录数
-        total = db.query(Model).count()
+        total = query.count()
         
         # 获取分页数据
-        models = db.query(Model).offset(skip).limit(limit).all()
+        models = query.offset(skip).limit(limit).all()
         
         return models, total
     
