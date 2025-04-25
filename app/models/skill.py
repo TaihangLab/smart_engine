@@ -4,7 +4,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
 class SkillClass(Base):
     """技能类数据模型，表示系统中注册的技能类型"""
@@ -18,8 +18,9 @@ class SkillClass(Base):
     python_class = Column(String(128))  # 对应的Python类名
     default_config = Column(JSON)  # 默认配置模板
     status = Column(Boolean, default=True)  # 是否启用
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    image_object_name = Column(String(256))  # 技能示例图片的对象名称
+    created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
+    updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
     
     # 关联
     instances = relationship("SkillInstance", back_populates="skill_class")

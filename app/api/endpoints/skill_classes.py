@@ -2,12 +2,15 @@
 技能类API端点，负责技能类的管理
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
 from sqlalchemy.orm import Session
+import os
 
 from app.db.session import get_db
 from app.services.skill_class_service import skill_class_service
 from app.services.skill_instance_service import skill_instance_service
+from app.services.minio_client import minio_client
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -15,7 +18,7 @@ router = APIRouter()
 def get_skill_classes(
     page: int = Query(1, description="当前页码", ge=1),
     limit: int = Query(10, description="每页数量", ge=1, le=100),
-    enabled: Optional[bool] = None,
+    status: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
     """
@@ -24,14 +27,30 @@ def get_skill_classes(
     Args:
         page: 当前页码，从1开始
         limit: 每页记录数，最大100条
-        enabled: 过滤启用/禁用的技能类
+        status: 过滤启用/禁用的技能类
         db: 数据库会话
         
     Returns:
         Dict[str, Any]: 技能类列表、总数、分页信息
     """
     # 使用分页查询方法获取数据
-    return skill_class_service.get_all_paginated(db, page=page, limit=limit, enabled=enabled)
+    return skill_class_service.get_all_paginated(db, page=page, limit=limit, status=status)
+
+@router.get("/get_types", response_model=List[str])
+def get_skill_types(db: Session = Depends(get_db)):
+    """
+    获取所有技能类型    
+    
+    Args:
+        db: 数据库会话
+        
+    Returns:
+        技能类型列表
+    """
+
+    skill_types = skill_class_service.get_skill_types(db)
+    # 从元组列表中提取类型名称
+    return skill_types
 
 @router.get("/{skill_class_id}", response_model=Dict[str, Any])
 def get_skill_class(skill_class_id: int, db: Session = Depends(get_db)):
@@ -52,14 +71,10 @@ def get_skill_class(skill_class_id: int, db: Session = Depends(get_db)):
             detail=f"技能类不存在: ID={skill_class_id}"
         )
     
-    # 获取关联的模型
-    models = skill_class_service.get_models(skill_class_id, db)
-    
-    # 返回带模型信息的技能类
-    skill_class["models"] = models
+    # 直接返回技能类信息，已包含模型、实例和相关设备信息
     return skill_class
 
-@router.post("", response_model=Dict[str, Any])
+# @router.post("", response_model=Dict[str, Any])
 def create_skill_class(
     skill_class: Dict[str, Any],
     db: Session = Depends(get_db)
@@ -95,7 +110,7 @@ def create_skill_class(
 @router.put("/{skill_class_id}", response_model=Dict[str, Any])
 def update_skill_class(
     skill_class_id: int,
-    skill_class: Dict[str, Any],
+    skill_class_data: Dict[str, Any],
     db: Session = Depends(get_db)
 ):
     """
@@ -103,7 +118,7 @@ def update_skill_class(
     
     Args:
         skill_class_id: 技能类ID
-        skill_class: 更新的技能类数据
+        skill_class_data: 更新的技能类数据
         db: 数据库会话
         
     Returns:
@@ -118,17 +133,17 @@ def update_skill_class(
         )
     
     # 如果更新名称，检查是否与其他技能类冲突
-    if "name" in skill_class and skill_class["name"] != existing.get("name"):
-        name_exists = skill_class_service.get_by_name(skill_class["name"], db)
+    if "name" in skill_class_data and skill_class_data["name"] != existing.get("name"):
+        name_exists = skill_class_service.get_by_name(skill_class_data["name"], db)
         if name_exists and name_exists.get("id") != skill_class_id:
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT,
-                detail=f"技能类名称已存在: {skill_class['name']}"
+                detail=f"技能类名称已存在: {skill_class_data['name']}"
             )
     
     # 更新技能类
     try:
-        updated = skill_class_service.update(skill_class_id, skill_class, db)
+        updated = skill_class_service.update(skill_class_id, skill_class_data, db)
         if not updated:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
@@ -161,19 +176,17 @@ def delete_skill_class(skill_class_id: int, db: Session = Depends(get_db)):
             detail=f"技能类不存在: ID={skill_class_id}"
         )
     
-    # 检查是否有技能实例使用此技能类
-    instances = skill_instance_service.get_by_class_id(skill_class_id, db)
-    if instances:
+    # 删除技能类
+    result = skill_class_service.delete(skill_class_id, db)
+    if not result["success"]:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"无法删除技能类: 有 {len(instances)} 个技能实例正在使用此技能类"
+            detail=result["message"]
         )
-    
-    # 删除技能类
-    success = skill_class_service.delete(skill_class_id, db)
-    return {"success": success, "message": "技能类已删除"}
+            
+    return result
 
-@router.post("/{skill_class_id}/models/{model_id}", response_model=Dict[str, Any])
+# @router.post("/{skill_class_id}/models/{model_id}", response_model=Dict[str, Any])
 def add_model_to_skill_class(
     skill_class_id: int,
     model_id: int,
@@ -200,7 +213,7 @@ def add_model_to_skill_class(
         )
     return {"success": True, "message": "成功添加模型到技能类"}
 
-@router.delete("/{skill_class_id}/models/{model_id}", response_model=Dict[str, Any])
+# @router.delete("/{skill_class_id}/models/{model_id}", response_model=Dict[str, Any])
 def remove_model_from_skill_class(
     skill_class_id: int,
     model_id: int,
@@ -225,21 +238,7 @@ def remove_model_from_skill_class(
         )
     return {"success": True, "message": "成功从技能类移除模型"}
 
-@router.get("/types", response_model=List[Dict[str, Any]])
-def get_skill_types(db: Session = Depends(get_db)):
-    """
-    获取所有技能类型
-    
-    Args:
-        db: 数据库会话
-        
-    Returns:
-        技能类型列表
-    """
-    types = skill_class_service.get_skill_types(db)
-    return types
-
-@router.get("/{skill_class_id}/instances", response_model=Dict[str, Any])
+# @router.get("/{skill_class_id}/instances", response_model=Dict[str, Any])
 def get_skill_class_instances(skill_class_id: int, db: Session = Depends(get_db)):
     """
     获取指定技能类的所有技能实例
@@ -270,4 +269,68 @@ def get_skill_class_instances(skill_class_id: int, db: Session = Depends(get_db)
         },
         "instances": instances,
         "total": len(instances)
-    } 
+    }
+
+@router.post("/{skill_class_id}/image", response_model=Dict[str, Any])
+async def upload_skill_class_image(
+    skill_class_id: int,
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    为技能类上传示例图片
+    
+    Args:
+        skill_class_id: 技能类ID
+        file: 要上传的图片文件
+        db: 数据库会话
+        
+    Returns:
+        MinIO的ObjectWriteResult对象
+    """
+    # 检查技能类是否存在
+    skill_class = skill_class_service.get_by_id(skill_class_id, db)
+    if not skill_class:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"技能类不存在: ID={skill_class_id}"
+        )
+    
+    # 验证文件是否为图片
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只能上传图片文件"
+        )
+    
+    try:
+        # 生成文件名：技能ID + 原始文件名
+        _, ext = os.path.splitext(file.filename)
+        object_name = f"{skill_class_id}_{skill_class['name']}{ext}"
+        
+        # 上传到MinIO
+        res = minio_client.upload_file(
+            file=file,
+            object_name=object_name,
+            prefix=settings.MINIO_SKILL_IMAGE_PREFIX
+        )
+
+        
+        
+        # 更新技能类的图片URL字段，但只存储对象路径
+        updated_data = {"image_object_name": object_name}
+        skill_class_service.update(skill_class_id, updated_data, db)
+        
+        # 获取临时URL用于返回
+        temp_url = minio_client.get_presigned_url(object_name)
+        
+        return {
+            "success": True,
+            "message": "图片上传成功",
+            "temp_url": temp_url
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"图片上传失败: {str(e)}"
+        ) 

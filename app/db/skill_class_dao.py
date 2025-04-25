@@ -10,20 +10,20 @@ class SkillClassDAO:
     """技能类数据访问对象"""
     
     @staticmethod
-    def get_all(db: Session) -> List[SkillClass]:
+    def get_skill_types(db: Session) -> List[Dict[str, Any]]:
         """
-        获取所有技能类
+        获取所有技能类型
         
         Args:
             db: 数据库会话
             
         Returns:
-            技能类列表
+            技能类型列表
         """
-        return db.query(SkillClass).all()
+        return db.query(SkillClass.type).distinct().all()
         
     @staticmethod
-    def get_paginated(db: Session, skip: int = 0, limit: int = 100, enabled: Optional[bool] = None) -> Tuple[List[SkillClass], int]:
+    def get_paginated(db: Session, skip: int = 0, limit: int = 100, status: Optional[bool] = None) -> Tuple[List[SkillClass], int]:
         """
         分页获取技能类列表
         
@@ -31,7 +31,7 @@ class SkillClassDAO:
             db: 数据库会话
             skip: 跳过的记录数
             limit: 返回的记录数量限制
-            enabled: 是否只返回启用的技能类
+            status: 是否只返回启用的技能类
             
         Returns:
             Tuple[List[SkillClass], int]: 技能类列表和总记录数
@@ -39,9 +39,9 @@ class SkillClassDAO:
         # 构建查询
         query = db.query(SkillClass)
         
-        # 如果指定了 enabled 参数，添加过滤条件
-        if enabled is not None:
-            query = query.filter(SkillClass.status == enabled)
+        # 如果指定了 status 参数，添加过滤条件
+        if status is not None:
+            query = query.filter(SkillClass.status == status)
         
         # 获取总记录数
         total = query.count()
@@ -51,18 +51,7 @@ class SkillClassDAO:
         
         return skill_classes, total
         
-    @staticmethod
-    def get_all_enabled(db: Session) -> List[SkillClass]:
-        """
-        获取所有已启用的技能类
-        
-        Args:
-            db: 数据库会话
-            
-        Returns:
-            已启用的技能类列表
-        """
-        return db.query(SkillClass).filter(SkillClass.status == True).all()
+
         
 
         

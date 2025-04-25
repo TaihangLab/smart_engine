@@ -71,7 +71,12 @@ def get_skill_instance(instance_id: int, db: Session = Depends(get_db)):
             detail=f"技能实例不存在: ID={instance_id}"
         )
     
-    # 实例已经包含了技能类信息
+    # 获取技能实例关联的设备
+    related_devices = skill_instance_service.get_related_devices(instance_id, db)
+    
+    # 将关联设备信息添加到实例对象中
+    instance["related_devices"] = related_devices
+    
     return instance
 
 @router.post("", response_model=Dict[str, Any])

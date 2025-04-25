@@ -48,6 +48,15 @@ class Settings(BaseSettings):
     # 数据库URL
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
     
+    # MinIO配置
+    MINIO_ENDPOINT: str = "192.168.1.107"
+    MINIO_PORT: int = 9000
+    MINIO_ACCESS_KEY: str = "minioadmin"
+    MINIO_SECRET_KEY: str = "minioadmin"
+    MINIO_SECURE: bool = False
+    MINIO_BUCKET: str = "visionai"
+    MINIO_SKILL_IMAGE_PREFIX: str = "skill-images/"
+    
     # # Redis配置
     # REDIS_HOST: str = os.getenv("REDIS_HOST", "192.168.1.107")
     # REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))

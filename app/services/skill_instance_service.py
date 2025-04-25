@@ -4,6 +4,7 @@
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 import logging
+import json
 
 from app.db.skill_instance_dao import SkillInstanceDAO
 from app.db.skill_class_dao import SkillClassDAO
@@ -13,6 +14,59 @@ logger = logging.getLogger(__name__)
 
 class SkillInstanceService:
     """技能实例服务"""
+    
+    @staticmethod
+    def get_related_devices(instance_id: int, db: Session) -> List[Dict[str, Any]]:
+        """
+        获取技能实例关联的AI设备
+        
+        Args:
+            instance_id: 技能实例ID
+            db: 数据库会话
+            
+        Returns:
+            关联设备列表
+        """
+        logger.info(f"获取技能实例关联设备: instance_id={instance_id}")
+        
+        # 导入AI任务相关模块，在使用时导入，避免循环导入
+        from app.db.ai_task_dao import AITaskDAO
+        
+        related_devices = []
+        
+        # 查找使用这个技能实例的任务
+        tasks = AITaskDAO.get_tasks_by_skill_instance_id(instance_id, db)
+        for task in tasks:
+            if not task:
+                continue
+            # 获取任务关联的摄像头
+            camera = task.camera
+            if camera:
+                # 获取摄像头元数据
+                meta_data = json.loads(camera.meta_data) if camera.meta_data and isinstance(camera.meta_data, str) else {}
+                # 添加到相关设备列表
+                device_info = {
+                    "id": camera.id,
+                    "name": camera.name,
+                    "camera_uuid": camera.camera_uuid,
+                    "location": camera.location,
+                    "camera_type": camera.camera_type,
+                    "status": camera.status
+                }
+                
+                # 添加设备类型特定信息
+                if camera.camera_type == "gb28181":
+                    if "deviceId" in meta_data:
+                        device_info["deviceId"] = meta_data.get("deviceId")
+                elif camera.camera_type in ["proxy_stream", "push_stream"]:
+                    device_info["app"] = meta_data.get("app")
+                    device_info["stream"] = meta_data.get("stream")
+                
+                # 检查是否已经添加过该设备
+                if not any(d.get("id") == camera.id for d in related_devices):
+                    related_devices.append(device_info)
+                    
+        return related_devices
     
     @staticmethod
     def get_all(db: Session) -> List[Dict[str, Any]]:

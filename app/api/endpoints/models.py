@@ -313,7 +313,7 @@ async def upload_model_files(
             detail=f"上传模型文件失败: {str(e)}"
         )
 
-@router.get("/{model_name}/skill_classes", response_model=Dict[str, Any])
+# @router.get("/{model_name}/skill_classes", response_model=Dict[str, Any])
 def get_model_skill_classes(model_name: str, db: Session = Depends(get_db)):
     """
     获取使用指定模型的所有技能类
@@ -339,7 +339,7 @@ def get_model_skill_classes(model_name: str, db: Session = Depends(get_db)):
             detail=f"获取模型使用情况失败: {str(e)}"
         )
 
-@router.get("/{model_name}/instances", response_model=Dict[str, Any])
+# @router.get("/{model_name}/instances", response_model=Dict[str, Any])
 def get_model_instances(model_name: str, db: Session = Depends(get_db)):
     """
     获取使用指定模型的所有技能实例

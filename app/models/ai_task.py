@@ -1,7 +1,7 @@
 from sqlalchemy import Column, Integer, String, Boolean, Float, ForeignKey, JSON, DateTime
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 import uuid
 
 class AITask(Base):
@@ -31,8 +31,9 @@ class AITask(Base):
     skill_instance_id = Column(Integer, ForeignKey("skill_instances.id"), nullable=False)
     skill_config = Column(JSON)  # 技能在此任务中的特定配置
     
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
+    updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
+
     
     # 关系对象
     camera = relationship("Camera", back_populates="tasks")
