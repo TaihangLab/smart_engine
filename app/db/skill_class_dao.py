@@ -23,7 +23,7 @@ class SkillClassDAO:
         return db.query(SkillClass.type).distinct().all()
         
     @staticmethod
-    def get_paginated(db: Session, skip: int = 0, limit: int = 100, status: Optional[bool] = None) -> Tuple[List[SkillClass], int]:
+    def get_paginated(db: Session, skip: int = 0, limit: int = 100, status: Optional[bool] = None, query_name: Optional[str] = None, query_type: Optional[str] = None) -> Tuple[List[SkillClass], int]:
         """
         分页获取技能类列表
         
@@ -32,7 +32,8 @@ class SkillClassDAO:
             skip: 跳过的记录数
             limit: 返回的记录数量限制
             status: 是否只返回启用的技能类
-            
+            query_name: 技能类名称
+            query_type: 技能类类型
         Returns:
             Tuple[List[SkillClass], int]: 技能类列表和总记录数
         """
@@ -42,6 +43,19 @@ class SkillClassDAO:
         # 如果指定了 status 参数，添加过滤条件
         if status is not None:
             query = query.filter(SkillClass.status == status)
+
+        # 如果指定了 query_name 参数，添加过滤条件
+        if query_name:
+            # 使用OR条件合并两个查询条件，匹配英文名称或中文名称
+            from sqlalchemy import or_
+            query = query.filter(or_(
+                SkillClass.name.like(f"%{query_name}%"),
+                SkillClass.name_zh.like(f"%{query_name}%")
+            ))
+
+        # 如果指定了 query_type 参数，添加过滤条件
+        if query_type:
+            query = query.filter(SkillClass.type == query_type)
         
         # 获取总记录数
         total = query.count()

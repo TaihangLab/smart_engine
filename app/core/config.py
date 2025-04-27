@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
     
     # Triton服务器配置
-    TRITON_URL: str = os.getenv("TRITON_URL", "192.168.1.111:8001")
+    TRITON_URL: str = os.getenv("TRITON_URL", "192.168.1.118:8001")
     TRITON_MODEL_REPOSITORY: str = os.getenv("TRITON_MODEL_REPOSITORY", "/models")
     TRITON_TIMEOUT: int = int(os.getenv("TRITON_TIMEOUT", "30"))
     

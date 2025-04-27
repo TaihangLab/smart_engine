@@ -19,7 +19,7 @@ class SkillClassService:
     
    
     @staticmethod
-    def get_all_paginated(db: Session, page: int = 1, limit: int = 10, status: Optional[bool] = None) -> Dict[str, Any]:
+    def get_all_paginated(db: Session, page: int = 1, limit: int = 10, status: Optional[bool] = None, query_name: Optional[str] = None, query_type: Optional[str] = None) -> Dict[str, Any]:
         """
         分页获取技能类列表
         
@@ -35,8 +35,8 @@ class SkillClassService:
         # 计算跳过的记录数
         skip = (page - 1) * limit
         
-        logger.info(f"分页获取技能类，页码={page}，每页数量={limit}，启用状态={status}")
-        skill_classes, total = SkillClassDAO.get_paginated(db, skip=skip, limit=limit, status=status)
+        logger.info(f"分页获取技能类，页码={page}，每页数量={limit}，启用状态={status}，技能类名称={query_name}，技能类类型={query_type}")
+        skill_classes, total = SkillClassDAO.get_paginated(db, skip=skip, limit=limit, status=status, query_name=query_name, query_type=query_type)
         
         # 构建响应数据
         result = []

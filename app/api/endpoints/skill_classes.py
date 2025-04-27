@@ -18,6 +18,8 @@ router = APIRouter()
 def get_skill_classes(
     page: int = Query(1, description="当前页码", ge=1),
     limit: int = Query(10, description="每页数量", ge=1, le=100),
+    query_name: str = Query(None, description="技能类名称"),
+    query_type: str = Query(None, description="技能类类型"),
     status: Optional[bool] = None,
     db: Session = Depends(get_db)
 ):
@@ -27,6 +29,8 @@ def get_skill_classes(
     Args:
         page: 当前页码，从1开始
         limit: 每页记录数，最大100条
+        query_name: 技能类名称
+        query_type: 技能类类型
         status: 过滤启用/禁用的技能类
         db: 数据库会话
         
@@ -34,7 +38,7 @@ def get_skill_classes(
         Dict[str, Any]: 技能类列表、总数、分页信息
     """
     # 使用分页查询方法获取数据
-    return skill_class_service.get_all_paginated(db, page=page, limit=limit, status=status)
+    return skill_class_service.get_all_paginated(db, page=page, limit=limit, status=status, query_name=query_name, query_type=query_type)
 
 @router.get("/get_types", response_model=List[str])
 def get_skill_types(db: Session = Depends(get_db)):
