@@ -12,7 +12,6 @@ class Camera(Base):
     camera_uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     name = Column(String(128), nullable=False)
     location = Column(String(256))
-    tags = Column(JSON)
     status = Column(Boolean, default=True)
     camera_type = Column(String(32), default="gb28181")  # 摄像头类型: gb28181, proxy_stream, push_stream
     meta_data = Column(JSON)  # 存储摄像头额外的元数据信息，包含设备标识等信息
@@ -21,6 +20,9 @@ class Camera(Base):
 
     # 关联到AI任务 (一对多关系)
     tasks = relationship("AITask", back_populates="camera")
+    
+    # 关联到标签 (多对多关系)
+    tag_relations = relationship("Tag", secondary="camera_tags", back_populates="cameras")
 
     def __repr__(self):
         return f"<Camera(id={self.id}, name={self.name})>" 

@@ -14,6 +14,7 @@ class SkillClass(Base):
     name = Column(String(128), unique=True, index=True, nullable=False)  # 技能类名称，如 "FaceDetection"
     name_zh = Column(String(128))  # 技能中文名称
     type = Column(String(64), index=True)  # 技能类型，如 "detection", "recognition"
+    version = Column(String(32),default="1.0")  # 技能版本
     description = Column(String(512))  # 技能类描述
     python_class = Column(String(128))  # 对应的Python类名
     default_config = Column(JSON)  # 默认配置模板
@@ -37,7 +38,7 @@ class SkillClassModel(Base):
     skill_class_id = Column(Integer, ForeignKey("skill_classes.id"), nullable=False)
     model_id = Column(Integer, ForeignKey("models.id"), nullable=False)
     required = Column(Boolean, default=True)  # 是否是必需的模型
-    created_at = Column(DateTime, default=datetime.utcnow)
+    created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
     
     # 关联
     skill_class = relationship("SkillClass", back_populates="models")
@@ -53,9 +54,9 @@ class SkillInstance(Base):
     config = Column(JSON)  # 实例特定配置
     status = Column(Boolean, default=True)  # 实例是否启用
     description = Column(String(512))  # 实例描述
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-
+    created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
+    updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
+    
     # 关联到技能类 (多对一关系)
     skill_class = relationship("SkillClass", back_populates="instances")
     # 关联到使用此实例的AI任务 (一对多关系)

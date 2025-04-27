@@ -86,12 +86,17 @@ class MinioClient:
             # 完整的对象路径
             full_object_name = f"{prefix}{object_name}"
             
+            # 获取文件大小
+            file.file.seek(0, os.SEEK_END)
+            file_size = file.file.tell()
+            file.file.seek(0)  # 重置文件指针到开头
+            
             # 上传文件
             res = self.client.put_object(
                 bucket_name=settings.MINIO_BUCKET,
                 object_name=full_object_name,
                 data=file.file,
-                length=-1,  # -1 表示未知长度，由 put_object 确定
+                length=file_size,  # 使用计算出的文件大小
                 content_type=file.content_type or "application/octet-stream"
             )
             

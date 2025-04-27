@@ -23,6 +23,7 @@ class CocoDetectorSkill(BaseSkill):
         "type": "detection",             # 技能类型：检测类
         "name": "coco_detector",         # 技能唯一标识符
         "name_zh": "COCO目标检测",        # 技能中文名称
+        "version": "1.0",              # 技能版本
         "description": "使用YOLO模型检测COCO数据集中的80个常见对象",  # 技能描述
         "status": True,                  # 技能状态（是否启用）
         "required_models": ["yolo11_coco"],  # 所需模型

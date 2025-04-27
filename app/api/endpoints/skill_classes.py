@@ -2,9 +2,11 @@
 技能类API端点，负责技能类的管理
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, Query, UploadFile, File, Body
+from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 import os
+import logging
 
 from app.db.session import get_db
 from app.services.skill_class_service import skill_class_service
@@ -12,7 +14,75 @@ from app.services.skill_instance_service import skill_instance_service
 from app.services.minio_client import minio_client
 from app.core.config import settings
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter()
+
+# 批量删除请求和响应模型
+class BatchDeleteSkillClassRequest(BaseModel):
+    """批量删除技能类请求模型"""
+    skill_class_ids: List[int] = Field(..., description="要删除的技能类ID列表", example=[1, 2, 3, 4, 5])
+
+class BatchDeleteSkillClassResponse(BaseModel):
+    """批量删除技能类响应模型"""
+    success: bool = Field(..., description="操作是否成功", example=True)
+    message: str = Field(..., description="操作结果消息", example="成功删除 3 个技能类，失败 2 个")
+    detail: Dict[str, Any] = Field(
+        ..., 
+        description="详细结果",
+        example={
+            "success": [1, 2, 3],
+            "failed": [
+                {"id": 4, "reason": "存在 2 个关联的技能实例，关联技能实例有：实例1(ID:10)、实例2(ID:11)"},
+                {"id": 5, "reason": "技能类不存在: ID=5"}
+            ]
+        }
+    )
+
+@router.delete("/batch-delete", response_model=BatchDeleteSkillClassResponse)
+def batch_delete_skill_classes(request: BatchDeleteSkillClassRequest, db: Session = Depends(get_db)):
+    """
+    批量删除技能类
+    
+    Args:
+        request: 批量删除请求模型
+        db: 数据库会话
+        
+    Returns:
+        批量删除结果
+    """
+    print(f"批量删除技能类请求接收: {request}")
+    results = {
+        "success": [],
+        "failed": []
+    }
+    
+    for skill_class_id in request.skill_class_ids:
+        # 检查技能类是否存在
+        existing = skill_class_service.get_by_id(skill_class_id, db)
+        if not existing:
+            results["failed"].append({
+                "id": skill_class_id,
+                "reason": f"技能类不存在: ID={skill_class_id}"
+            })
+            continue
+        
+        # 删除技能类
+        result = skill_class_service.delete(skill_class_id, db)
+        
+        if result["success"]:
+            results["success"].append(skill_class_id)
+        else:
+            results["failed"].append({
+                "id": skill_class_id,
+                "reason": result["message"]
+            })
+    
+    return {
+        "success": True,
+        "message": f"成功删除 {len(results['success'])} 个技能类，失败 {len(results['failed'])} 个",
+        "detail": results
+    }
 
 @router.get("", response_model=Dict[str, Any])
 def get_skill_classes(
@@ -287,11 +357,11 @@ async def upload_skill_class_image(
     Args:
         skill_class_id: 技能类ID
         file: 要上传的图片文件
-        db: 数据库会话
         
     Returns:
-        MinIO的ObjectWriteResult对象
-    """
+        Dict: 上传结果，包含临时URL
+  
+  """
     # 检查技能类是否存在
     skill_class = skill_class_service.get_by_id(skill_class_id, db)
     if not skill_class:
@@ -308,6 +378,9 @@ async def upload_skill_class_image(
         )
     
     try:
+        # 记录文件信息
+        logger.info(f"准备上传图片: {file.filename}, 大小: {file.size if hasattr(file, 'size') else '未知'}, 类型: {file.content_type}")
+        
         # 生成文件名：技能ID + 原始文件名
         _, ext = os.path.splitext(file.filename)
         object_name = f"{skill_class_id}_{skill_class['name']}{ext}"
@@ -319,7 +392,7 @@ async def upload_skill_class_image(
             prefix=settings.MINIO_SKILL_IMAGE_PREFIX
         )
 
-        
+        logger.info(f"图片上传成功: {object_name}")
         
         # 更新技能类的图片URL字段，但只存储对象路径
         updated_data = {"image_object_name": object_name}
@@ -334,6 +407,7 @@ async def upload_skill_class_image(
             "temp_url": temp_url
         }
     except Exception as e:
+        logger.error(f"图片上传失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"图片上传失败: {str(e)}"

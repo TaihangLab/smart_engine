@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.models.camera import Camera
 from app.services.wvp_client import wvp_client
 from app.db.camera_dao import CameraDAO
+from app.db.tag_dao import TagDAO
 import json
 import logging
 from fastapi import HTTPException
@@ -40,8 +41,8 @@ class CameraService:
         db_cameras, total = CameraDAO.get_ai_cameras_paginated(skip=skip, limit=limit, db=db)
         
         for db_camera in db_cameras:
-            # 解析tags从JSON字符串
-            tags_list = json.loads(db_camera.tags) if db_camera.tags else []
+            # 从tag_relations获取标签列表
+            tags_list = [tag.name for tag in db_camera.tag_relations]
             meta_data = json.loads(db_camera.meta_data) if db_camera.meta_data else {}
             
             # 构建基本摄像头信息
@@ -315,8 +316,8 @@ class CameraService:
             logger.warning(f"未找到摄像头: {camera_id}")
             return None
         
-        # 解析tags从JSON字符串
-        tags_list = json.loads(camera.tags) if camera.tags else []
+        # 从tag_relations获取标签列表
+        tags_list = [tag.name for tag in camera.tag_relations]
         meta_data = json.loads(camera.meta_data) if camera.meta_data else {}
         
         # 尝试获取设备状态
@@ -430,8 +431,8 @@ class CameraService:
             logger.warning(f"未找到摄像头: {camera_uuid}")
             return None
         
-        # 解析tags从JSON字符串
-        tags_list = json.loads(camera.tags) if camera.tags else []
+        # 从tag_relations获取标签列表
+        tags_list = [tag.name for tag in camera.tag_relations]
         meta_data = json.loads(camera.meta_data) if camera.meta_data else {}
         
         # 尝试获取设备状态
@@ -670,30 +671,43 @@ class CameraService:
         else:
             logger.info(f"添加摄像头: camera_type={camera_type}")
         
+        # 从camera_data中提取标签数据，但不传给DAO
+        tags_data = camera_data_copy.pop("tags", []) if "tags" in camera_data_copy else []
+        
         # 使用DAO创建摄像头
         new_camera = CameraDAO.create_ai_camera(camera_data_copy, db)
         if not new_camera:
             return None
+            
+        # 如果有标签数据，添加标签关系
+        if tags_data and isinstance(tags_data, list):
+            for tag_name in tags_data:
+                TagDAO.add_tag_to_camera(new_camera.id, tag_name, db)
+        
+        # 获取最新的摄像头对象（包含tag_relations）
+        updated_camera = CameraDAO.get_ai_camera_by_id(new_camera.id, db)
+        if not updated_camera:
+            return None
         
         # 构建响应数据
-        tags_list = json.loads(new_camera.tags) if new_camera.tags else []
-        meta_data = json.loads(new_camera.meta_data) if new_camera.meta_data else {}
+        tags_list = [tag.name for tag in updated_camera.tag_relations]
+        meta_data = json.loads(updated_camera.meta_data) if updated_camera.meta_data else {}
         
         # 构建基本信息
         result = {
-            "id": str(new_camera.id),
-            "camera_uuid": new_camera.camera_uuid,
-            "name": new_camera.name,
-            "location": new_camera.location,
+            "id": str(updated_camera.id),
+            "camera_uuid": updated_camera.camera_uuid,
+            "name": updated_camera.name,
+            "location": updated_camera.location,
             "tags": tags_list,
-            "status": new_camera.status,
-            "camera_type": new_camera.camera_type
+            "status": updated_camera.status,
+            "camera_type": updated_camera.camera_type
         }
         
         # 获取摄像头关联的AI任务，从中提取技能IDs和AI任务相关属性
         try:
             from app.db.ai_task_dao import AITaskDAO
-            tasks = AITaskDAO.get_tasks_by_camera_id(new_camera.id, db)
+            tasks = AITaskDAO.get_tasks_by_camera_id(updated_camera.id, db)
             
             # 初始化默认值
             result["skill_ids"] = []
@@ -723,15 +737,16 @@ class CameraService:
             result["electronic_fence"] = camera_data.get("electronic_fence", "{}")
         
         # 根据摄像头类型添加特定字段
-        if camera_type == "gb28181" and "deviceId" in meta_data:
-            result["deviceId"] = meta_data.get("deviceId")
+        if updated_camera.camera_type == "gb28181":
+            if "deviceId" in meta_data:
+                result["deviceId"] = meta_data.get("deviceId")
             if "gb_id" in meta_data:
                 result["gb_id"] = meta_data.get("gb_id")
-        elif camera_type == "proxy_stream":
+        elif updated_camera.camera_type == "proxy_stream":
             result["app"] = meta_data.get("app")
             result["stream"] = meta_data.get("stream")
             result["proxy_id"] = meta_data.get("proxy_id")
-        elif camera_type == "push_stream":
+        elif updated_camera.camera_type == "push_stream":
             result["app"] = meta_data.get("app")
             result["stream"] = meta_data.get("stream")
             result["push_id"] = meta_data.get("push_id")
@@ -756,13 +771,36 @@ class CameraService:
         # 创建副本避免修改原始数据
         camera_data_copy = camera_data.copy()
         
+        # 从camera_data中提取标签数据，但不传给DAO
+        tags_data = camera_data_copy.pop("tags", None)
+        
         # 使用DAO更新摄像头
         updated_camera = CameraDAO.update_ai_camera(camera_id, camera_data_copy, db)
         if not updated_camera:
             return None
+            
+        # 如果提供了标签数据，更新标签关系
+        if tags_data is not None and isinstance(tags_data, list):
+            # 获取现有标签
+            existing_tags = [tag.name for tag in updated_camera.tag_relations]
+            
+            # 移除不在新列表中的标签
+            for tag_name in existing_tags:
+                if tag_name not in tags_data:
+                    TagDAO.remove_tag_from_camera(camera_id, tag_name, db)
+            
+            # 添加新标签
+            for tag_name in tags_data:
+                if tag_name not in existing_tags:
+                    TagDAO.add_tag_to_camera(camera_id, tag_name, db)
+                    
+        # 获取最新的摄像头对象（包含更新后的tag_relations）
+        updated_camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
+        if not updated_camera:
+            return None
         
         # 构建响应数据
-        tags_list = json.loads(updated_camera.tags) if updated_camera.tags else []
+        tags_list = [tag.name for tag in updated_camera.tag_relations]
         meta_data = json.loads(updated_camera.meta_data) if updated_camera.meta_data else {}
         
         # 构建基本信息
@@ -855,13 +893,12 @@ class CameraService:
         if camera_count > 0:
             return {"success": True, "message": "摄像头数据库已经存在数据，无需初始化", "data": None}
         
-        # 创建示例摄像头数据 - 注意Camera模型只有id, camera_uuid, name, location, tags, status, camera_type, meta_data字段
+        # 创建示例摄像头数据 - Camera模型只有id, camera_uuid, name, location, status, camera_type, meta_data字段
         sample_cameras = [
             CameraModel(
                 camera_uuid="cam-example-001",
                 name="示例摄像头1",
                 location="前门入口",
-                tags=json.dumps(["示例", "RTSPCamera"]),
                 status=False,
                 camera_type="gb28181", 
                 meta_data=json.dumps({"deviceId": "example_device_001"})
@@ -870,7 +907,6 @@ class CameraService:
                 camera_uuid="cam-example-002",
                 name="示例摄像头2",
                 location="后门入口",
-                tags=json.dumps(["示例", "RTSPCamera"]),
                 status=False,
                 camera_type="gb28181",
                 meta_data=json.dumps({"deviceId": "example_device_002"})
@@ -879,7 +915,6 @@ class CameraService:
                 camera_uuid="cam-example-003",
                 name="示例摄像头3",
                 location="侧门入口",
-                tags=json.dumps(["示例", "RTSPCamera"]),
                 status=False,
                 camera_type="gb28181",
                 meta_data=json.dumps({"deviceId": "example_device_003"})

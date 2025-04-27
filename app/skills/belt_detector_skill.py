@@ -22,6 +22,7 @@ class BeltDetectorSkill(BaseSkill):
         "type": "detection",  # 技能类型：检测类
         "name": "belt_detector",  # 技能唯一标识符
         "name_zh": "安全带检测",  # 技能中文名称
+        "version": "1.0",  # 技能版本
         "description": "使用YOLO模型检测施工人员是否佩戴安全带",  # 技能描述
         "status": True,  # 技能状态（是否启用）
         "required_models": ["yolo11_safebelts"],  # 所需模型

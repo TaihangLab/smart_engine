@@ -2,7 +2,7 @@
 模型API端点模块，提供模型相关的REST API
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Response, UploadFile, File, Form, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Response, UploadFile, File, Form, Query, Body
 import shutil
 import os
 import tempfile
@@ -12,11 +12,84 @@ from app.db.session import get_db
 from app.models.model import Model
 from app.services.triton_client import triton_client
 from app.services.model_service import sync_models_from_triton, ModelService
-
+from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+# 批量删除请求和响应模型
+class BatchDeleteModelRequest(BaseModel):
+    """批量删除模型请求模型"""
+    ids: List[int] = Field(..., description="要删除的模型ID列表", example=[1, 2, 3, 4, 5])
+class BatchDeleteModelResponse(BaseModel):
+    """批量删除模型响应模型"""
+    success: bool = Field(..., description="操作是否成功", example=True)
+    message: str = Field(..., description="操作结果消息", example="成功删除 3 个模型，失败 2 个")
+    detail: Dict[str, Any] = Field(
+        ..., 
+        description="详细结果",
+        example={
+            "success": [1, 2, 3],
+            "failed": [
+                {"id": 4, "reason": "模型正在被以下技能使用，无法删除: 人脸识别, 行为分析"},
+                {"id": 5, "reason": "模型不存在"}
+            ]
+        }
+    )
+@router.delete("/batch-delete", response_model=BatchDeleteModelResponse)
+def batch_delete_models(request: BatchDeleteModelRequest, db: Session = Depends(get_db)):
+    """
+    批量删除模型
+    
+    Args:
+        request: 批量删除请求，包含ids字段
+        
+    Returns:
+        Dict[str, Any]: 操作结果
+    """
+    try:
+        results = {
+            "success": [],
+            "failed": []
+        }
+        
+        for model_id in request.ids:
+            # 检查模型是否被使用
+            is_used, skills = ModelService.check_model_used_by_skills(model_id, db)
+            if is_used:
+                # 如果模型被使用，记录失败信息
+                results["failed"].append({
+                    "id": model_id,
+                    "reason": f"模型正在被以下技能使用，无法删除: {', '.join(skills)}"
+                })
+                continue
+            
+            # 调用服务层删除模型
+            result = ModelService.delete_model(model_id, db)
+            
+            if result.get("success"):
+                results["success"].append(model_id)
+            else:
+                results["failed"].append({
+                    "id": model_id,
+                    "reason": result.get("reason", "未知错误")
+                })
+        
+        return {
+            "success": True,
+            "message": f"成功删除 {len(results['success'])} 个模型，失败 {len(results['failed'])} 个",
+            "detail": results
+        }
+        
+    except Exception as e:
+        logger.error(f"批量删除模型失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
 
 @router.get("/list", response_model=Dict[str, Any])
 def list_models(
@@ -34,7 +107,6 @@ def list_models(
         limit: 每页记录数，最大100条
         query_name: 按模型名称筛选
         query_used: 按模型使用状态筛选
-        db: 数据库会话
         
     Returns:
         Dict[str, Any]: 模型列表、总数、分页信息
@@ -181,6 +253,11 @@ def delete_model(model_id: int, db: Session = Depends(get_db)):
             detail=str(e)
         )
 
+
+
+
+
+
 @router.post("/{model_id}/load", response_model=Dict[str, Any])
 def load_model(model_id: int, db: Session = Depends(get_db)):
     """
@@ -320,7 +397,6 @@ def get_model_skill_classes(model_name: str, db: Session = Depends(get_db)):
     
     Args:
         model_name: 模型名称
-        db: 数据库会话
         
     Returns:
         Dict: 包含使用该模型的所有技能类信息
@@ -346,7 +422,6 @@ def get_model_instances(model_name: str, db: Session = Depends(get_db)):
     
     Args:
         model_name: 模型名称
-        db: 数据库会话
         
     Returns:
         Dict: 包含使用该模型的所有技能实例信息，按技能类分组

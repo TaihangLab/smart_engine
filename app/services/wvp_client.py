@@ -1,10 +1,36 @@
 import requests
 import logging
 import hashlib
-from typing import List, Dict, Any, Optional
+import functools
+from typing import List, Dict, Any, Optional, Callable
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+def auto_relogin(func):
+    """装饰器：当API调用因授权失效返回401或其他认证错误时自动重新登录"""
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        try:
+            # 尝试执行原始方法
+            response = func(self, *args, **kwargs)
+            # 检查响应状态，看是否有授权问题
+            if isinstance(response, dict) and response.get("code") == 401:
+                logger.warning("授权已过期，尝试重新登录")
+                self._login()
+                # 重新调用原始方法
+                return func(self, *args, **kwargs)
+            return response
+        except requests.exceptions.RequestException as e:
+            # 检查是否为授权错误
+            if hasattr(e, 'response') and e.response is not None and e.response.status_code in [401, 403]:
+                logger.warning(f"请求失败，状态码: {e.response.status_code}，尝试重新登录")
+                self._login()
+                # 重新调用原始方法
+                return func(self, *args, **kwargs)
+            # 其他异常继续抛出
+            raise
+    return wrapper
 
 class WVPClient:
     def __init__(self):
@@ -57,6 +83,22 @@ class WVPClient:
                 logger.error(f"Response content: {e.response.text}")
             raise Exception(f"Failed to login to WVP: {str(e)}")
 
+    def check_response_status(self, response_data: dict) -> bool:
+        """检查响应状态，判断是否需要重新登录
+        
+        Args:
+            response_data: API响应数据
+            
+        Returns:
+            bool: 如果需要重新登录则返回True
+        """
+        # 检查token过期或授权失败的情况
+        if response_data.get("code") in [401, 403]:
+            logger.warning(f"WVP授权问题，状态码: {response_data.get('code')}, 消息: {response_data.get('msg')}")
+            return True
+        return False
+
+    @auto_relogin
     def get_devices(self, page: int = 1, count: int = 100, query: str = "", status: bool = True) -> Dict[str, Any]:
         """
         分页查询国标设备
@@ -105,6 +147,7 @@ class WVPClient:
             # 出错时返回空数据
             return {"total": 0, "list": []}
 
+    @auto_relogin
     def get_device(self, device_id: str) -> Optional[Dict[str, Any]]:
         """
         查询国标设备
@@ -128,6 +171,7 @@ class WVPClient:
             logger.error(f"Failed to get device info: {str(e)}")
             return None
 
+    @auto_relogin
     def get_device_channels(self, device_id: str, page: int = 1, count: int = 100, 
                            query: str = "", online: Optional[bool] = None, 
                            channel_type: Optional[bool] = None) -> Dict[str, Any]:
@@ -170,6 +214,7 @@ class WVPClient:
             logger.error(f"Failed to get device channels: {str(e)}")
             return {"total": 0, "list": []}
 
+    @auto_relogin
     def get_device_status(self, device_id: str) -> Optional[str]:
         """
         设备状态查询
@@ -193,6 +238,7 @@ class WVPClient:
             logger.error(f"Failed to get device status: {str(e)}")
             return None
 
+    @auto_relogin
     def sync_device_channels(self, device_id: str) -> Optional[Dict[str, Any]]:
         """
         同步设备通道
@@ -216,6 +262,7 @@ class WVPClient:
             logger.error(f"Failed to sync device channels: {str(e)}")
             return None
 
+    @auto_relogin
     def start_play(self, device_id: str, channel_id: str) -> Optional[Dict[str, Any]]:
         """
         开始点播
@@ -240,6 +287,7 @@ class WVPClient:
             logger.error(f"Failed to start play: {str(e)}")
             return None
 
+    @auto_relogin
     def stop_play(self, device_id: str, channel_id: str) -> bool:
         """
         停止点播
@@ -261,6 +309,7 @@ class WVPClient:
             logger.error(f"Failed to stop play: {str(e)}")
             return False
 
+    @auto_relogin
     def get_snap(self, device_id: str, channel_id: str) -> Optional[str]:
         """
         获取截图
@@ -282,6 +331,7 @@ class WVPClient:
             logger.error(f"Failed to get snap: {str(e)}")
             return None
 
+    @auto_relogin
     def ptz_control(self, device_id: str, channel_id: str, command: str, speed: int = 50) -> bool:
         """
         云台控制
@@ -306,6 +356,7 @@ class WVPClient:
             logger.error(f"Failed to control PTZ: {str(e)}")
             return False
 
+    @auto_relogin
     def get_presets(self, device_id: str, channel_id: str) -> Optional[List[Dict[str, Any]]]:
         """
         查询预置位
@@ -326,6 +377,7 @@ class WVPClient:
             logger.error(f"Failed to get presets: {str(e)}")
             return None
 
+    @auto_relogin
     def call_preset(self, device_id: str, channel_id: str, preset_id: int) -> bool:
         """
         调用预置位
@@ -346,6 +398,7 @@ class WVPClient:
             logger.error(f"Failed to call preset: {str(e)}")
             return False
 
+    @auto_relogin
     def query_record(self, device_id: str, channel_id: str, start_time: str, end_time: str) -> Optional[Dict[str, Any]]:
         """
         录像查询
@@ -372,6 +425,7 @@ class WVPClient:
             logger.error(f"Failed to query record: {str(e)}")
             return None
 
+    @auto_relogin
     def start_playback(self, device_id: str, channel_id: str, start_time: str, end_time: str) -> Optional[Dict[str, Any]]:
         """
         开始视频回放
@@ -398,6 +452,7 @@ class WVPClient:
             logger.error(f"Failed to start playback: {str(e)}")
             return None
 
+    @auto_relogin
     def stop_playback(self, device_id: str, channel_id: str, stream: str) -> bool:
         """
         停止视频回放
@@ -415,6 +470,7 @@ class WVPClient:
             logger.error(f"Failed to stop playback: {str(e)}")
             return False
 
+    @auto_relogin
     def get_stream_info(self, app: str, stream: str, media_server_id: Optional[str] = None) -> Optional[Dict[str, Any]]:
         """
         根据应用名和流id获取播放地址
@@ -443,6 +499,7 @@ class WVPClient:
             logger.error(f"Failed to get stream info: {str(e)}")
             return None
 
+    @auto_relogin
     def get_push_list(self, page: int = 1, count: int = 100) -> Dict[str, Any]:
         """
         分页查询推流列表
@@ -485,6 +542,7 @@ class WVPClient:
                 logger.error(f"Response content: {e.response.text}")
             return {"total": 0, "list": []}
 
+    @auto_relogin
     def get_proxy_list(self, page: int = 1, count: int = 100) -> Dict[str, Any]:
         """
         分页查询流代理
@@ -527,6 +585,7 @@ class WVPClient:
                 logger.error(f"Response content: {e.response.text}")
             return {"total": 0, "list": []}
 
+    @auto_relogin
     def get_device_by_id(self, device_id: str) -> dict:
         """
         查询单个国标设备
@@ -566,6 +625,7 @@ class WVPClient:
                 logger.error(f"Response content: {e.response.text}")
             return {}
             
+    @auto_relogin
     def get_proxy_one(self, app: str, stream: str) -> dict:
         """
         获取单个代理流设备信息
@@ -598,6 +658,7 @@ class WVPClient:
             logger.error(f"获取代理流设备异常: {str(e)}")
             return {}
             
+    @auto_relogin
     def get_push_one(self, app: str, stream: str) -> dict:
         """
         获取单个推流设备信息
