@@ -14,20 +14,45 @@ def auto_relogin(func):
         try:
             # 尝试执行原始方法
             response = func(self, *args, **kwargs)
+            
             # 检查响应状态，看是否有授权问题
-            if isinstance(response, dict) and response.get("code") == 401:
-                logger.warning("授权已过期，尝试重新登录")
-                self._login()
-                # 重新调用原始方法
-                return func(self, *args, **kwargs)
+            if isinstance(response, dict):
+                # 直接从返回值检查code
+                if response.get("code") == 401:
+                    logger.warning("授权已过期，尝试重新登录")
+                    self._login()
+                    # 重新调用原始方法
+                    return func(self, *args, **kwargs)
+                
+                # 检查嵌套的情况 - 返回的是完整API响应
+                if "code" in response and response.get("code") == 401:
+                    logger.warning("授权已过期，尝试重新登录")
+                    self._login()
+                    # 重新调用原始方法
+                    return func(self, *args, **kwargs)
+            
             return response
         except requests.exceptions.RequestException as e:
             # 检查是否为授权错误
-            if hasattr(e, 'response') and e.response is not None and e.response.status_code in [401, 403]:
-                logger.warning(f"请求失败，状态码: {e.response.status_code}，尝试重新登录")
-                self._login()
-                # 重新调用原始方法
-                return func(self, *args, **kwargs)
+            if hasattr(e, 'response') and e.response is not None:
+                # 检查状态码
+                if e.response.status_code in [401, 403]:
+                    logger.warning(f"请求失败，状态码: {e.response.status_code}，尝试重新登录")
+                    self._login()
+                    # 重新调用原始方法
+                    return func(self, *args, **kwargs)
+                
+                # 尝试解析响应内容是否包含401错误码
+                try:
+                    content = e.response.json()
+                    if content.get("code") == 401:
+                        logger.warning(f"返回内容包含401错误码，尝试重新登录")
+                        self._login()
+                        # 重新调用原始方法
+                        return func(self, *args, **kwargs)
+                except:
+                    pass  # 解析失败，继续处理其他情况
+            
             # 其他异常继续抛出
             raise
     return wrapper
@@ -125,11 +150,31 @@ class WVPClient:
             if response.status_code != 200:
                 logger.error(f"Get devices failed with status code {response.status_code}")
                 logger.error(f"Response content: {response.text}")
-                response.raise_for_status()
+                
+                # 对于401错误，我们直接抛出异常，让装饰器捕获并处理
+                if response.status_code == 401:
+                    # 尝试解析响应内容
+                    try:
+                        content = response.json()
+                        # 如果能解析成JSON且包含401错误码，抛出带有响应对象的异常
+                        if content.get("code") == 401:
+                            response.raise_for_status()
+                    except:
+                        # 解析失败也抛出异常
+                        response.raise_for_status()
+                else:
+                    # 其他错误码也抛出异常
+                    response.raise_for_status()
             
             try:
                 data = response.json()
                 logger.info(f"Get devices response code: {data.get('code')}")
+                
+                # 检查API返回的错误码
+                if data.get("code") == 401:
+                    # 返回值中包含401错误码，但HTTP状态是200，这种情况也需要重新登录
+                    # 直接返回包含code=401的结果，让装饰器捕获
+                    return data
                 
                 if data.get("code") != 0:
                     logger.error(f"Failed to get devices: {data.get('msg')}")
@@ -144,8 +189,9 @@ class WVPClient:
             logger.error(f"Failed to get devices: {str(e)}")
             if hasattr(e, 'response') and e.response is not None:
                 logger.error(f"Response content: {e.response.text}")
-            # 出错时返回空数据
-            return {"total": 0, "list": []}
+            
+            # 这里不捕获异常，让它传播到装饰器进行处理
+            raise
 
     @auto_relogin
     def get_device(self, device_id: str) -> Optional[Dict[str, Any]]:
@@ -309,13 +355,14 @@ class WVPClient:
             logger.error(f"Failed to stop play: {str(e)}")
             return False
 
+    #国标设备请求截图
     @auto_relogin
-    def get_snap(self, device_id: str, channel_id: str) -> Optional[str]:
+    def request_device_snap(self, device_id: str, channel_id: str) -> Optional[str]:
         """
-        获取截图
+        请求国标设备截图
         :param device_id: 设备国标编号
         :param channel_id: 通道国标编号
-        :return: 截图Base64数据
+        :return: 截图文件名或None（失败时）
         """
         url = f"{self.base_url}/api/play/snap"
         try:
@@ -325,10 +372,191 @@ class WVPClient:
             }
             response = self.session.get(url, params=params)
             response.raise_for_status()
-            # 根据API文档，这个接口返回的直接是Base64字符串而非JSON
-            return response.text
+            try:
+                data = response.json()
+                if isinstance(data, dict) and "data" in data:
+                    # 从响应中获取截图文件名
+                    return data.get("data")
+                else:
+                    logger.warning(f"请求截图返回数据格式不正确: {data}")
+                    return None
+            except ValueError:
+                logger.error(f"请求截图响应不是有效JSON: {response.text}")
+                return None
         except requests.exceptions.RequestException as e:
-            logger.error(f"Failed to get snap: {str(e)}")
+            logger.error(f"请求截图失败: {str(e)}")
+            return None
+
+    #国标设备获取截图
+    def get_device_snap(self, device_id: str, channel_id: str, mark: Optional[str] = None) -> Optional[bytes]:
+        """
+        获取国标设备截图数据
+        :param device_id: 设备国标编号
+        :param channel_id: 通道国标编号
+        :param mark: 标识（可选）
+        :return: 截图数据或None（失败时）
+        """
+        url_path = f"/api/device/query/snap/{device_id}/{channel_id}"
+        url = f"{self.base_url}{url_path}"
+        
+        try:
+            params = {}
+            if mark:
+                params["mark"] = mark
+                
+            response = self.session.get(url, params=params, stream=True)
+            
+            if response.status_code == 204:
+                logger.warning(f"设备截图不存在: {device_id}/{channel_id}")
+                return None
+                
+            response.raise_for_status()
+            
+            # 检查内容类型是否为图像
+            content_type = response.headers.get('Content-Type', '')
+            if 'image' not in content_type.lower():
+                logger.warning(f"获取截图响应不是图像类型: {content_type}")
+                
+            return response.content
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"获取设备截图失败: {str(e)}")
+            return None
+
+    #推流设备请求截图
+    @auto_relogin
+    def request_push_snap(self, app: str, stream: str) -> Optional[str]:
+        """
+        请求推流设备截图
+        :param app: 应用名
+        :param stream: 流ID
+        :return: 截图文件路径或None（失败时）
+        """
+        url = f"{self.base_url}/api/push/snap"
+        try:
+            params = {
+                "app": app,
+                "stream": stream
+            }
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            try:
+                data = response.json()
+                if isinstance(data, dict) and "data" in data:
+                    # 从响应中获取截图文件路径
+                    return data.get("data")
+                else:
+                    logger.warning(f"请求推流设备截图返回数据格式不正确: {data}")
+                    return None
+            except ValueError:
+                logger.error(f"请求推流设备截图响应不是有效JSON: {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"请求推流设备截图失败: {str(e)}")
+            return None
+
+    #推流设备获取截图
+    def get_push_snap(self, app: str, stream: str, mark: Optional[str] = None) -> Optional[bytes]:
+        """
+        获取推流设备截图数据
+        :param app: 应用名
+        :param stream: 流ID
+        :param mark: 标识（可选）
+        :return: 截图数据或None（失败时）
+        """
+        url_path = f"/api/push/snap/{app}/{stream}"
+        url = f"{self.base_url}{url_path}"
+        
+        try:
+            params = {}
+            if mark:
+                params["mark"] = mark
+                
+            response = self.session.get(url, params=params, stream=True)
+            
+            if response.status_code == 204:
+                logger.warning(f"推流设备截图不存在: {app}/{stream}")
+                return None
+                
+            response.raise_for_status()
+            
+            # 检查内容类型是否为图像
+            content_type = response.headers.get('Content-Type', '')
+            if 'image' not in content_type.lower():
+                logger.warning(f"获取推流设备截图响应不是图像类型: {content_type}")
+                
+            return response.content
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"获取推流设备截图失败: {str(e)}")
+            return None
+
+    #流代理设备请求截图
+    @auto_relogin
+    def request_proxy_snap(self, app: str, stream: str) -> Optional[str]:
+        """
+        请求流代理设备截图
+        :param app: 应用名
+        :param stream: 流ID
+        :return: 截图文件路径或None（失败时）
+        """
+        url = f"{self.base_url}/api/proxy/snap"
+        try:
+            params = {
+                "app": app,
+                "stream": stream
+            }
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            try:
+                data = response.json()
+                if isinstance(data, dict) and "data" in data:
+                    # 从响应中获取截图文件路径
+                    return data.get("data")
+                else:
+                    logger.warning(f"请求流代理设备截图返回数据格式不正确: {data}")
+                    return None
+            except ValueError:
+                logger.error(f"请求流代理设备截图响应不是有效JSON: {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"请求流代理设备截图失败: {str(e)}")
+            return None
+
+    #流代理设备获取截图
+    def get_proxy_snap(self, app: str, stream: str, mark: Optional[str] = None) -> Optional[bytes]:
+        """
+        获取流代理设备截图数据
+        :param app: 应用名
+        :param stream: 流ID
+        :param mark: 标识（可选）
+        :return: 截图数据或None（失败时）
+        """
+        url_path = f"/api/proxy/snap/{app}/{stream}"
+        url = f"{self.base_url}{url_path}"
+        
+        try:
+            params = {}
+            if mark:
+                params["mark"] = mark
+                
+            response = self.session.get(url, params=params, stream=True)
+            
+            if response.status_code == 204:
+                logger.warning(f"流代理设备截图不存在: {app}/{stream}")
+                return None
+                
+            response.raise_for_status()
+            
+            # 检查内容类型是否为图像
+            content_type = response.headers.get('Content-Type', '')
+            if 'image' not in content_type.lower():
+                logger.warning(f"获取流代理设备截图响应不是图像类型: {content_type}")
+                
+            return response.content
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"获取流代理设备截图失败: {str(e)}")
             return None
 
     @auto_relogin

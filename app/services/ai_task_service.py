@@ -82,8 +82,9 @@ class AITaskService:
         config = json.loads(db_task.config) if db_task.config else {}
         skill_config = json.loads(db_task.skill_config) if db_task.skill_config else {}
         
-        # 获取关联的摄像头和技能名称（如果有）
+        # 获取关联的摄像头、技能类和技能实例名称（如果有）
         camera_name = db_task.camera.name if db_task.camera else None
+        skill_class_name = db_task.skill_class.name_zh if db_task.skill_class else None
         skill_instance_name = db_task.skill_instance.name if db_task.skill_instance else None
         
         task_data = {
@@ -102,6 +103,8 @@ class AITaskService:
             "updated_at": db_task.updated_at.isoformat() if db_task.updated_at else None,
             "camera_id": db_task.camera_id,
             "camera_name": camera_name,
+            "skill_class_id": db_task.skill_class_id,
+            "skill_class_name": skill_class_name,
             "skill_instance_id": db_task.skill_instance_id,
             "skill_instance_name": skill_instance_name,
             "skill_config": skill_config
@@ -112,7 +115,7 @@ class AITaskService:
     @staticmethod
     def create_task(task_data: Dict[str, Any], db: Session) -> Dict[str, Any]:
         """
-        创建新AI任务
+        创建新AI任务，并自动创建关联的技能实例
         
         Args:
             task_data: 任务数据
@@ -127,18 +130,66 @@ class AITaskService:
         if not task_data.get('camera_id'):
             logger.error("缺少摄像头ID (camera_id)")
             return None
+        
+        if not task_data.get('skill_class_id'):
+            logger.error("缺少技能类ID (skill_class_id)")
+            return None
+        
+        try:
+            # 导入需要的服务
+            from app.services.skill_instance_service import skill_instance_service
+            from app.services.skill_class_service import skill_class_service
             
-        if not task_data.get('skill_instance_id'):
-            logger.error("缺少技能实例ID (skill_instance_id)")
+            # 获取技能类信息
+            skill_class_id = task_data.get('skill_class_id')
+            skill_class = skill_class_service.get_by_id(skill_class_id, db)
+            if not skill_class:
+                logger.error(f"技能类不存在: id={skill_class_id}")
+                return None
+            
+            # 基于技能类自动创建技能实例
+            instance_name = f"{skill_class.get('name_zh', 'Skill')}实例-{task_data.get('name')}"
+            instance_data = {
+                'name': instance_name,
+                'skill_class_id': skill_class_id,
+                'config': skill_class.get('default_config', {}),  # 使用技能类的默认配置
+                'status': True,
+                'description': f"由任务'{task_data.get('name')}'自动创建的技能实例"
+            }
+            
+            # 如果用户提供了自定义的技能配置，合并到实例配置中
+            if 'skill_custom_config' in task_data and isinstance(task_data['skill_custom_config'], dict):
+                user_config = task_data['skill_custom_config']
+                instance_config = instance_data['config'] if isinstance(instance_data['config'], dict) else {}
+                instance_data['config'] = {**instance_config, **user_config}
+                
+                # 同时也保存到任务的skill_config字段
+                task_data['skill_config'] = user_config
+            
+            # 创建技能实例
+            new_instance = skill_instance_service.create(instance_data, db)
+            if not new_instance:
+                logger.error("自动创建技能实例失败")
+                return None
+            
+            # 更新任务数据，添加技能实例ID
+            task_data['skill_instance_id'] = new_instance['id']
+            
+            # 使用DAO创建任务
+            new_task = AITaskDAO.create_task(task_data, db)
+            if not new_task:
+                # 如果任务创建失败，尝试删除刚刚创建的技能实例
+                try:
+                    skill_instance_service.delete(new_instance['id'], db)
+                except Exception as e:
+                    logger.warning(f"清理临时技能实例失败: {str(e)}")
+                return None
+            
+            # 返回创建后的任务数据
+            return AITaskService.get_task_by_id(new_task.id, db)
+        except Exception as e:
+            logger.error(f"创建AI任务失败: {str(e)}", exc_info=True)
             return None
-        
-        # 使用DAO创建任务
-        new_task = AITaskDAO.create_task(task_data, db)
-        if not new_task:
-            return None
-        
-        # 返回创建后的任务数据
-        return AITaskService.get_task_by_id(new_task.id, db)
     
     @staticmethod
     def update_task(task_id: int, task_data: Dict[str, Any], db: Session) -> Dict[str, Any]:

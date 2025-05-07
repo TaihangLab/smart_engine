@@ -9,65 +9,15 @@ import json
 from app.db.skill_instance_dao import SkillInstanceDAO
 from app.db.skill_class_dao import SkillClassDAO
 from app.models.skill import SkillInstance
+from app.db.ai_task_dao import AITaskDAO
+from app.db.camera_dao import CameraDAO
 
 logger = logging.getLogger(__name__)
 
 class SkillInstanceService:
     """技能实例服务"""
     
-    @staticmethod
-    def get_related_devices(instance_id: int, db: Session) -> List[Dict[str, Any]]:
-        """
-        获取技能实例关联的AI设备
-        
-        Args:
-            instance_id: 技能实例ID
-            db: 数据库会话
-            
-        Returns:
-            关联设备列表
-        """
-        logger.info(f"获取技能实例关联设备: instance_id={instance_id}")
-        
-        # 导入AI任务相关模块，在使用时导入，避免循环导入
-        from app.db.ai_task_dao import AITaskDAO
-        
-        related_devices = []
-        
-        # 查找使用这个技能实例的任务
-        tasks = AITaskDAO.get_tasks_by_skill_instance_id(instance_id, db)
-        for task in tasks:
-            if not task:
-                continue
-            # 获取任务关联的摄像头
-            camera = task.camera
-            if camera:
-                # 获取摄像头元数据
-                meta_data = json.loads(camera.meta_data) if camera.meta_data and isinstance(camera.meta_data, str) else {}
-                # 添加到相关设备列表
-                device_info = {
-                    "id": camera.id,
-                    "name": camera.name,
-                    "camera_uuid": camera.camera_uuid,
-                    "location": camera.location,
-                    "camera_type": camera.camera_type,
-                    "status": camera.status
-                }
-                
-                # 添加设备类型特定信息
-                if camera.camera_type == "gb28181":
-                    if "deviceId" in meta_data:
-                        device_info["deviceId"] = meta_data.get("deviceId")
-                elif camera.camera_type in ["proxy_stream", "push_stream"]:
-                    device_info["app"] = meta_data.get("app")
-                    device_info["stream"] = meta_data.get("stream")
-                
-                # 检查是否已经添加过该设备
-                if not any(d.get("id") == camera.id for d in related_devices):
-                    related_devices.append(device_info)
-                    
-        return related_devices
-    
+     
     @staticmethod
     def get_all(db: Session) -> List[Dict[str, Any]]:
         """
@@ -295,6 +245,72 @@ class SkillInstanceService:
         except Exception as e:
             logger.error(f"克隆技能实例失败: {str(e)}")
             return None
+
+    @staticmethod
+    def get_devices_by_skill_instance_id(skill_instance_id: int, db: Session) -> List[Dict[str, Any]]:
+        """
+        根据技能实例ID获取关联的设备列表
+        
+        Args:
+            skill_instance_id: 技能实例ID
+            db: 数据库会话
+            
+        Returns:
+            List[Dict[str, Any]]: 设备列表
+        """
+        logger.info(f"获取技能实例关联设备: skill_instance_id={skill_instance_id}")
+        
+        # 直接从DAO层获取去重的摄像头ID列表
+        camera_ids = AITaskDAO.get_distinct_camera_ids_by_skill_instance_id(skill_instance_id, db)
+        
+        # 设备列表
+        devices = []
+        
+        # 获取所有摄像头的详细信息
+        for camera_id in camera_ids:
+            camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
+            if not camera:
+                continue
+
+            # 从tag_relations获取标签列表
+            tags_list = [tag.name for tag in camera.tag_relations]
+
+            # 解析元数据
+            meta_data = json.loads(camera.meta_data) if camera.meta_data and isinstance(camera.meta_data, str) else {}
+            
+            # 构建基本设备信息
+            device_info = {
+                "id": camera.id,
+                "camera_uuid": camera.camera_uuid,
+                "name": camera.name,
+                "location": camera.location,
+                "tags": tags_list,
+                "camera_type": camera.camera_type,
+                "status": camera.status,
+            }
+            
+            if meta_data:
+                try:
+                    if camera.camera_type == "gb28181":
+                        if "deviceId" in meta_data:
+                            device_info["deviceId"] = meta_data.get("deviceId")
+                        if "gb_id" in meta_data:
+                            device_info["gb_id"] = meta_data.get("gb_id")
+                    elif camera.camera_type == "proxy_stream":
+                        device_info["app"] = meta_data.get("app")
+                        device_info["stream"] = meta_data.get("stream")
+                        device_info["proxy_id"] = meta_data.get("proxy_id")
+                    elif camera.camera_type == "push_stream":
+                        device_info["app"] = meta_data.get("app")
+                        device_info["stream"] = meta_data.get("stream")
+                        device_info["push_id"] = meta_data.get("push_id")
+                except Exception as e:
+                    logger.warning(f"解析摄像头元数据时出错: {str(e)}")
+            
+            devices.append(device_info)
+        
+        # 直接返回设备列表
+        return devices
 
 def _convert_instance_to_dict(instance: SkillInstance) -> Dict[str, Any]:
     """

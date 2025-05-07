@@ -7,6 +7,7 @@ from app.models.ai_task import AITask
 import json
 import logging
 from datetime import datetime
+from sqlalchemy import distinct
 
 logger = logging.getLogger(__name__)
 
@@ -83,6 +84,20 @@ class AITaskDAO:
         return db.query(AITask).filter(AITask.skill_instance_id == skill_instance_id).all()
     
     @staticmethod
+    def get_by_skill_class_id(skill_class_id: int, db: Session) -> List[AITask]:
+        """
+        获取与指定技能类关联的所有任务
+        
+        Args:
+            skill_class_id: 技能类ID
+            db: 数据库会话
+            
+        Returns:
+            List[AITask]: 任务列表
+        """
+        return db.query(AITask).filter(AITask.skill_class_id == skill_class_id).all()
+    
+    @staticmethod
     def create_task(task_data: Dict[str, Any], db: Session) -> Optional[AITask]:
         """
         创建新AI任务
@@ -116,6 +131,7 @@ class AITaskDAO:
                 task_type=task_data.get('task_type', 'detection'),
                 config=config,
                 camera_id=task_data.get('camera_id'),
+                skill_class_id=task_data.get('skill_class_id'),
                 skill_instance_id=task_data.get('skill_instance_id'),
                 skill_config=skill_config_json
             )
@@ -208,4 +224,67 @@ class AITaskDAO:
         except Exception as e:
             db.rollback()
             logger.error(f"删除AI任务失败: {str(e)}", exc_info=True)
-            return False 
+            return False
+    
+    @staticmethod
+    def get_distinct_camera_ids_by_skill_class_id(skill_class_id: int, db: Session) -> List[int]:
+        """
+        获取与指定技能类关联的所有任务的摄像头ID（去重）
+        
+        Args:
+            skill_class_id: 技能类ID
+            db: 数据库会话
+            
+        Returns:
+            List[int]: 去重后的摄像头ID列表
+        """
+        # 使用distinct直接获取去重的camera_id
+        camera_ids = db.query(distinct(AITask.camera_id)).filter(
+            AITask.skill_class_id == skill_class_id,
+            AITask.camera_id != None  # 排除camera_id为null的情况
+        ).all()
+        
+        # 将结果从元组列表转换为整数列表
+        return [camera_id[0] for camera_id in camera_ids]
+    
+    @staticmethod
+    def get_distinct_camera_ids_by_skill_instance_id(skill_instance_id: int, db: Session) -> List[int]:
+        """
+        获取与指定技能实例关联的所有任务的摄像头ID（去重）
+        
+        Args:
+            skill_instance_id: 技能实例ID
+            db: 数据库会话
+            
+        Returns:
+            List[int]: 去重后的摄像头ID列表
+        """
+        # 使用distinct直接获取去重的camera_id
+        camera_ids = db.query(distinct(AITask.camera_id)).filter(
+            AITask.skill_instance_id == skill_instance_id,
+            AITask.camera_id != None  # 排除camera_id为null的情况
+        ).all()
+        
+        # 将结果从元组列表转换为整数列表
+        return [camera_id[0] for camera_id in camera_ids]
+    
+    @staticmethod
+    def get_distinct_skill_instance_ids_by_camera_id(camera_id: int, db: Session) -> List[int]:
+        """
+        获取与指定摄像头关联的所有任务的技能实例ID（去重）
+        
+        Args:
+            camera_id: 摄像头ID
+            db: 数据库会话
+            
+        Returns:
+            List[int]: 去重后的技能类ID列表
+        """
+        # 使用distinct直接获取去重的skill_instance_id
+        skill_instance_ids = db.query(distinct(AITask.skill_instance_id)).filter(
+            AITask.camera_id == camera_id,
+            AITask.skill_instance_id != None  # 排除skill_instance_id为null的情况
+        ).all()
+        
+        # 将结果从元组列表转换为整数列表
+        return [skill_instance_id[0] for skill_instance_id in skill_instance_ids] 

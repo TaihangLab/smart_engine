@@ -9,6 +9,7 @@ import re
 import sys
 import traceback
 import pkgutil
+import importlib.util
 from typing import Dict, Any, Type, List, Optional, Union, Tuple
 
 from sqlalchemy.orm import Session
@@ -233,81 +234,127 @@ class SkillFactory:
             logger.exception(f"验证技能配置失败: {e}")
             return False, str(e)
             
-    def scan_and_register_skills(self, skill_dir: str, db: Session = None) -> Tuple[bool, Dict[str, Any]]:
+    def scan_and_register_skills(self, skill_dirs: Union[str, List[str]], db: Session = None) -> Tuple[bool, Dict[str, Any]]:
         """
         扫描目录下的技能模块并注册
         
         Args:
-            skill_dir: 技能目录路径
+            skill_dirs: 技能目录路径或路径列表
             db: 数据库会话，用于同步技能到数据库
             
         Returns:
             (成功标志, 结果统计)
         """
+        # 初始化结果统计
         result = {
             "total_found": 0,  # 发现的技能类总数
             "registered": 0,   # 成功注册的技能类数
             "failed": 0,       # 注册失败的技能类数
             "db_created": 0,   # 在数据库中新创建的技能类数
             "db_updated": 0,   # 在数据库中更新的技能类数
+            "dirs_scanned": 0, # 扫描的目录数
+            "files_scanned": 0, # 扫描的文件数
         }
         
+        # 将单个目录转换为列表
+        if isinstance(skill_dirs, str):
+            skill_dirs = [skill_dirs]
+        
         try:
-            # 确保技能目录路径存在
-            if not os.path.exists(skill_dir):
-                logger.error(f"技能目录不存在: {skill_dir}")
-                return False, result
-                
-            # 获取目录中的所有.py文件
-            skill_files = []
-            for file in os.listdir(skill_dir):
-                if file.endswith('.py') and not file.startswith('__'):
-                    skill_files.append(os.path.join(skill_dir, file))
-            
-            # 获取app.skills包的路径
-            package_name = "app.skills"
-            
-            # 遍历所有技能文件
-            for file_path in skill_files:
-                file_name = os.path.basename(file_path)
-                module_name = file_name[:-3]  # 去掉.py扩展名
-                
-                try:
-                    # 构建完整模块名称
-                    full_module_name = f"{package_name}.{module_name}"
+            # 遍历所有技能目录
+            for skill_dir in skill_dirs:
+                if not os.path.exists(skill_dir):
+                    logger.warning(f"技能目录不存在，已跳过: {skill_dir}")
+                    continue
                     
-                    # 尝试导入模块
-                    module = importlib.import_module(full_module_name)
+                result["dirs_scanned"] += 1
+                logger.info(f"扫描技能目录: {skill_dir}")
+                
+                # 获取目录中的所有.py文件
+                skill_files = []
+                for file in os.listdir(skill_dir):
+                    if file.endswith('.py') and not file.startswith('__'):
+                        skill_files.append(os.path.join(skill_dir, file))
+                
+                result["files_scanned"] += len(skill_files)
+                
+                # 遍历所有技能文件
+                for file_path in skill_files:
+                    file_name = os.path.basename(file_path)
+                    module_name = file_name[:-3]  # 去掉.py扩展名
                     
-                    # 遍历模块中的所有类，查找BaseSkill的子类
-                    for name, obj in inspect.getmembers(module, inspect.isclass):
-                        # 只考虑定义在当前模块中的类，排除导入的类
-                        if obj.__module__ == full_module_name and issubclass(obj, BaseSkill) and obj != BaseSkill:
-                            result["total_found"] += 1
-                            
-                            # 注册技能类
-                            if self.register_skill_class(obj):
-                                result["registered"] += 1
+                    try:
+                        # 动态导入模块 (支持从插件目录和标准目录)
+                        module = self._import_module_from_file(file_path)
+                        
+                        if not module:
+                            logger.error(f"导入模块失败: {file_path}")
+                            result["failed"] += 1
+                            continue
+                        
+                        # 遍历模块中的所有类，查找BaseSkill的子类
+                        for name, obj in inspect.getmembers(module, inspect.isclass):
+                            # 检查是否是BaseSkill的子类，排除BaseSkill自身
+                            if issubclass(obj, BaseSkill) and obj != BaseSkill:
+                                result["total_found"] += 1
                                 
-                                # 如果提供了数据库会话，则同步技能类到数据库
-                                if db:
-                                    sync_result = self._sync_skill_class_to_db(obj, db)
-                                    if sync_result["status"] == "created":
-                                        result["db_created"] += 1
-                                    elif sync_result["status"] == "updated":
-                                        result["db_updated"] += 1
-                            else:
-                                result["failed"] += 1
-                                
-                except Exception as e:
-                    logger.error(f"导入模块 {module_name} 失败: {str(e)}")
-                    result["failed"] += 1
+                                # 注册技能类
+                                if self.register_skill_class(obj):
+                                    result["registered"] += 1
+                                    
+                                    # 如果提供了数据库会话，则同步技能类到数据库
+                                    if db:
+                                        sync_result = self._sync_skill_class_to_db(obj, db)
+                                        if sync_result["status"] == "created":
+                                            result["db_created"] += 1
+                                        elif sync_result["status"] == "updated":
+                                            result["db_updated"] += 1
+                                else:
+                                    result["failed"] += 1
+                                    
+                    except Exception as e:
+                        logger.error(f"处理技能文件 {file_path} 失败: {str(e)}")
+                        result["failed"] += 1
             
             return True, result
         except Exception as e:
             logger.exception(f"扫描注册技能类失败: {e}")
             return False, result
+    
+    def _import_module_from_file(self, file_path: str) -> Optional[Any]:
+        """
+        从文件路径动态导入模块
+        
+        Args:
+            file_path: 模块文件路径
             
+        Returns:
+            导入的模块对象或None
+        """
+        try:
+            # 生成唯一的模块名，避免冲突
+            module_name = f"dynamic_skill_{os.path.basename(file_path)[:-3]}_{hash(file_path) % 10000}"
+            
+            # 创建模块规范
+            spec = importlib.util.spec_from_file_location(module_name, file_path)
+            if spec is None:
+                logger.error(f"无法为文件创建模块规范: {file_path}")
+                return None
+                
+            # 从规范创建模块
+            module = importlib.util.module_from_spec(spec)
+            
+            # 将模块添加到sys.modules
+            sys.modules[module_name] = module
+            
+            # 执行模块
+            spec.loader.exec_module(module)
+            
+            return module
+        except Exception as e:
+            logger.error(f"导入模块失败: {file_path}，错误: {str(e)}")
+            return None
+    
     def _sync_skill_class_to_db(self, skill_class: Type[BaseSkill], db: Session) -> Dict[str, Any]:
         """
         将技能类同步到数据库
@@ -382,7 +429,7 @@ class SkillFactory:
                     "description": skill_desc,
                     "python_class": skill_class.__name__,
                     "default_config": default_config,
-                    "enabled": True
+                    "status": True
                 }
                 
                 new_skill = SkillClassDAO.create(new_skill_data, db)

@@ -17,8 +17,12 @@ from app.db.model_dao import ModelDAO
 from app.db.camera_dao import CameraDAO
 from app.skills.skill_base import BaseSkill
 from app.skills.skill_factory import skill_factory
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# 定义技能目录路径
+SKILL_PLUGINS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "plugins", "skills")
 
 class SkillManager:
     """
@@ -76,9 +80,8 @@ class SkillManager:
             return False
             
         try:
-            # 1. 扫描注册技能类并同步到数据库
-            skill_dir = os.path.dirname(os.path.abspath(__file__))
-            success, result = skill_factory.scan_and_register_skills(skill_dir, self.db)
+            # 1. 扫描所有技能目录并注册技能类
+            success, result = self._scan_all_skill_dirs()
             
             if not success:
                 logger.error("扫描注册技能类失败")
@@ -88,7 +91,9 @@ class SkillManager:
                         f"注册{result['registered']}个, "
                         f"数据库新增{result['db_created']}个, "
                         f"数据库更新{result['db_updated']}个, "
-                        f"失败{result['failed']}个")
+                        f"失败{result['failed']}个, "
+                        f"扫描目录{result['dirs_scanned']}个, "
+                        f"扫描文件{result['files_scanned']}个")
             
             # 2. 从数据库加载已启用的技能实例并创建实例
             self._load_skill_instances()
@@ -99,6 +104,40 @@ class SkillManager:
         except Exception as e:
             logger.exception(f"初始化技能管理器失败: {e}")
             return False
+            
+    def _scan_all_skill_dirs(self) -> Tuple[bool, Dict[str, Any]]:
+        """
+        扫描所有技能目录并注册技能类
+        
+        Returns:
+            (成功标志, 结果统计)
+        """
+        skill_dirs = self._get_skill_dirs()
+        logger.info(f"将扫描以下技能目录: {skill_dirs}")
+        return skill_factory.scan_and_register_skills(skill_dirs, self.db)
+    
+    def _get_skill_dirs(self) -> List[str]:
+        """
+        获取所有需要扫描的技能目录
+        
+        Returns:
+            技能目录路径列表
+        """
+        dirs = []
+        
+        # 添加插件目录（如果存在）
+        if os.path.exists(SKILL_PLUGINS_DIR):
+            dirs.append(SKILL_PLUGINS_DIR)
+        else:
+            # 确保插件目录存在，如果不存在则创建
+            try:
+                os.makedirs(SKILL_PLUGINS_DIR, exist_ok=True)
+                dirs.append(SKILL_PLUGINS_DIR)
+                logger.info(f"已创建技能插件目录: {SKILL_PLUGINS_DIR}")
+            except Exception as e:
+                logger.error(f"创建技能插件目录失败: {e}")
+        
+        return dirs
             
     def _load_skill_instances(self) -> None:
         """
@@ -435,6 +474,117 @@ class SkillManager:
         except Exception as e:
             logger.exception(f"扫描同步技能失败: {e}")
             return {"success": False, "message": f"扫描同步技能异常: {str(e)}"}
+
+    def reload_skills(self) -> Dict[str, Any]:
+        """
+        热加载技能：重新扫描技能目录并重新加载技能实例
+        不需要重启应用即可加载新的技能类和实例
+        
+        Returns:
+            Dict[str, Any]: 加载结果统计
+        """
+        logger.info("开始热加载技能")
+        
+        if not self.db:
+            logger.error("热加载技能失败：未提供数据库会话")
+            return {"success": False, "message": "未提供数据库会话"}
+            
+        try:
+            # 记录开始时间
+            start_time = time.time()
+            
+            # 1. 重新扫描所有技能目录
+            success, scan_result = self._scan_all_skill_dirs()
+            if not success:
+                logger.error("热加载技能失败：扫描技能目录失败")
+                return {
+                    "success": False, 
+                    "message": "扫描技能目录失败",
+                    "details": scan_result
+                }
+            
+            # 2. 重新加载技能实例
+            before_count = len(self.skill_instances)
+            self._load_skill_instances()
+            after_count = len(self.skill_instances)
+            
+            # 计算执行时间
+            elapsed_time = time.time() - start_time
+            
+            # 返回结果
+            result = {
+                "success": True,
+                "message": "技能热加载成功",
+                "skill_classes": {
+                    "total_found": scan_result["total_found"],
+                    "registered": scan_result["registered"],
+                    "db_created": scan_result["db_created"],
+                    "db_updated": scan_result["db_updated"],
+                    "failed": scan_result["failed"]
+                },
+                "skill_instances": {
+                    "before": before_count,
+                    "after": after_count,
+                    "delta": after_count - before_count
+                },
+                "elapsed_time": f"{elapsed_time:.2f}秒"
+            }
+            
+            logger.info(f"技能热加载成功: 发现{scan_result['total_found']}个技能类, "
+                        f"加载{after_count}个技能实例, 耗时{elapsed_time:.2f}秒")
+            
+            return result
+        except Exception as e:
+            logger.exception(f"热加载技能失败: {e}")
+            return {
+                "success": False,
+                "message": f"热加载技能失败: {str(e)}"
+            }
+    
+    def upload_skill_file(self, file_path: str, file_content: bytes) -> Dict[str, Any]:
+        """
+        上传技能文件到插件目录
+        
+        Args:
+            file_path: 文件名（不含路径）
+            file_content: 文件内容
+            
+        Returns:
+            Dict[str, Any]: 上传结果
+        """
+        try:
+            # 确保文件名是Python文件
+            if not file_path.endswith('.py'):
+                return {
+                    "success": False,
+                    "message": "只支持上传Python文件(.py)"
+                }
+            
+            # 确保插件目录存在
+            if not os.path.exists(SKILL_PLUGINS_DIR):
+                os.makedirs(SKILL_PLUGINS_DIR, exist_ok=True)
+                
+            # 构建完整的文件路径
+            full_path = os.path.join(SKILL_PLUGINS_DIR, os.path.basename(file_path))
+            
+            # 写入文件
+            with open(full_path, 'wb') as f:
+                f.write(file_content)
+            
+            logger.info(f"技能文件上传成功: {full_path}")
+            
+            # 返回结果
+            return {
+                "success": True,
+                "message": "技能文件上传成功",
+                "file_path": full_path
+            }
+        except Exception as e:
+            logger.exception(f"上传技能文件失败: {e}")
+            return {
+                "success": False,
+                "message": f"上传技能文件失败: {str(e)}"
+            }
 
 # 创建技能管理器实例
 skill_manager = SkillManager() 

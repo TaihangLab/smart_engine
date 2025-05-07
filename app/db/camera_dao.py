@@ -101,11 +101,12 @@ class CameraDAO:
             meta_data = {}
             # 根据摄像头类型存储不同的元数据
             camera_type = camera_data.get('camera_type', 'gb28181')
-            
             if camera_type == 'gb28181':
                 # 对于国标设备，保存设备标识信息
                 if 'deviceId' in camera_data:
                     meta_data['deviceId'] = camera_data['deviceId']
+                if 'gb_id' in camera_data:
+                    meta_data['gb_id'] = camera_data['gb_id']
 
             elif camera_type == 'proxy_stream':
                 # 代理流设备
@@ -114,8 +115,8 @@ class CameraDAO:
                 if 'stream' in camera_data:
                     meta_data['stream'] = camera_data['stream']
                 # 保存设备标识信息
-                if 'id' in camera_data:
-                    meta_data['proxy_id'] = camera_data['id']
+                if 'proxy_id' in camera_data:
+                    meta_data['proxy_id'] = camera_data['proxy_id']
 
             elif camera_type == 'push_stream':
                 # 推流设备
@@ -124,8 +125,8 @@ class CameraDAO:
                 if 'stream' in camera_data:
                     meta_data['stream'] = camera_data['stream']
                 # 保存设备标识信息
-                if 'id' in camera_data:
-                    meta_data['push_id'] = camera_data['id']
+                if 'push_id' in camera_data:
+                    meta_data['push_id'] = camera_data['push_id']
 
             
             # 将元数据序列化为JSON
@@ -134,12 +135,7 @@ class CameraDAO:
             new_camera = Camera(
                 name=camera_data.get('name'),
                 location=camera_data.get('location', ''),
-                tags=tags_json,
                 status=camera_data.get('status', True),
-                warning_level=camera_data.get('warning_level', 0),
-                frame_rate=camera_data.get('frame_rate', 0),
-                running_period=camera_data.get('running_period', '{}'),
-                electronic_fence=camera_data.get('electronic_fence', '{}'),
                 camera_type=camera_type,
                 meta_data=meta_data_json
             )
@@ -179,18 +175,8 @@ class CameraDAO:
                 camera.name = camera_data['name']
             if 'location' in camera_data:
                 camera.location = camera_data['location']
-            if 'tags' in camera_data:
-                camera.tags = json.dumps(camera_data['tags'])
             if 'status' in camera_data:
                 camera.status = camera_data['status']
-            if 'warning_level' in camera_data:
-                camera.warning_level = camera_data['warning_level']
-            if 'frame_rate' in camera_data:
-                camera.frame_rate = camera_data['frame_rate']
-            if 'running_period' in camera_data:
-                camera.running_period = camera_data['running_period']
-            if 'electronic_fence' in camera_data:
-                camera.electronic_fence = camera_data['electronic_fence']
             if 'camera_type' in camera_data:
                 camera.camera_type = camera_data['camera_type']
             
@@ -257,4 +243,120 @@ class CameraDAO:
         except Exception as e:
             db.rollback()
             logger.error(f"删除摄像头失败: {str(e)}", exc_info=True)
-            return False 
+            return False
+    
+    @staticmethod
+    def batch_delete_ai_cameras(camera_ids: List[int], db: Session) -> Dict[str, Any]:
+        """
+        批量删除AI平台摄像头
+        
+        Args:
+            camera_ids: 摄像头ID列表
+            db: 数据库会话
+            
+        Returns:
+            Dict[str, Any]: 包含成功删除和失败删除的摄像头ID列表
+        """
+        success_ids = []
+        failed_ids = []
+        
+        for camera_id in camera_ids:
+            try:
+                camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
+                if not camera:
+                    failed_ids.append(camera_id)
+                    continue
+                
+                # 删除摄像头
+                db.delete(camera)
+                success_ids.append(camera_id)
+                
+            except Exception as e:
+                logger.error(f"删除摄像头 {camera_id} 失败: {str(e)}", exc_info=True)
+                failed_ids.append(camera_id)
+        
+        try:
+            # 提交事务
+            db.commit()
+        except Exception as e:
+            # 如果提交失败，回滚并将所有ID标记为失败
+            db.rollback()
+            logger.error(f"批量删除摄像头事务提交失败: {str(e)}", exc_info=True)
+            failed_ids.extend(success_ids)
+            success_ids = []
+        
+        return {
+            "success_ids": success_ids,
+            "failed_ids": failed_ids,
+            "total": len(camera_ids),
+            "success_count": len(success_ids),
+            "failed_count": len(failed_ids)
+        }
+    
+    @staticmethod
+    def get_ai_cameras_filtered(
+        skip: int = 0, 
+        limit: int = 100, 
+        name: Optional[str] = None, 
+        location: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        match_all: bool = False,
+        db: Session = None
+    ) -> Tuple[List[Camera], int]:
+        """
+        筛选获取AI平台摄像头列表
+        
+        Args:
+            skip: 跳过的记录数
+            limit: 返回的记录数量限制
+            name: 按名称过滤（模糊匹配）
+            location: 按位置过滤（模糊匹配）
+            tags: 按标签过滤（列表）
+            match_all: 是否需要匹配所有标签（True为AND逻辑，False为OR逻辑）
+            db: 数据库会话
+            
+        Returns:
+            Tuple[List[Camera], int]: 摄像头列表和总记录数
+        """
+        # 导入标签相关的模型
+        from app.models.tag import Tag, camera_tag
+        
+        # 初始化查询
+        query = db.query(Camera)
+        
+        # 添加名称过滤条件
+        if name:
+            query = query.filter(Camera.name.ilike(f'%{name}%'))
+        
+        # 添加位置过滤条件
+        if location:
+            query = query.filter(Camera.location.ilike(f'%{location}%'))
+        
+        # 添加标签过滤
+        if tags and len(tags) > 0:
+            if match_all:
+                # AND逻辑：必须匹配所有提供的标签
+                # 对每个标签创建子查询
+                for tag_name in tags:
+                    # 匹配当前标签的子查询
+                    sub_query = db.query(camera_tag.c.camera_id)\
+                        .join(Tag, Tag.id == camera_tag.c.tag_id)\
+                        .filter(Tag.name == tag_name)
+                    # 摄像头ID必须在子查询结果中
+                    query = query.filter(Camera.id.in_(sub_query))
+            else:
+                # OR逻辑：匹配任一提供的标签
+                sub_query = db.query(camera_tag.c.camera_id)\
+                    .join(Tag, Tag.id == camera_tag.c.tag_id)\
+                    .filter(Tag.name.in_(tags))\
+                    .distinct()
+                query = query.filter(Camera.id.in_(sub_query))
+        
+        # 获取总记录数
+        total = query.count()
+        
+        # 应用分页
+        cameras = query.offset(skip).limit(limit).all()
+        
+        return cameras, total 
+    

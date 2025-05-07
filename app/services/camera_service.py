@@ -18,7 +18,7 @@ class CameraService:
     """摄像头服务类，提供摄像头相关的业务逻辑处理"""
     
     @staticmethod
-    def get_ai_cameras(db: Session, page: int = 1, limit: int = 10) -> Dict[str, Any]:
+    def get_ai_cameras(db: Session, page: int = 1, limit: int = 10, name: Optional[str] = None, location: Optional[str] = None, tags: Optional[List[str]] = None, match_all: bool = False) -> Dict[str, Any]:
         """
         获取视觉AI平台数据库中已添加的摄像头
         
@@ -26,6 +26,10 @@ class CameraService:
             db: 数据库会话
             page: 当前页码，从1开始
             limit: 每页记录数
+            name: 按名称过滤（模糊匹配）
+            location: 按位置过滤（模糊匹配）
+            tags: 按标签过滤（列表），传入单个值时等同于单标签过滤
+            match_all: 是否需要匹配所有标签（True为AND逻辑，False为OR逻辑）
             
         Returns:
             Dict[str, Any]: 摄像头列表及总数
@@ -36,9 +40,26 @@ class CameraService:
         # 存储AI平台的设备
         cameras = []
         
-        # 获取视觉AI平台数据库中的摄像头（分页）
-        logger.info(f"从AI平台数据库获取摄像头，页码={page}，每页数量={limit}")
-        db_cameras, total = CameraDAO.get_ai_cameras_paginated(skip=skip, limit=limit, db=db)
+        # 获取视觉AI平台数据库中的摄像头（分页和过滤）
+        log_msg = f"从AI平台数据库获取摄像头，页码={page}，每页数量={limit}"
+        if name:
+            log_msg += f"，名称过滤='{name}'"
+        if location:
+            log_msg += f"，位置过滤='{location}'"
+        if tags:
+            log_msg += f"，标签过滤='{tags}'，匹配方式={'全部' if match_all else '任一'}"
+        logger.info(log_msg)
+        
+        # 统一使用CameraDAO.get_ai_cameras_filtered方法
+        db_cameras, total = CameraDAO.get_ai_cameras_filtered(
+            skip=skip, 
+            limit=limit, 
+            name=name, 
+            location=location,
+            tags=tags, 
+            match_all=match_all, 
+            db=db
+        )
         
         for db_camera in db_cameras:
             # 从tag_relations获取标签列表
@@ -56,40 +77,29 @@ class CameraService:
                 "camera_type": db_camera.camera_type
             }
             
-            # 获取摄像头关联的AI任务，从中提取技能IDs和AI任务相关属性
+            # 从任务表获取摄像头的关联skill_class_id，然后对应的查询技能名称
+            skill_names = []
             try:
+                # 导入所需模块
                 from app.db.ai_task_dao import AITaskDAO
-                tasks = AITaskDAO.get_tasks_by_camera_id(db_camera.id, db)
+                from app.db.skill_instance_dao import SkillInstanceDAO
                 
-                # 初始化默认值
-                camera["skill_ids"] = []
-                camera["warning_level"] = 0  # 从AI任务获取
-                camera["frame_rate"] = 1.0   # 从AI任务获取
-                camera["running_period"] = "{}"  # 从AI任务获取
-                camera["electronic_fence"] = "{}"  # 从AI任务获取
+                # 直接获取摄像头关联的不同技能实例ID（去重）
+                skill_instance_ids = AITaskDAO.get_distinct_skill_instance_ids_by_camera_id(db_camera.id, db)
                 
-                # 如果有关联任务，获取相关属性和技能IDs
-                if tasks:
-                    camera["skill_ids"] = [str(task.skill_instance_id) for task in tasks]
-                    
-                    # 获取第一个任务的属性作为摄像头属性(便于前端展示)
-                    if len(tasks) > 0:
-                        first_task = tasks[0]
-                        camera["warning_level"] = first_task.warning_level
-                        camera["frame_rate"] = first_task.frame_rate
-                        camera["running_period"] = first_task.running_period
-                        camera["electronic_fence"] = first_task.electronic_fence
+                # 获取每个技能实例的名称
+                for skill_instance_id in skill_instance_ids:
+                    skill_instance = SkillInstanceDAO.get_by_id(skill_instance_id, db)
+                    if skill_instance:
+                        skill_names.append(skill_instance.name)
+                
             except Exception as e:
-                logger.warning(f"获取摄像头关联任务失败: {str(e)}")
-                # 设置默认值
-                camera["skill_ids"] = []
-                camera["warning_level"] = 0
-                camera["frame_rate"] = 1.0
-                camera["running_period"] = "{}"
-                camera["electronic_fence"] = "{}"
+                logger.warning(f"获取摄像头关联技能名称失败: {str(e)}")
+            
+            camera["skill_names"] = skill_names
             
             # 根据摄像头类型添加特定字段
-            if db_camera.meta_data:
+            if meta_data:
                 try:
                     if db_camera.camera_type == "gb28181":
                         if "deviceId" in meta_data:
@@ -109,7 +119,7 @@ class CameraService:
             
             cameras.append(camera)
         
-        logger.info(f"在AI平台数据库中找到{len(db_cameras)}个摄像头，总共{total}个")
+        logger.info(f"在AI平台数据库中找到{len(cameras)}个摄像头，总共{total}个")
         
         return {
             "cameras": cameras,  # 摄像头列表
@@ -320,32 +330,7 @@ class CameraService:
         tags_list = [tag.name for tag in camera.tag_relations]
         meta_data = json.loads(camera.meta_data) if camera.meta_data else {}
         
-        # 尝试获取设备状态
-        device_status = None
-        try:
-            # 根据摄像头类型从WVP获取状态
-            if camera.camera_type == "gb28181":
-                # 国标设备
-                deviceId = meta_data.get("deviceId")
-                if deviceId:
-                    device_status = CameraService.get_gb28181_device_by_id(deviceId)
-            elif camera.camera_type == "proxy_stream":
-                # 对于代理流设备，从数据库中获取app和stream字段
-                app = meta_data.get("app")
-                stream = meta_data.get("stream")
-                
-                if app and stream:
-                    device_status = CameraService.get_proxy_device_one(app, stream)
-            elif camera.camera_type == "push_stream":
-                # 对于推流设备，从数据库中获取app和stream字段
-                app = meta_data.get("app")
-                stream = meta_data.get("stream")
-                
-                if app and stream:
-                    device_status = CameraService.get_push_device_one(app, stream)
-        except Exception as e:
-            logger.warning(f"获取设备状态时出错: {str(e)}")
-        
+
         # 构建摄像头基本信息
         result = {
             "id": str(camera.id),
@@ -354,41 +339,29 @@ class CameraService:
             "location": camera.location,
             "tags": tags_list,
             "status": camera.status,
-            "camera_type": camera.camera_type,
-            "device_status": device_status
+            "camera_type": camera.camera_type
         }
         
-        # 获取摄像头关联的AI任务，从中提取技能IDs和AI任务相关属性
+        # 从任务表获取摄像头的关联skill_class_id，然后对应的查询技能名称
+        skill_names = []
         try:
+            # 导入所需模块
             from app.db.ai_task_dao import AITaskDAO
-            tasks = AITaskDAO.get_tasks_by_camera_id(camera.id, db)
+            from app.db.skill_instance_dao import SkillInstanceDAO
             
-            # 初始化默认值
-            result["skill_ids"] = []
-            result["warning_level"] = 0  # 从AI任务获取
-            result["frame_rate"] = 1.0   # 从AI任务获取
-            result["running_period"] = "{}"  # 从AI任务获取
-            result["electronic_fence"] = "{}"  # 从AI任务获取
+            # 直接获取摄像头关联的不同技能实例ID（去重）
+            skill_instance_ids = AITaskDAO.get_distinct_skill_instance_ids_by_camera_id(camera_id, db)
             
-            # 如果有关联任务，获取相关属性和技能IDs
-            if tasks:
-                result["skill_ids"] = [str(task.skill_instance_id) for task in tasks]
+            # 获取每个技能实例的名称
+            for skill_instance_id in skill_instance_ids:
+                skill_instance = SkillInstanceDAO.get_by_id(skill_instance_id, db)
+                if skill_instance:
+                    skill_names.append(skill_instance.name)
                 
-                # 获取第一个任务的属性作为摄像头属性(便于前端展示)
-                if len(tasks) > 0:
-                    first_task = tasks[0]
-                    result["warning_level"] = first_task.warning_level
-                    result["frame_rate"] = first_task.frame_rate
-                    result["running_period"] = first_task.running_period
-                    result["electronic_fence"] = first_task.electronic_fence
         except Exception as e:
-            logger.warning(f"获取摄像头关联任务失败: {str(e)}")
-            # 设置默认值
-            result["skill_ids"] = []
-            result["warning_level"] = 0
-            result["frame_rate"] = 1.0
-            result["running_period"] = "{}"
-            result["electronic_fence"] = "{}"
+            logger.warning(f"获取摄像头关联技能名称失败: {str(e)}")
+        
+        result["skill_names"] = skill_names
         
         # 添加类型特定的信息
         if camera.meta_data:
@@ -427,84 +400,8 @@ class CameraService:
         
         # 从数据库获取摄像头基本信息
         camera = CameraDAO.get_ai_camera_by_uuid(camera_uuid, db)
-        if not camera:
-            logger.warning(f"未找到摄像头: {camera_uuid}")
-            return None
+        result = CameraService.get_ai_camera_by_id(camera.id, db)
         
-        # 从tag_relations获取标签列表
-        tags_list = [tag.name for tag in camera.tag_relations]
-        meta_data = json.loads(camera.meta_data) if camera.meta_data else {}
-        
-        # 尝试获取设备状态
-        device_status = None
-        try:
-            # 根据摄像头类型从WVP获取状态
-            if camera.camera_type == "gb28181":
-                # 国标设备
-                deviceId = meta_data.get("deviceId")
-                if deviceId:
-                    device_status = CameraService.get_gb28181_device_by_id(deviceId)
-            elif camera.camera_type == "proxy_stream":
-                # 对于代理流设备，从数据库中获取app和stream字段
-                app = meta_data.get("app")
-                stream = meta_data.get("stream")
-                
-                if app and stream:
-                    device_status = CameraService.get_proxy_device_one(app, stream)
-            elif camera.camera_type == "push_stream":
-                # 对于推流设备，从数据库中获取app和stream字段
-                app = meta_data.get("app")
-                stream = meta_data.get("stream")
-                
-                if app and stream:
-                    device_status = CameraService.get_push_device_one(app, stream)
-        except Exception as e:
-            logger.warning(f"获取设备状态时出错: {str(e)}")
-        
-        # 构建摄像头基本信息
-        result = {
-            "id": str(camera.id),
-            "camera_uuid": camera.camera_uuid,
-            "name": camera.name,
-            "location": camera.location,
-            "tags": tags_list,
-            "status": camera.status,
-            "warning_level": camera.warning_level,
-            "frame_rate": camera.frame_rate,
-            "running_period": camera.running_period,
-            "electronic_fence": camera.electronic_fence,
-            "skill_ids": [], # 不再直接访问db_camera.skills
-            "camera_type": camera.camera_type,
-            "device_status": device_status
-        }
-        
-        # 获取摄像头关联的AI任务，从中提取技能IDs
-        try:
-            from app.db.ai_task_dao import AITaskDAO
-            tasks = AITaskDAO.get_tasks_by_camera_id(camera.id, db)
-            if tasks:
-                result["skill_ids"] = [str(task.skill_instance_id) for task in tasks]
-        except Exception as e:
-            logger.warning(f"获取摄像头关联任务失败: {str(e)}")
-        
-        # 添加类型特定的信息
-        if camera.meta_data:
-            try:
-                if camera.camera_type == "gb28181":
-                    if "deviceId" in meta_data:
-                        result["deviceId"] = meta_data.get("deviceId")
-                    if "gb_id" in meta_data:
-                        result["gb_id"] = meta_data.get("gb_id")
-                elif camera.camera_type == "proxy_stream":
-                    result["app"] = meta_data.get("app")
-                    result["stream"] = meta_data.get("stream")
-                    result["proxy_id"] = meta_data.get("proxy_id")
-                elif camera.camera_type == "push_stream":
-                    result["app"] = meta_data.get("app")
-                    result["stream"] = meta_data.get("stream")
-                    result["push_id"] = meta_data.get("push_id")
-            except Exception as e:
-                logger.warning(f"解析摄像头元数据时出错: {str(e)}")
         
         return result
     
@@ -645,8 +542,8 @@ class CameraService:
         # 根据摄像头类型处理必要的字段
         if camera_type == "gb28181":
             # 国标设备
-            if "deviceId" not in camera_data_copy:
-                logger.error("国标设备缺少必要字段deviceId")
+            if "deviceId"  not in camera_data_copy or "gb_id" not in camera_data_copy:
+                logger.error("国标设备缺少必要字段deviceId或gb_id")
                 return None
                 
         elif camera_type == "proxy_stream":
@@ -703,38 +600,6 @@ class CameraService:
             "status": updated_camera.status,
             "camera_type": updated_camera.camera_type
         }
-        
-        # 获取摄像头关联的AI任务，从中提取技能IDs和AI任务相关属性
-        try:
-            from app.db.ai_task_dao import AITaskDAO
-            tasks = AITaskDAO.get_tasks_by_camera_id(updated_camera.id, db)
-            
-            # 初始化默认值
-            result["skill_ids"] = []
-            result["warning_level"] = camera_data.get("warning_level", 0)  # 使用传入数据的值或默认值
-            result["frame_rate"] = camera_data.get("frame_rate", 1.0)      # 使用传入数据的值或默认值
-            result["running_period"] = camera_data.get("running_period", "{}")  # 使用传入数据的值或默认值
-            result["electronic_fence"] = camera_data.get("electronic_fence", "{}")  # 使用传入数据的值或默认值
-            
-            # 如果有关联任务，获取相关属性和技能IDs
-            if tasks:
-                result["skill_ids"] = [str(task.skill_instance_id) for task in tasks]
-                
-                # 获取第一个任务的属性作为摄像头属性(便于前端展示)
-                if len(tasks) > 0:
-                    first_task = tasks[0]
-                    result["warning_level"] = first_task.warning_level
-                    result["frame_rate"] = first_task.frame_rate
-                    result["running_period"] = first_task.running_period
-                    result["electronic_fence"] = first_task.electronic_fence
-        except Exception as e:
-            logger.warning(f"获取摄像头关联任务失败: {str(e)}")
-            # 设置从传入数据获取的值或默认值
-            result["skill_ids"] = []
-            result["warning_level"] = camera_data.get("warning_level", 0)
-            result["frame_rate"] = camera_data.get("frame_rate", 1.0)
-            result["running_period"] = camera_data.get("running_period", "{}")
-            result["electronic_fence"] = camera_data.get("electronic_fence", "{}")
         
         # 根据摄像头类型添加特定字段
         if updated_camera.camera_type == "gb28181":
@@ -814,38 +679,6 @@ class CameraService:
             "camera_type": updated_camera.camera_type
         }
         
-        # 获取摄像头关联的AI任务，从中提取技能IDs和AI任务相关属性
-        try:
-            from app.db.ai_task_dao import AITaskDAO
-            tasks = AITaskDAO.get_tasks_by_camera_id(updated_camera.id, db)
-            
-            # 初始化默认值
-            result["skill_ids"] = []
-            result["warning_level"] = camera_data.get("warning_level", 0)  # 使用传入数据的值或默认值
-            result["frame_rate"] = camera_data.get("frame_rate", 1.0)      # 使用传入数据的值或默认值
-            result["running_period"] = camera_data.get("running_period", "{}")  # 使用传入数据的值或默认值
-            result["electronic_fence"] = camera_data.get("electronic_fence", "{}")  # 使用传入数据的值或默认值
-            
-            # 如果有关联任务，获取相关属性和技能IDs
-            if tasks:
-                result["skill_ids"] = [str(task.skill_instance_id) for task in tasks]
-                
-                # 获取第一个任务的属性作为摄像头属性(便于前端展示)
-                if len(tasks) > 0:
-                    first_task = tasks[0]
-                    result["warning_level"] = first_task.warning_level
-                    result["frame_rate"] = first_task.frame_rate
-                    result["running_period"] = first_task.running_period
-                    result["electronic_fence"] = first_task.electronic_fence
-        except Exception as e:
-            logger.warning(f"获取摄像头关联任务失败: {str(e)}")
-            # 设置从传入数据获取的值或默认值
-            result["skill_ids"] = []
-            result["warning_level"] = camera_data.get("warning_level", 0)
-            result["frame_rate"] = camera_data.get("frame_rate", 1.0)
-            result["running_period"] = camera_data.get("running_period", "{}")
-            result["electronic_fence"] = camera_data.get("electronic_fence", "{}")
-        
         # 根据摄像头类型添加特定字段
         if updated_camera.camera_type == "gb28181":
             if "deviceId" in meta_data:
@@ -877,6 +710,38 @@ class CameraService:
         """
         logger.info(f"删除摄像头: id={camera_id}")
         return CameraDAO.delete_ai_camera(camera_id, db)
+    
+    @staticmethod
+    def batch_delete_ai_cameras(camera_ids: List[int], db: Session) -> Dict[str, Any]:
+        """
+        批量删除AI平台摄像头
+        
+        Args:
+            camera_ids: 摄像头ID列表
+            db: 数据库会话
+            
+        Returns:
+            Dict[str, Any]: 批量删除结果，包含成功和失败的ID列表
+        """
+        if not camera_ids:
+            return {
+                "success": False,
+                "message": "未提供摄像头ID列表",
+                "success_ids": [],
+                "failed_ids": [],
+                "total": 0,
+                "success_count": 0,
+                "failed_count": 0
+            }
+        
+        logger.info(f"批量删除摄像头: ids={camera_ids}")
+        result = CameraDAO.batch_delete_ai_cameras(camera_ids, db)
+        
+        # 添加操作结果信息
+        result["success"] = len(result["failed_ids"]) == 0
+        result["message"] = f"成功删除 {result['success_count']} 个摄像头，失败 {result['failed_count']} 个"
+        
+        return result
     
     @classmethod
     def init_ai_camera_db(cls, db: Session) -> Dict[str, Any]:
@@ -1140,4 +1005,103 @@ class CameraService:
             logger.error(f"分析摄像头流失败: {str(e)}", exc_info=True)
             if isinstance(e, HTTPException):
                 raise
-            raise HTTPException(status_code=500, detail=f"Failed to analyze camera stream: {str(e)}") 
+            raise HTTPException(status_code=500, detail=f"Failed to analyze camera stream: {str(e)}")
+    
+    @classmethod
+    def get_camera_snapshot(cls, camera_id: int, db: Session) -> Optional[bytes]:
+        """
+        获取摄像头截图
+        
+        根据摄像头类型调用不同的截图接口：
+        - 国标摄像头: 使用deviceId和channelId获取国标设备截图
+        - 代理流摄像头: 使用app和stream获取代理流设备截图
+        - 推流摄像头: 使用app和stream获取推流设备截图
+        
+        Args:
+            camera_id: 摄像头ID
+            db: 数据库会话
+            
+        Returns:
+            Optional[bytes]: 截图数据(二进制)或None(失败时)
+        """
+        try:
+            # 获取摄像头信息
+            camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
+            if not camera:
+                logger.warning(f"未找到摄像头: {camera_id}")
+                return None
+                
+            # 解析元数据
+            meta_data = json.loads(camera.meta_data) if camera.meta_data else {}
+            
+            # 根据摄像头类型调用不同的截图接口
+            snapshot_data = None  # 截图二进制数据
+            
+            if camera.camera_type == "gb28181":
+                # 国标设备
+                deviceId = meta_data.get("deviceId")
+                # 国标设备通常使用通道ID，默认与设备ID相同
+                channelId = meta_data.get("channelId", deviceId)
+                
+                if deviceId and channelId:
+                    logger.info(f"请求国标设备截图: deviceId={deviceId}, channelId={channelId}")
+                    # 先请求截图，触发截图生成
+                    result = wvp_client.request_device_snap(deviceId, channelId)
+                    if result:
+                        logger.info(f"成功请求截图: {result}")
+                        # 获取截图数据，不需要传入filename
+                        snapshot_data = wvp_client.get_device_snap(deviceId, channelId)
+                    else:
+                        logger.warning(f"请求截图失败")
+                else:
+                    logger.warning(f"国标摄像头缺少deviceId或channelId: {camera_id}")
+                    
+            elif camera.camera_type == "proxy_stream":
+                # 代理流设备
+                app = meta_data.get("app")
+                stream = meta_data.get("stream")
+                
+                if app and stream:
+                    logger.info(f"请求代理流设备截图: app={app}, stream={stream}")
+                    # 先请求截图，触发截图生成
+                    result = wvp_client.request_proxy_snap(app, stream)
+                    if result:
+                        logger.info(f"成功请求截图: {result}")
+                        # 获取截图数据，不需要传入filename
+                        snapshot_data = wvp_client.get_proxy_snap(app, stream)
+                    else:
+                        logger.warning(f"请求截图失败")
+                else:
+                    logger.warning(f"代理流摄像头缺少app或stream: {camera_id}")
+                    
+            elif camera.camera_type == "push_stream":
+                # 推流设备
+                app = meta_data.get("app")
+                stream = meta_data.get("stream")
+                
+                if app and stream:
+                    logger.info(f"请求推流设备截图: app={app}, stream={stream}")
+                    # 先请求截图，触发截图生成
+                    result = wvp_client.request_push_snap(app, stream)
+                    if result:
+                        logger.info(f"成功请求截图: {result}")
+                        # 获取截图数据，不需要传入filename
+                        snapshot_data = wvp_client.get_push_snap(app, stream)
+                    else:
+                        logger.warning(f"请求截图失败")
+                else:
+                    logger.warning(f"推流摄像头缺少app或stream: {camera_id}")
+            else:
+                logger.warning(f"不支持的摄像头类型: {camera.camera_type}")
+                
+            # 检查截图结果
+            if not snapshot_data:
+                logger.warning(f"获取摄像头截图失败: camera_id={camera_id}, type={camera.camera_type}")
+                return None
+                
+            return snapshot_data
+            
+        except Exception as e:
+            logger.error(f"获取摄像头截图过程中出错: {str(e)}", exc_info=True)
+            return None 
+

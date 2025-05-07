@@ -2,7 +2,7 @@
 技能实例API端点，负责技能实例的管理
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Body
 from sqlalchemy.orm import Session
 import logging
 
@@ -307,3 +307,27 @@ def disable_skill_instance(instance_id: int, db: Session = Depends(get_db)):
     # 获取更新后的实例
     updated = skill_instance_service.get_by_id(instance_id, db)
     return updated 
+
+@router.get("/{skill_instance_id}/devices", response_model=List[Dict[str, Any]])
+def get_skill_instance_devices(skill_instance_id: int, db: Session = Depends(get_db)):
+    """
+    获取指定技能实例关联的设备列表
+    
+    Args:
+        skill_instance_id: 技能实例ID
+        db: 数据库会话
+        
+    Returns:
+        List[Dict[str, Any]]: 设备列表
+    """
+    # 检查技能实例是否存在
+    skill_instance = skill_instance_service.get_by_id(skill_instance_id, db)
+    if not skill_instance:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"技能实例不存在: ID={skill_instance_id}"
+        )
+    
+    # 获取关联设备列表
+    devices = skill_instance_service.get_devices_by_skill_instance_id(skill_instance_id, db)
+    return devices

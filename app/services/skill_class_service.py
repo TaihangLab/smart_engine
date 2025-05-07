@@ -11,6 +11,8 @@ from app.db.skill_instance_dao import SkillInstanceDAO
 from app.models.skill import SkillClass, SkillClassModel
 from app.services.minio_client import minio_client
 from app.services.skill_instance_service import SkillInstanceService
+from app.db.ai_task_dao import AITaskDAO
+from app.db.camera_dao import CameraDAO
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +21,7 @@ class SkillClassService:
     
    
     @staticmethod
-    def get_all_paginated(db: Session, page: int = 1, limit: int = 10, status: Optional[bool] = None, query_name: Optional[str] = None, query_type: Optional[str] = None) -> Dict[str, Any]:
+    def get_all_paginated(db: Session, page: int = 1, limit: int = 10, status: Optional[bool] = None, query_name: Optional[str] = None, query_type: Optional[str] = None,  is_detail: Optional[bool] = True) -> Dict[str, Any]:
         """
         分页获取技能类列表
         
@@ -45,40 +47,49 @@ class SkillClassService:
             models = SkillClassDAO.get_models(skill_class.id, db)
             model_info = [(model.id, model.name if hasattr(model, 'name') else None) for model in models]
             
-            # 获取关联的实例
-            instances = SkillInstanceDAO.get_by_skill_class(skill_class.id, db)
             
             # 获取相关AI设备
-            related_devices = []
-            for instance in instances:
-                # 使用SkillInstanceService获取该实例关联的设备
-                instance_devices = SkillInstanceService.get_related_devices(instance.id, db)
-                for device in instance_devices:
-                    # 检查是否已经添加过该设备
-                    if not any(d.get("id") == device.get("id") for d in related_devices):
-                        related_devices.append(device)
+            
+            camera_ids = AITaskDAO.get_distinct_camera_ids_by_skill_class_id(skill_class.id, db)
+            total_device_count = len(camera_ids)
+ 
 
-            # 获取技能示例图片
-            image_object_name = skill_class.image_object_name
-            if image_object_name:
-                image_url = minio_client.get_presigned_url(image_object_name)
+            if is_detail:
+                #返回详细信息
+
+                # 获取技能示例图片
+                image_object_name = skill_class.image_object_name
+                if image_object_name:
+                    image_url = minio_client.get_presigned_url(image_object_name)
+                else:
+                    image_url = None
+
+                class_data = {
+                    "id": skill_class.id,
+                    "name": skill_class.name,
+                    "name_zh": skill_class.name_zh,
+                    "type": skill_class.type,
+                    "version": skill_class.version,
+                    "description": skill_class.description,
+                    "image_url": image_url,
+                    "status": skill_class.status,
+                    "model_info": model_info,
+                    "total_device_count": total_device_count,
+                    "created_at": skill_class.created_at.isoformat() if skill_class.created_at else None,
+                    "updated_at": skill_class.updated_at.isoformat() if skill_class.updated_at else None,
+                }
             else:
-                image_url = None
+                #返回简要信息
+                class_data = {
+                    "id": skill_class.id,
+                    "name": skill_class.name,
+                    "name_zh": skill_class.name_zh,
+                    "type": skill_class.type,
+                    "version": skill_class.version,
+                    "status": skill_class.status,
+                }
 
-            class_data = {
-                "id": skill_class.id,
-                "name": skill_class.name,
-                "name_zh": skill_class.name_zh,
-                "type": skill_class.type,
-                "version": skill_class.version,
-                "description": skill_class.description,
-                "image_url": image_url,
-                "status": skill_class.status,
-                "model_info": model_info,
-                "related_devices_count": len(related_devices),
-                "created_at": skill_class.created_at.isoformat() if skill_class.created_at else None,
-                "updated_at": skill_class.updated_at.isoformat() if skill_class.updated_at else None,
-            }
+
             result.append(class_data)
         
         return {
@@ -89,11 +100,9 @@ class SkillClassService:
             "pages": (total + limit - 1) // limit if total > 0 else 0  # 总页数
         }
     
-
-
     
     @staticmethod
-    def get_by_id(skill_class_id: int, db: Session) -> Optional[Dict[str, Any]]:
+    def get_by_id(skill_class_id: int,  db: Session, is_detail: Optional[bool]= True) -> Optional[Dict[str, Any]]:
         """
         根据ID获取技能类
         
@@ -131,7 +140,7 @@ class SkillClassService:
             }
             
             # 获取关联设备
-            related_devices = SkillInstanceService.get_related_devices(instance.id, db)
+            related_devices = SkillInstanceService.get_devices_by_skill_instance_id(instance.id, db)
             instance_info["related_devices"] = related_devices
             instance_info["device_count"] = len(related_devices)
             
@@ -141,34 +150,117 @@ class SkillClassService:
             
             instances_with_devices.append(instance_info)
         
-        # 获取技能示例图片
-        image_object_name = skill_class.image_object_name
-        if image_object_name:
-            image_url = minio_client.get_presigned_url(image_object_name)
+        if is_detail:
+            #返回详细信息
+                
+            # 获取技能示例图片
+            image_object_name = skill_class.image_object_name
+            if image_object_name:
+                image_url = minio_client.get_presigned_url(image_object_name)
+            else:
+                image_url = None
+            
+            skill_class_dict = {
+                "id": skill_class.id,
+                "name": skill_class.name,
+                "name_zh": skill_class.name_zh,
+                "type": skill_class.type,
+                "version": skill_class.version,
+                "description": skill_class.description,
+                "image_url": image_url,
+                "python_class": skill_class.python_class,
+                "default_config": skill_class.default_config,
+                "status": skill_class.status,
+                "created_at": skill_class.created_at.isoformat() if skill_class.created_at else None,
+                "updated_at": skill_class.updated_at.isoformat() if skill_class.updated_at else None,
+                "model_info": model_info,
+                "instances": instances_with_devices,
+                "instance_count": len(instances),
+                "total_device_count": len(total_devices)
+            }
         else:
-            image_url = None
-        
-        skill_class_dict = {
-            "id": skill_class.id,
-            "name": skill_class.name,
-            "name_zh": skill_class.name_zh,
-            "type": skill_class.type,
-            "version": skill_class.version,
-            "description": skill_class.description,
-            "image_url": image_url,
-            "python_class": skill_class.python_class,
-            "default_config": skill_class.default_config,
-            "status": skill_class.status,
-            "created_at": skill_class.created_at.isoformat() if skill_class.created_at else None,
-            "updated_at": skill_class.updated_at.isoformat() if skill_class.updated_at else None,
-            "model_info": model_info,
-            "instances": instances_with_devices,
-            "instance_count": len(instances),
-            "total_device_count": len(total_devices)
-        }
+            #返回简要信息
+            skill_class_dict = {
+                "id": skill_class.id,
+                "name": skill_class.name,
+                "name_zh": skill_class.name_zh,
+                "type": skill_class.type,
+                "version": skill_class.version,
+                "description": skill_class.description,
+                "status": skill_class.status,
+                "default_config": skill_class.default_config,
+            }
         
         return skill_class_dict
     
+
+    @staticmethod
+    def get_devices_by_skill_class_id(skill_class_id: int, db: Session) -> List[Dict[str, Any]]:
+        """
+        根据技能类ID获取关联的设备列表
+        
+        Args:
+            skill_class_id: 技能类ID
+            db: 数据库会话
+            
+        Returns:
+            List[Dict[str, Any]]: 设备列表
+        """
+        logger.info(f"获取技能类关联设备: skill_class_id={skill_class_id}")
+        
+        # 直接从DAO层获取去重的摄像头ID列表
+        camera_ids = AITaskDAO.get_distinct_camera_ids_by_skill_class_id(skill_class_id, db)
+        
+        # 设备列表
+        devices = []
+        
+        # 获取所有摄像头的详细信息
+        for camera_id in camera_ids:
+            camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
+            if not camera:
+                continue
+
+            # 从tag_relations获取标签列表
+            tags_list = [tag.name for tag in camera.tag_relations]
+
+            # 解析元数据
+            meta_data = json.loads(camera.meta_data) if camera.meta_data and isinstance(camera.meta_data, str) else {}
+            
+            # 构建基本设备信息
+            device_info = {
+                "id": camera.id,
+                "camera_uuid": camera.camera_uuid,
+                "name": camera.name,
+                "location": camera.location,
+                "tags": tags_list,
+                "camera_type": camera.camera_type,
+                "status": camera.status,
+                
+           }
+            
+            if meta_data:
+                try:
+                    if camera.camera_type == "gb28181":
+                        if "deviceId" in meta_data:
+                            device_info["deviceId"] = meta_data.get("deviceId")
+                        if "gb_id" in meta_data:
+                            device_info["gb_id"] = meta_data.get("gb_id")
+                    elif camera.camera_type == "proxy_stream":
+                        device_info["app"] = meta_data.get("app")
+                        device_info["stream"] = meta_data.get("stream")
+                        device_info["proxy_id"] = meta_data.get("proxy_id")
+                    elif camera.camera_type == "push_stream":
+                        device_info["app"] = meta_data.get("app")
+                        device_info["stream"] = meta_data.get("stream")
+                        device_info["push_id"] = meta_data.get("push_id")
+                except Exception as e:
+                    logger.warning(f"解析摄像头元数据时出错: {str(e)}")
+            
+            devices.append(device_info)
+        
+        # 直接返回设备列表
+        return devices
+
     @staticmethod
     def get_by_name(skill_class_name: str, db: Session) -> Optional[Dict[str, Any]]:
         """

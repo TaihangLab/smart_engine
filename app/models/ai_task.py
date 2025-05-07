@@ -27,8 +27,9 @@ class AITask(Base):
     # 关联关系
     camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
     
-    # 使用技能实例而非技能类
-    skill_instance_id = Column(Integer, ForeignKey("skill_instances.id"), nullable=False)
+    # 使用技能类和技能实例
+    skill_class_id = Column(Integer, ForeignKey("skill_classes.id"), nullable=False)  # 技能类ID
+    skill_instance_id = Column(Integer, ForeignKey("skill_instances.id"), nullable=True)  # 技能实例ID，可为空
     skill_config = Column(JSON)  # 技能在此任务中的特定配置
     
     created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
@@ -38,6 +39,7 @@ class AITask(Base):
     # 关系对象
     camera = relationship("Camera", back_populates="tasks")
     skill_instance = relationship("SkillInstance", back_populates="tasks")
+    skill_class = relationship("SkillClass")
 
     def __repr__(self):
         return f"<AITask(id={self.id}, name='{self.name}', type='{self.task_type}')>" 

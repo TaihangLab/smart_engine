@@ -8,6 +8,7 @@
 - **技能管理**：支持创建和管理视觉AI技能，一个技能可以包含多个模型
 - **模型管理**：支持管理Triton推理服务器上的模型，自动同步模型到数据库
 - **技能模块化**：采用插件式技能架构，可以轻松扩展新的视觉分析能力
+- **技能热加载**：支持动态加载技能插件，无需重启系统
 - **RESTful API**：提供完整的HTTP接口，支持所有功能操作
 - **健康监控**：提供健康检查接口，监控系统和依赖服务状态
 
@@ -27,11 +28,10 @@ app/
 ├── core/           # 核心配置和工具
 ├── db/             # 数据库相关代码
 ├── models/         # 数据模型定义
+├── plugins/        # 插件目录
+│   └── skills/     # 技能插件
 ├── services/       # 业务服务层
-└── skills/         # 技能系统
-    ├── belt_detector_skill.py    # 安全带检测技能
-    ├── coco_detector_skill.py    # COCO对象检测技能
-    ├── helmet_detector_skill.py  # 安全帽检测技能
+└── skills/         # 技能系统核心
     ├── skill_base.py             # 技能基类
     ├── skill_factory.py          # 技能工厂，负责创建技能实例
     └── skill_manager.py          # 技能管理器，负责管理技能生命周期
@@ -128,8 +128,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 ### 创建自定义技能
 
-1. 创建一个新的Python文件，例如`my_custom_skill.py`，放在`app/skills/`目录下
-2. 继承`BaseSkill`类并实现必要的方法:
+有两种方式可以添加新技能：
+
+#### 方式一：开发插件并直接放置
+
+1. 创建一个新的Python文件，例如`my_custom_skill.py`，继承`BaseSkill`并实现必要的方法
+2. 将文件放在`app/plugins/skills/`目录下
+3. 通过API接口触发技能热加载：`POST /api/v1/skill-classes/reload`
+4. 系统会自动扫描并注册新技能，无需重启
 
 ```python
 from app.skills.skill_base import BaseSkill
@@ -151,11 +157,56 @@ class MyCustomSkill(BaseSkill):
         pass
 ```
 
-3. 重启应用，系统会自动扫描并注册新技能
+#### 方式二：通过API上传
+
+1. 创建技能插件Python文件
+2. 通过API上传文件：`POST /api/v1/skill-classes/upload`（文件会自动放入插件目录并触发热加载）
+
+### 技能热加载
+
+系统支持技能热加载，可以在不重启应用的情况下动态添加新技能：
+
+```
+POST /api/v1/skill-classes/reload
+```
+
+响应示例：
+```json
+{
+  "success": true,
+  "message": "技能热加载成功",
+  "skill_classes": {
+    "total_found": 5,
+    "registered": 5,
+    "db_created": 1,
+    "db_updated": 0,
+    "failed": 0
+  },
+  "skill_instances": {
+    "before": 3,
+    "after": 4,
+    "delta": 1
+  },
+  "elapsed_time": "0.53秒"
+}
+```
+
+### 技能文件上传
+
+系统提供API接口上传技能文件：
+
+```
+POST /api/v1/skill-classes/upload
+Content-Type: multipart/form-data
+
+file=@your_skill.py
+```
 
 ### 技能管理
 
-系统会在启动时自动扫描`app/skills/`目录，发现并注册所有技能。技能信息会同步到数据库，可以通过API接口进行管理。
+系统会在启动时自动扫描`app/plugins/skills/`目录，发现并注册所有技能。技能信息会同步到数据库，可以通过API接口进行管理。
+
+完整的技能开发指南请参考`app/plugins/skills/README.md`。
 
 ## API接口
 

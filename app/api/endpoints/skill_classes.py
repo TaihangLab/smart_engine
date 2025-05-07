@@ -13,6 +13,7 @@ from app.services.skill_class_service import skill_class_service
 from app.services.skill_instance_service import skill_instance_service
 from app.services.minio_client import minio_client
 from app.core.config import settings
+from app.skills.skill_manager import skill_manager
 
 logger = logging.getLogger(__name__)
 
@@ -412,3 +413,111 @@ async def upload_skill_class_image(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"图片上传失败: {str(e)}"
         ) 
+
+@router.get("/{skill_class_id}/devices", response_model=List[Dict[str, Any]])
+def get_skill_class_devices(skill_class_id: int, db: Session = Depends(get_db)):
+    """
+    获取指定技能类关联的设备列表
+    
+    Args:
+        skill_class_id: 技能类ID
+        db: 数据库会话
+        
+    Returns:
+        List[Dict[str, Any]]: 设备列表
+    """
+    # 检查技能类是否存在
+    skill_class = skill_class_service.get_by_id(skill_class_id, db)
+    if not skill_class:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"技能类不存在: ID={skill_class_id}"
+        )
+    
+    # 获取关联设备列表
+    devices = skill_class_service.get_devices_by_skill_class_id(skill_class_id, db)
+    return devices
+
+# 技能热加载响应模型
+class ReloadSkillsResponse(BaseModel):
+    """技能热加载响应模型"""
+    success: bool = Field(..., description="操作是否成功", example=True)
+    message: str = Field(..., description="操作结果消息", example="技能热加载成功")
+    skill_classes: Optional[Dict[str, Any]] = Field(None, description="技能类加载统计")
+    skill_instances: Optional[Dict[str, Any]] = Field(None, description="技能实例加载统计")
+    elapsed_time: Optional[str] = Field(None, description="执行耗时")
+
+@router.post("/reload", response_model=ReloadSkillsResponse)
+def reload_skills(db: Session = Depends(get_db)):
+    """
+    热加载技能类和实例（无需重启系统）
+    
+    将重新扫描技能目录，并重新加载技能实例。
+    此操作可以用于在添加新技能后，不重启系统即可加载技能。
+    
+    Returns:
+        操作结果
+    """
+    logger.info("接收到技能热加载请求")
+    
+    # 执行技能热加载
+    result = skill_manager.reload_skills()
+    
+    # 检查结果
+    if not result.get("success", False):
+        logger.error(f"技能热加载失败: {result.get('message')}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("message", "技能热加载失败")
+        )
+    
+    return result
+
+@router.post("/upload", response_model=Dict[str, Any])
+async def upload_skill_file(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db)
+):
+    """
+    上传技能文件到插件目录
+    
+    Args:
+        file: 上传的技能文件，必须是.py文件
+        db: 数据库会话
+        
+    Returns:
+        上传结果
+    """
+    logger.info(f"接收到技能文件上传请求: {file.filename}")
+    
+    # 验证文件类型
+    if not file.filename.endswith('.py'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="只支持上传Python文件(.py)"
+        )
+    
+    # 读取文件内容
+    file_content = await file.read()
+    
+    # 上传文件
+    result = skill_manager.upload_skill_file(file.filename, file_content)
+    
+    # 检查上传结果
+    if not result.get("success", False):
+        logger.error(f"技能文件上传失败: {result.get('message')}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=result.get("message", "技能文件上传失败")
+        )
+    
+    # 上传成功，自动热加载技能
+    reload_result = skill_manager.reload_skills()
+    
+    # 合并结果
+    combined_result = {
+        **result,
+        "reload_result": reload_result
+    }
+    
+    return combined_result

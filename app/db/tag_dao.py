@@ -152,57 +152,7 @@ class TagDAO:
         
         return cameras, total
     
-    @staticmethod
-    def get_cameras_by_multiple_tags(tag_names: List[str], db: Session, match_all: bool = False, skip: int = 0, limit: int = None) -> Tuple[List[Camera], int]:
-        """
-        根据多个标签名称获取摄像头列表
-        
-        Args:
-            tag_names: 标签名称列表
-            db: 数据库会话
-            match_all: 是否需要匹配所有标签 (True为AND逻辑，False为OR逻辑)
-            skip: 跳过的记录数
-            limit: 返回的记录数量限制
-            
-        Returns:
-            Tuple[List[Camera], int]: 摄像头列表和总记录数
-        """
-        if not tag_names:
-            # 没有指定标签，返回空结果
-            return [], 0
-        
-        # 基础查询
-        query = db.query(Camera).join(Camera.tag_relations)
-        
-        if match_all:
-            # AND逻辑：必须包含所有指定的标签
-            # 使用子查询和GROUP BY实现AND逻辑
-            from sqlalchemy import func
-            
-            # 筛选条件：标签名称在指定列表中
-            query = query.filter(Tag.name.in_(tag_names))
-            
-            # 分组计数，只选择标签数量等于指定标签数量的摄像头
-            query = query.group_by(Camera.id).having(func.count(Camera.id) == len(tag_names))
-        else:
-            # OR逻辑：包含任意一个指定的标签
-            query = query.filter(Tag.name.in_(tag_names))
-            # 使用distinct去重
-            query = query.distinct()
-        
-        # 获取总记录数
-        total = query.count()
-        
-        # 应用分页
-        if skip:
-            query = query.offset(skip)
-        if limit:
-            query = query.limit(limit)
-        
-        # 执行查询
-        cameras = query.all()
-        
-        return cameras, total
+
     
     @staticmethod
     def add_tag_to_camera(camera_id: int, tag_name: str, db: Session) -> bool:
@@ -284,3 +234,67 @@ class TagDAO:
             db.rollback()
             logger.error(f"从摄像头移除标签时出错: {str(e)}")
             return False 
+    
+    @staticmethod
+    def update_tag(tag_id: int, data: Dict[str, Any], db: Session) -> Optional[Tag]:
+        """
+        更新标签信息
+        
+        Args:
+            tag_id: 标签ID
+            data: 要更新的数据字典，可包含name和description
+            db: 数据库会话
+            
+        Returns:
+            Optional[Tag]: 更新后的标签，如果标签不存在返回None
+        """
+        try:
+            # 获取标签
+            tag = db.query(Tag).filter(Tag.id == tag_id).first()
+            if not tag:
+                logger.warning(f"标签不存在: {tag_id}")
+                return None
+            
+            # 更新字段
+            if "name" in data:
+                tag.name = data["name"]
+            if "description" in data:
+                tag.description = data["description"]
+            
+            db.commit()
+            db.refresh(tag)
+            logger.info(f"成功更新标签: {tag_id}")
+            return tag
+        except Exception as e:
+            db.rollback()
+            logger.error(f"更新标签时出错: {str(e)}")
+            raise
+    
+    @staticmethod
+    def delete_tag(tag_id: int, db: Session) -> bool:
+        """
+        删除标签
+        
+        Args:
+            tag_id: 标签ID
+            db: 数据库会话
+            
+        Returns:
+            bool: 删除成功返回True，否则返回False
+        """
+        try:
+            # 获取标签
+            tag = db.query(Tag).filter(Tag.id == tag_id).first()
+            if not tag:
+                logger.warning(f"标签不存在: {tag_id}")
+                return False
+            
+            # 删除标签
+            db.delete(tag)
+            db.commit()
+            logger.info(f"成功删除标签: {tag_id}")
+            return True
+        except Exception as e:
+            db.rollback()
+            logger.error(f"删除标签时出错: {str(e)}")
+            raise 

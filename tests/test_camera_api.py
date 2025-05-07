@@ -443,15 +443,25 @@ def test_end_to_end():
 if __name__ == "__main__":
     logger.info("开始测试摄像头API...")
     
-    if len(sys.argv) > 1 and sys.argv[1] == "--cleanup":
-        # 查找并删除测试摄像头
-        cameras = test_list_ai_cameras()
-        if cameras and "cameras" in cameras:
-            for camera in cameras["cameras"]:
-                if camera.get("deviceId") == TEST_CAMERA["deviceId"]:
-                    camera_id = int(camera.get("id"))
-                    logger.info(f"清理：删除测试摄像头 ID: {camera_id}")
-                    test_delete_ai_camera(camera_id)
-    else:
-        # 运行端到端测试
-        test_end_to_end() 
+    test_create_ai_camera()
+    test_create_ai_camera()
+    test_create_ai_camera()
+    test_create_ai_camera()
+    test_create_ai_camera()
+    test_create_ai_camera()
+    test_create_ai_camera()
+    test_create_ai_camera()
+    test_create_ai_camera()
+    
+    # if len(sys.argv) > 1 and sys.argv[1] == "--cleanup":
+    #     # 查找并删除测试摄像头
+    #     cameras = test_list_ai_cameras()
+    #     if cameras and "cameras" in cameras:
+    #         for camera in cameras["cameras"]:
+    #             if camera.get("deviceId") == TEST_CAMERA["deviceId"]:
+    #                 camera_id = int(camera.get("id"))
+    #                 logger.info(f"清理：删除测试摄像头 ID: {camera_id}")
+    #                 test_delete_ai_camera(camera_id)
+    # else:
+    #     # 运行端到端测试
+    #     test_end_to_end() 
