@@ -919,7 +919,83 @@ class WVPClient:
             logger.error(f"获取推流设备异常: {str(e)}")
             return {}
 
-    
+    @auto_relogin
+    def get_channel_one(self, device_id: str, channel_device_id: str) -> dict:
+        """
+        获取单个通道详情
+        
+        Args:
+            device_id: 设备的国标编码
+            channel_device_id: 通道的国标编码
+            
+        Returns:
+            dict: 通道详情信息，获取失败时返回空字典
+        """
+        url = f"{self.base_url}/api/device/query/channel/one"
+        try:
+            params = {
+                "deviceId": device_id,
+                "channelDeviceId": channel_device_id
+            }
+            
+            response = self.session.get(url, params=params)
+            logger.info(f"Get channel detail response status: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"Get channel detail failed with status code {response.status_code}")
+                logger.error(f"Response content: {response.text}")
+                return {}
+            
+            try:
+                data = response.json()
+                if data.get("code") != 0:
+                    logger.warning(f"获取通道详情失败: {data.get('msg')}")
+                    return {}
+                return data.get("data", {})
+            except ValueError as e:
+                logger.error(f"Response is not valid JSON: {response.text}, {str(e)}")
+                return {}
+        except Exception as e:
+            logger.error(f"获取通道详情异常: {str(e)}")
+            return {}
+
+    @auto_relogin
+    def play_channel(self, channel_id: int) -> Optional[Dict[str, Any]]:
+        """
+        播放通道
+        
+        Args:
+            channel_id: 通道ID
+            
+        Returns:
+            Optional[Dict[str, Any]]: 播放信息，获取失败时返回None
+        """
+        url = f"{self.base_url}/api/common/channel/play"
+        try:
+            params = {
+                "channelId": channel_id
+            }
+            
+            response = self.session.get(url, params=params)
+            logger.info(f"Play channel response status: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"Play channel failed with status code {response.status_code}")
+                logger.error(f"Response content: {response.text}")
+                return None
+            
+            try:
+                data = response.json()
+                if data.get("code") != 0:
+                    logger.warning(f"播放通道失败: {data.get('msg')}")
+                    return None
+                return data.get("data")
+            except ValueError as e:
+                logger.error(f"Response is not valid JSON: {response.text}, {str(e)}")
+                return None
+        except Exception as e:
+            logger.error(f"播放通道异常: {str(e)}")
+            return None
 
 # 创建全局WVP客户端实例
 wvp_client = WVPClient() 
