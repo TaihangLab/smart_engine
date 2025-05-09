@@ -323,6 +323,30 @@ class CameraService:
         
         # 从数据库获取摄像头基本信息
         camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
+
+        # 解析meta_data字符串为字典
+        meta_data_dict = json.loads(camera.meta_data) if isinstance(camera.meta_data, str) else camera.meta_data
+        
+
+        source_name = ""
+        # 查询设备源设备名称
+        if camera.camera_type == "gb28181":
+            device_info = wvp_client.get_device_by_id(meta_data_dict.get("deviceId"))
+            if device_info:
+                # print(device_info)
+                source_name = device_info.get("name", camera.name)
+        elif camera.camera_type == "proxy_stream":
+            device_info = wvp_client.get_proxy_one(meta_data_dict.get("app"), meta_data_dict.get("stream"))
+            if device_info:
+                source_name = device_info.get("gbName", camera.name)
+        elif camera.camera_type == "push_stream":
+            device_info = wvp_client.get_push_one(meta_data_dict.get("app"), meta_data_dict.get("stream"))
+            if device_info:
+                source_name = device_info.get("gbName", camera.name)
+        else:
+            source_name = camera.name
+
+
         if not camera:
             logger.warning(f"未找到摄像头: {camera_id}")
             return None
@@ -340,7 +364,8 @@ class CameraService:
             "location": camera.location,
             "tags": tags_list,
             "status": camera.status,
-            "camera_type": camera.camera_type
+            "camera_type": camera.camera_type,
+            "source_name": source_name
         }
         
         # 从任务表获取摄像头的关联skill_class_id，然后对应的查询技能名称
@@ -556,7 +581,7 @@ class CameraService:
         elif camera_type == "push_stream":
             # 推流设备需要push_id, app和stream字段
             if "push_id" not in camera_data_copy or "app" not in camera_data_copy or "stream" not in camera_data_copy:
-                print(camera_data_copy)
+                # print(camera_data_copy)
                 logger.error("推流设备缺少必要字段push_id、app或stream")
                 return None
         
@@ -572,7 +597,7 @@ class CameraService:
         
         # 从camera_data中提取标签数据，但不传给DAO
         tags_data = camera_data_copy.pop("tags", []) if "tags" in camera_data_copy else []
-        
+
         # 使用DAO创建摄像头
         new_camera = CameraDAO.create_ai_camera(camera_data_copy, db)
         if not new_camera:
@@ -699,7 +724,7 @@ class CameraService:
         return result
     
     @staticmethod
-    def delete_ai_camera(camera_id: int, db: Session) -> bool:
+    def delete_ai_camera(camera_id: int, db: Session) -> Dict[str, Any]:
         """
         删除AI平台摄像头
         
@@ -708,10 +733,21 @@ class CameraService:
             db: 数据库会话
             
         Returns:
-            bool: 是否成功删除
+            Dict[str, Any]: 删除结果
         """
-        logger.info(f"删除摄像头: id={camera_id}")
-        return CameraDAO.delete_ai_camera(camera_id, db)
+        logger.info(f"删除摄像头: camera_id={camera_id}")
+        result = CameraDAO.delete_ai_camera(camera_id, db)
+        
+        if result["success"]:
+            return {
+                "success": True,
+                "message": f"成功删除摄像头 {camera_id}"
+            }
+        else:
+            return {
+                "success": False,
+                "message": f"删除摄像头 {camera_id} 失败: {result.get('error', '未知错误')}"
+            }
     
     @staticmethod
     def batch_delete_ai_cameras(camera_ids: List[int], db: Session) -> Dict[str, Any]:
@@ -739,9 +775,27 @@ class CameraService:
         logger.info(f"批量删除摄像头: ids={camera_ids}")
         result = CameraDAO.batch_delete_ai_cameras(camera_ids, db)
         
+        # 处理失败原因并组合详细错误信息
+        failed_details = []
+        for camera_id in result.get("failed_ids", []):
+            reason = result.get("failed_reasons", {}).get(str(camera_id), "未知原因")
+            failed_details.append(f"摄像头 {camera_id}: {reason}")
+        
         # 添加操作结果信息
         result["success"] = len(result["failed_ids"]) == 0
-        result["message"] = f"成功删除 {result['success_count']} 个摄像头，失败 {result['failed_count']} 个"
+        
+        if len(failed_details) > 0:
+            # 如果有失败的摄像头，提供详细信息
+            result["message"] = f"成功删除 {result['success_count']} 个摄像头，失败 {result['failed_count']} 个。失败详情: {'; '.join(failed_details[:3])}"
+            if len(failed_details) > 3:
+                result["message"] += f"等共 {len(failed_details)} 个摄像头"
+        else:
+            # 如果全部成功
+            result["message"] = f"成功删除 {result['success_count']} 个摄像头"
+        
+        # 移除failed_reasons字段，因为它的信息已经合并到message中
+        if "failed_reasons" in result:
+            del result["failed_reasons"]
         
         return result
     

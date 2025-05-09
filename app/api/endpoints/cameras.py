@@ -89,6 +89,7 @@ class CameraDetailResponse(BaseModel):
     id: str = Field(..., description="摄像头ID")
     camera_uuid: str = Field(..., description="摄像头UUID")
     name: str = Field(..., description="摄像头名称")
+    source_name: Optional[str] = Field(None, description="源设备名称")
     location: Optional[str] = Field(None, description="摄像头位置")
     tags: List[str] = Field([], description="标签列表")
     status: bool = Field(..., description="是否启用")
@@ -199,7 +200,7 @@ class BatchDeleteCamerasRequest(BaseModel):
 class BatchDeleteCamerasResponse(BaseModel):
     """批量删除摄像头的响应模型"""
     success: bool = Field(..., description="操作是否完全成功")
-    message: str = Field(..., description="操作结果消息")
+    message: str = Field(..., description="操作结果消息，包含成功和失败的详细信息")
     success_ids: List[int] = Field(..., description="成功删除的摄像头ID列表")
     failed_ids: List[int] = Field(..., description="删除失败的摄像头ID列表")
     total: int = Field(..., description="请求删除的总数量")
@@ -406,7 +407,6 @@ def get_ai_camera(
     try:
         # 调用服务层获取摄像头信息
         camera_data = CameraService.get_ai_camera_by_id(camera_id, db)
-        
         if not camera_data:
             logger.warning(f"未找到摄像头: {camera_id}")
             raise HTTPException(
@@ -446,7 +446,7 @@ def add_ai_camera(
     try:
         # 将Pydantic模型转换为字典
         camera_dict = camera_data.model_dump(exclude_unset=True)
-        
+
         # 记录收到的数据，便于调试
         logger.info(f"添加摄像头请求，类型: {camera_dict.get('camera_type')}, 数据: {camera_dict}")
         
@@ -582,21 +582,35 @@ def delete_ai_camera(
     
     Args:
         camera_id: 摄像头ID
+        db: 数据库会话
         
     Returns:
-        OperationResponse: 操作结果，包含成功状态和消息
+        OperationResponse: 操作结果
     """
     try:
-        # 调用服务层删除摄像头
         result = CameraService.delete_ai_camera(camera_id, db)
         
-        if not result:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Camera not found"
-            )
+        if not result["success"]:
+            # 如果不是因为摄像头不存在而失败，返回400错误
+            if "关联" in result["message"]:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=result["message"]
+                )
+            # 如果是因为摄像头不存在而失败，返回404错误
+            elif "不存在" in result["message"]:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=result["message"]
+                )
+            # 其他错误返回500
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail=result["message"]
+                )
         
-        return OperationResponse(success=True, message=f"成功删除摄像头 {camera_id}")
+        return {"success": True, "message": result["message"]}
     except HTTPException:
         raise
     except Exception as e:

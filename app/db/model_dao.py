@@ -137,8 +137,9 @@ class ModelDAO:
                 version=model_data.get('version', '1.0'),
                 description=model_data.get('description', ''),
                 status=model_data.get('status', True),
-                config=model_data.get('config', {}),
-                triton_config=model_data.get('triton_config', {})
+                model_config=model_data.get('model_config', {}),
+                model_metadata=model_data.get('model_metadata', {}),
+                server_metadata=model_data.get('server_metadata', {}),
             )
             
             db.add(new_model)
@@ -184,10 +185,12 @@ class ModelDAO:
                 model.description = model_data['description']
             if 'status' in model_data:
                 model.status = model_data['status']
-            if 'config' in model_data:
-                model.config = model_data['config']
-            if 'triton_config' in model_data:
-                model.triton_config = model_data['triton_config']
+            if 'model_config' in model_data:
+                model.model_config = model_data['model_config']
+            if 'model_metadata' in model_data:
+                model.model_metadata = model_data['model_metadata']
+            if 'server_metadata' in model_data:
+                model.server_metadata = model_data['server_metadata']
             
             db.commit()
             db.refresh(model)

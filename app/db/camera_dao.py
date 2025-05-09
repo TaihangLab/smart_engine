@@ -131,7 +131,7 @@ class CameraDAO:
             
             # 将元数据序列化为JSON
             meta_data_json = json.dumps(meta_data)
-            
+
             new_camera = Camera(
                 name=camera_data.get('name'),
                 location=camera_data.get('location', ''),
@@ -217,7 +217,7 @@ class CameraDAO:
             return None
     
     @staticmethod
-    def delete_ai_camera(camera_id: int, db: Session) -> bool:
+    def delete_ai_camera(camera_id: int, db: Session) -> Dict[str, Any]:
         """
         删除AI平台摄像头
         
@@ -226,24 +226,36 @@ class CameraDAO:
             db: 数据库会话
             
         Returns:
-            bool: 是否成功删除
+            Dict[str, Any]: 删除结果，包含成功状态和错误信息
         """
         try:
             camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
             if not camera:
-                return False
+                return {"success": False, "error": "摄像头不存在"}
             
-            # 注意：不再需要删除CameraSkill关联，相关的AI任务会在其他地方处理
+            # 导入AI任务DAO
+            from app.db.ai_task_dao import AITaskDAO
+            
+            # 检查是否有关联的AI任务
+            associated_tasks = AITaskDAO.get_tasks_by_camera_id(camera_id, db)
+            if associated_tasks:
+                # 如果存在关联任务，则不删除该摄像头
+                task_count = len(associated_tasks)
+                task_names = [task.name for task in associated_tasks[:3]]
+                error_msg = f"摄像头关联了{task_count}个AI任务，无法删除。关联任务包括: {', '.join(task_names)}"
+                if len(task_names) < task_count:
+                    error_msg += f"等共{task_count}个任务"
+                return {"success": False, "error": error_msg}
             
             # 删除摄像头
             db.delete(camera)
             db.commit()
             
-            return True
+            return {"success": True}
         except Exception as e:
             db.rollback()
             logger.error(f"删除摄像头失败: {str(e)}", exc_info=True)
-            return False
+            return {"success": False, "error": str(e)}
     
     @staticmethod
     def batch_delete_ai_cameras(camera_ids: List[int], db: Session) -> Dict[str, Any]:
@@ -259,12 +271,27 @@ class CameraDAO:
         """
         success_ids = []
         failed_ids = []
+        failed_reasons = {}
+        
+        # 导入AI任务DAO
+        from app.db.ai_task_dao import AITaskDAO
         
         for camera_id in camera_ids:
             try:
                 camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
                 if not camera:
                     failed_ids.append(camera_id)
+                    failed_reasons[str(camera_id)] = "摄像头不存在"
+                    continue
+                
+                # 检查是否有关联的AI任务
+                associated_tasks = AITaskDAO.get_tasks_by_camera_id(camera_id, db)
+                if associated_tasks:
+                    # 如果存在关联任务，则不删除该摄像头
+                    failed_ids.append(camera_id)
+                    task_count = len(associated_tasks)
+                    task_names = [task.name for task in associated_tasks[:3]]
+                    failed_reasons[str(camera_id)] = f"摄像头关联了{task_count}个AI任务，无法删除。关联任务包括: {', '.join(task_names)}"
                     continue
                 
                 # 删除摄像头
@@ -274,6 +301,7 @@ class CameraDAO:
             except Exception as e:
                 logger.error(f"删除摄像头 {camera_id} 失败: {str(e)}", exc_info=True)
                 failed_ids.append(camera_id)
+                failed_reasons[str(camera_id)] = str(e)
         
         try:
             # 提交事务
@@ -282,12 +310,17 @@ class CameraDAO:
             # 如果提交失败，回滚并将所有ID标记为失败
             db.rollback()
             logger.error(f"批量删除摄像头事务提交失败: {str(e)}", exc_info=True)
+            for camera_id in success_ids:
+                if str(camera_id) not in failed_reasons:
+                    failed_reasons[str(camera_id)] = "数据库事务提交失败"
             failed_ids.extend(success_ids)
             success_ids = []
         
+        # 返回的结果中继续包含failed_reasons，因为服务层需要它来生成错误消息
         return {
             "success_ids": success_ids,
             "failed_ids": failed_ids,
+            "failed_reasons": failed_reasons,
             "total": len(camera_ids),
             "success_count": len(success_ids),
             "failed_count": len(failed_ids)

@@ -55,16 +55,22 @@ def sync_models_from_triton() -> Dict[str, Any]:
                     
                     # 只有当模型就绪时才获取配置和元数据
                     if is_ready:
-                        config = triton_client.get_model_config(model_name)
-                        metadata = triton_client.get_model_metadata(model_name)
+                        # 尝试获取模型配置
+                        model_config = triton_client.get_model_config(model_name)
+                        # 尝试获取模型元数据
+                        model_metadata = triton_client.get_model_metadata(model_name)
+                        # 尝试获取服务器元数据
+                        server_metadata = triton_client.get_server_metadata()
                     else:
-                        config = {}
-                        metadata = None
+                        model_config = {}
+                        model_metadata = {}
+                        server_metadata = {}
                         logger.warning(f"模型 {model_name} 未就绪，无法获取配置和元数据")
                 except Exception as e:
                     logger.error(f"获取模型 {model_name} 配置或元数据失败: {str(e)}")
-                    config = {}
-                    metadata = None
+                    model_config = {}
+                    model_metadata = {}
+                    server_metadata = {}
                     is_ready = False
                 
                 # 构建模型数据
@@ -73,8 +79,9 @@ def sync_models_from_triton() -> Dict[str, Any]:
                     "version": model_info.get("version", "1"),
                     "description": f"从Triton同步的模型: {model_name}",
                     "status": is_ready,  # 根据模型是否就绪设置状态
-                    "config": metadata or {},
-                    "triton_config": config or {}
+                    "model_config": model_config,
+                    "model_metadata": model_metadata,
+                    "server_metadata": server_metadata
                 }
                 
                 # 检查模型是否已存在
@@ -487,10 +494,9 @@ class ModelService:
         # 检查模型是否被技能使用
         is_used, skill_names = ModelService.check_model_used_by_skills(model_id, db)
         if is_used:
-            logger.warning(f"模型正在被以下技能使用，不建议卸载: {', '.join(skill_names)}")
+            logger.warning(f"模型正在被以下技能使用：{', '.join(skill_names)} ，不建议卸载")
+            return {"success": False, "message": "模型正在被以下技能使用：" + ', '.join(skill_names) + "，不建议卸载"}
             # 这里可以选择是否继续卸载
-            return {"success": False, "message": "模型正在被以下技能使用，不建议卸载: " + ', '.join(skill_names)}
-        # 从Triton卸载模型
         try:
             success = triton_client.unload_model(model.name)
             
@@ -521,8 +527,10 @@ class ModelService:
         
         # 获取使用该模型的技能实例
         skill_instances = ModelService.get_model_instances(model.name, db)
-        
-        return skill_instances.get("has_enabled_instances",False),skill_instances.get("skill_classes",[])
+        skill_names = [sc.get("skill_class",{}).get("name_zh", "") for sc in skill_instances.get("skill_classes", [])]
+
+
+        return skill_instances.get("has_enabled_instances",False),skill_names
     
     
     @staticmethod
