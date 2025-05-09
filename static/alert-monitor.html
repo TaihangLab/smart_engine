@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>视频监控报警系统</title>
+    <style>
+        body {
+            font-family: 'PingFang SC', 'Microsoft YaHei', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f2f5;
+            color: #333;
+        }
+        
+        .header {
+            background-color: #262f3e;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 {
+            margin: 0;
+            font-size: 1.5rem;
+        }
+        
+        .status-bar {
+            background-color: #f9f9f9;
+            padding: 10px 20px;
+            border-bottom: 1px solid #ddd;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-wrap: wrap;
+            gap: 10px;
+        }
+        
+        .status-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .connected {
+            color: #52c41a;
+        }
+        
+        .disconnected {
+            color: #f5222d;
+        }
+        
+        .alert-count {
+            background-color: #1890ff;
+            color: white;
+            border-radius: 10px;
+            padding: 2px 8px;
+            font-size: 0.8rem;
+        }
+        
+        .filters {
+            display: flex;
+            gap: 15px;
+            align-items: center;
+        }
+        
+        .filters select {
+            padding: 5px;
+            border-radius: 4px;
+            border: 1px solid #d9d9d9;
+        }
+        
+        .content {
+            padding: 20px;
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+        
+        .alert-container {
+            display: flex;
+            flex-direction: column;
+            gap: 15px;
+        }
+        
+        .alert-item {
+            background-color: white;
+            border-radius: 6px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            overflow: hidden;
+            border-left: 4px solid #ff4d4f;
+            transition: all 0.3s ease;
+        }
+        
+        .alert-item:hover {
+            box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+        }
+        
+        .alert-header {
+            display: flex;
+            justify-content: space-between;
+            padding: 12px 15px;
+            background-color: #fafafa;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        
+        .alert-type {
+            font-weight: bold;
+            color: #ff4d4f;
+        }
+        
+        .alert-time {
+            color: #888;
+            font-size: 0.9rem;
+        }
+        
+        .alert-body {
+            padding: 15px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+        
+        .alert-info {
+            flex: 1;
+            min-width: 250px;
+        }
+        
+        .alert-info p {
+            margin: 5px 0;
+            line-height: 1.5;
+        }
+        
+        .alert-image {
+            flex: 1;
+            min-width: 250px;
+            max-width: 500px;
+        }
+        
+        .alert-image img {
+            width: 100%;
+            border-radius: 4px;
+            object-fit: cover;
+        }
+        
+        .alert-footer {
+            padding: 10px 15px;
+            border-top: 1px solid #f0f0f0;
+            display: flex;
+            justify-content: flex-end;
+            gap: 10px;
+        }
+        
+        .alert-video-link {
+            color: #1890ff;
+            text-decoration: none;
+            padding: 5px 10px;
+        }
+        
+        .alert-video-link:hover {
+            text-decoration: underline;
+        }
+        
+        .alert-dismiss {
+            background-color: #f0f0f0;
+            border: none;
+            border-radius: 4px;
+            padding: 5px 10px;
+            cursor: pointer;
+        }
+        
+        .alert-dismiss:hover {
+            background-color: #e0e0e0;
+        }
+        
+        .no-alerts {
+            text-align: center;
+            padding: 50px;
+            color: #999;
+        }
+        
+        /* 报警类型样式 */
+        .alert-type-no_helmet {
+            border-left-color: #ff4d4f;
+        }
+        
+        .alert-type-intrusion {
+            border-left-color: #ff7a45;
+        }
+        
+        .alert-type-fire {
+            border-left-color: #ff4d4f;
+        }
+        
+        .alert-type-smoke {
+            border-left-color: #ffa940;
+        }
+        
+        .alert-type-loitering {
+            border-left-color: #faad14;
+        }
+        
+        .alert-type-abnormal_behavior {
+            border-left-color: #faad14;
+        }
+        
+        .alert-type-test_alert {
+            border-left-color: #1890ff;
+        }
+        
+        .actions {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 15px;
+        }
+        
+        .test-button {
+            background-color: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 15px;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        
+        .test-button:hover {
+            background-color: #096dd9;
+        }
+        
+        @media screen and (max-width: 768px) {
+            .status-bar {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            
+            .filters {
+                width: 100%;
+                justify-content: space-between;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- 报警音效 -->
+    <audio id="alert-sound" src="/static/sound/alert.mp3" preload="auto"></audio>
+    
+    <!-- 页面头部 -->
+    <header class="header">
+        <h1>视频监控报警系统</h1>
+    </header>
+    
+    <!-- 状态栏 -->
+    <div class="status-bar">
+        <div class="status-item">
+            <span>连接状态:</span>
+            <span id="connection-status" class="disconnected">未连接</span>
+        </div>
+        
+        <div class="status-item">
+            <span>报警数量:</span>
+            <span id="alert-count" class="alert-count">0</span>
+        </div>
+        
+        <div class="filters">
+            <select id="camera-filter">
+                <option value="">所有摄像头</option>
+                <option value="camera_01">摄像头 1</option>
+                <option value="camera_02">摄像头 2</option>
+                <option value="camera_03">摄像头 3</option>
+            </select>
+            
+            <select id="alert-type-filter">
+                <option value="">所有报警类型</option>
+                <option value="no_helmet">未佩戴安全帽</option>
+                <option value="intrusion">入侵警告</option>
+                <option value="fire">火灾警告</option>
+                <option value="smoke">烟雾警告</option>
+                <option value="loitering">徘徊行为</option>
+                <option value="abnormal_behavior">异常行为</option>
+            </select>
+        </div>
+    </div>
+    
+    <!-- 主内容区域 -->
+    <div class="content">
+        <div class="actions">
+            <button id="send-test-alert" class="test-button">发送测试报警</button>
+        </div>
+        
+        <div id="alert-container" class="alert-container">
+            <div class="no-alerts">
+                <p>等待报警数据...</p>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 引入JavaScript -->
+    <script src="/static/js/alert-monitor.js"></script>
+</body>
+</html> 
