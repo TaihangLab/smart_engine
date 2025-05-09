@@ -556,6 +556,7 @@ class CameraService:
         elif camera_type == "push_stream":
             # 推流设备需要push_id, app和stream字段
             if "push_id" not in camera_data_copy or "app" not in camera_data_copy or "stream" not in camera_data_copy:
+                print(camera_data_copy)
                 logger.error("推流设备缺少必要字段push_id、app或stream")
                 return None
         

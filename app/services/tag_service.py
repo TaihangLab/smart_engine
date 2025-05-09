@@ -112,7 +112,7 @@ class TagService:
     @staticmethod
     def delete_tag(tag_id: int, db: Session) -> Dict[str, Any]:
         """
-        删除指定ID的标签
+        删除指定ID的标签，同时解除所有摄像头与该标签的关联
         
         Args:
             tag_id: 标签ID
@@ -126,19 +126,19 @@ class TagService:
         if not tag:
             raise ValueError(f"标签不存在: ID={tag_id}")
         
-        # 检查标签是否关联了摄像头
-        if len(tag.cameras) > 0:
-            # 获取关联摄像头数量
-            camera_count = len(tag.cameras)
-            raise ValueError(f"标签 '{tag.name}' 已关联{camera_count}个摄像头，无法删除。请先移除所有关联摄像头再尝试删除。")
-        
-        # 保存名称用于返回消息
+        # 保存名称和关联的摄像头数量用于返回消息
         tag_name = tag.name
+        camera_count = len(tag.cameras)
         
-        # 删除标签
+        # 删除标签（TagDAO.delete_tag 会处理解除摄像头关联）
         TagDAO.delete_tag(tag_id, db)
+        
+        # 构建返回消息，包含关联摄像头数量信息
+        message = f"成功删除标签 '{tag_name}'"
+        if camera_count > 0:
+            message += f"，并解除了与 {camera_count} 个摄像头的关联"
         
         return {
             "success": True,
-            "message": f"成功删除标签 '{tag_name}'"
+            "message": message
         } 

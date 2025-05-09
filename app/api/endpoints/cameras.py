@@ -11,7 +11,7 @@ from app.db.camera_dao import CameraDAO
 from app.db.tag_dao import TagDAO
 import logging
 import json
-from pydantic import BaseModel, Field, RootModel
+from pydantic import BaseModel, Field, RootModel, validator
 
 logger = logging.getLogger(__name__)
 
@@ -42,31 +42,47 @@ class CameraBaseRequest(BaseModel):
     status: bool = Field(True, description="是否启用", example=True)
     tags: Optional[List[str]] = Field([], description="标签列表", example=["入口", "重要区域"])
 
-class GB28181CameraRequest(CameraBaseRequest):
-    """国标摄像头请求模型"""
-    camera_type: str = Field("gb28181", description="摄像头类型，固定为gb28181", example="gb28181")
-    deviceId: str = Field(..., description="国标设备ID", example="34020000001320000001")
+# 摄像头创建请求模型
+class CameraCreateRequest(BaseModel):
+    """统一的摄像头创建请求模型"""
+    name: str = Field(..., description="摄像头名称", example="前门摄像头")
+    location: Optional[str] = Field(None, description="摄像头位置", example="大楼前门")
+    status: bool = Field(True, description="是否启用", example=True)
+    tags: Optional[List[str]] = Field([], description="标签列表", example=["入口", "重要区域"])
+    camera_type: str = Field(..., description="摄像头类型: gb28181, proxy_stream, push_stream", example="gb28181")
+    
+    # 所有类型可能用到的字段
+    deviceId: Optional[str] = Field(None, description="国标设备ID", example="34020000001320000001")
     channelId: Optional[str] = Field(None, description="国标通道ID", example="34020000001320000001")
-
-
-class ProxyStreamCameraRequest(CameraBaseRequest):
-    """代理流摄像头请求模型"""
-    camera_type: str = Field("proxy_stream", description="摄像头类型，固定为proxy_stream", example="proxy_stream")
-    app: str = Field(..., description="应用名称", example="live")
-    stream: str = Field(..., description="流ID", example="proxy001")
-    proxy_id: str = Field(..., description="代理ID", example="proxy001")
-
-class PushStreamCameraRequest(CameraBaseRequest):
-    """推流摄像头请求模型"""
-    camera_type: str = Field("push_stream", description="摄像头类型，固定为push_stream", example="push_stream")
-    app: str = Field(..., description="应用名称", example="live")
-    stream: str = Field(..., description="流ID", example="push001")
-    push_id: str = Field(..., description="推流ID", example="push001")
-
-# 使用Pydantic v2的RootModel
-class CameraRequest(RootModel):
-    """摄像头请求模型（通用，用于分发到具体类型）"""
-    root: Union[GB28181CameraRequest, ProxyStreamCameraRequest, PushStreamCameraRequest]
+    app: Optional[str] = Field(None, description="应用名称", example="live")
+    stream: Optional[str] = Field(None, description="流ID", example="stream001")
+    proxy_id: Optional[str] = Field(None, description="代理ID", example="proxy001")
+    push_id: Optional[str] = Field(None, description="推流ID", example="push001")
+    
+    # 根据摄像头类型验证必需字段
+    @validator('deviceId')
+    def validate_gb28181(cls, v, values):
+        if values.get('camera_type') == 'gb28181' and not v:
+            raise ValueError('GB28181摄像头必须提供deviceId')
+        return v
+    
+    @validator('app', 'stream')
+    def validate_stream(cls, v, values):
+        if values.get('camera_type') in ['proxy_stream', 'push_stream'] and not v:
+            raise ValueError(f"{values.get('camera_type')}摄像头必须提供app和stream")
+        return v
+    
+    @validator('proxy_id')
+    def validate_proxy_id(cls, v, values):
+        if values.get('camera_type') == 'proxy_stream' and not v:
+            raise ValueError('代理流摄像头必须提供proxy_id')
+        return v
+    
+    @validator('push_id')
+    def validate_push_id(cls, v, values):
+        if values.get('camera_type') == 'push_stream' and not v:
+            raise ValueError('推流摄像头必须提供push_id')
+        return v
 
 class CameraDetailResponse(BaseModel):
     """摄像头详细信息响应模型"""
@@ -141,37 +157,27 @@ class CameraListResponse(BaseModel):
     limit: int = Field(..., description="每页记录数")
     pages: int = Field(..., description="总页数")
 
-# 在已有的模型类下添加更新摄像头的请求模型
-class CameraBaseUpdateRequest(BaseModel):
-    """摄像头基础更新请求模型"""
+# 摄像头更新请求模型
+class CameraUpdateRequest(BaseModel):
+    """统一的摄像头更新请求模型"""
     name: Optional[str] = Field(None, description="摄像头名称", example="前门摄像头(已更新)")
     location: Optional[str] = Field(None, description="摄像头位置", example="大楼前门")
     status: Optional[bool] = Field(None, description="是否启用", example=True)
     tags: Optional[List[str]] = Field(None, description="标签列表", example=["入口", "重要区域", "已更新"])
-
-class GB28181CameraUpdateRequest(CameraBaseUpdateRequest):
-    """国标摄像头更新请求模型"""
-    camera_type: Optional[str] = Field(None, description="摄像头类型，固定为gb28181", example="gb28181")
+    camera_type: Optional[str] = Field(None, description="摄像头类型: gb28181, proxy_stream, push_stream", example="gb28181")
+    
+    # 所有类型可能用到的字段
     deviceId: Optional[str] = Field(None, description="国标设备ID", example="34020000001320000001")
     channelId: Optional[str] = Field(None, description="国标通道ID", example="34020000001320000001")
-
-class ProxyStreamCameraUpdateRequest(CameraBaseUpdateRequest):
-    """代理流摄像头更新请求模型"""
-    camera_type: Optional[str] = Field(None, description="摄像头类型，固定为proxy_stream", example="proxy_stream")
     app: Optional[str] = Field(None, description="应用名称", example="live")
-    stream: Optional[str] = Field(None, description="流ID", example="proxy001")
+    stream: Optional[str] = Field(None, description="流ID", example="stream001")
     proxy_id: Optional[str] = Field(None, description="代理ID", example="proxy001")
-
-class PushStreamCameraUpdateRequest(CameraBaseUpdateRequest):
-    """推流摄像头更新请求模型"""
-    camera_type: Optional[str] = Field(None, description="摄像头类型，固定为push_stream", example="push_stream")
-    app: Optional[str] = Field(None, description="应用名称", example="live")
-    stream: Optional[str] = Field(None, description="流ID", example="push001")
     push_id: Optional[str] = Field(None, description="推流ID", example="push001")
-
-class CameraUpdateRequest(RootModel):
-    """摄像头更新请求模型（通用，用于分发到具体类型）"""
-    root: Union[GB28181CameraUpdateRequest, ProxyStreamCameraUpdateRequest, PushStreamCameraUpdateRequest]
+    
+    class Config:
+        """Pydantic配置"""
+        # 允许额外字段（不在模型定义中的字段）
+        extra = "allow"
 
 # 添加一个用于标签更新的请求模型
 class TagUpdate(BaseModel):
@@ -420,16 +426,16 @@ def get_ai_camera(
 
 @router.post("", response_model=CameraResponse)
 def add_ai_camera(
-    camera_data: Union[GB28181CameraRequest, ProxyStreamCameraRequest, PushStreamCameraRequest], 
+    camera_data: CameraCreateRequest, 
     db: Session = Depends(get_db)
 ):
     """
     添加新摄像头到AI平台
     
     根据摄像头类型不同，需要提供不同的字段：
-    - 对于GB28181设备，需要提供deviceId（国标编号）
-    - 对于代理流设备，需要提供app和stream字段
-    - 对于推流设备，需要提供app和stream字段
+    - 对于GB28181设备，需要提供deviceId（国标编号）和可选的channelId
+    - 对于代理流设备，需要提供app、stream和proxy_id字段
+    - 对于推流设备，需要提供app、stream和push_id字段
     
     Args:
         camera_data: 摄像头数据，包含必要的设备标识信息
@@ -439,12 +445,10 @@ def add_ai_camera(
     """
     try:
         # 将Pydantic模型转换为字典
-        if hasattr(camera_data, "root"):
-            # 如果是RootModel，通过root属性访问内容
-            camera_dict = camera_data.root.model_dump()
-        else:
-            # 普通模型直接调用model_dump()
-            camera_dict = camera_data.model_dump()
+        camera_dict = camera_data.model_dump(exclude_unset=True)
+        
+        # 记录收到的数据，便于调试
+        logger.info(f"添加摄像头请求，类型: {camera_dict.get('camera_type')}, 数据: {camera_dict}")
         
         # 调用服务层创建AI摄像头
         result = CameraService.create_ai_camera(camera_dict, db)
@@ -486,7 +490,7 @@ def add_ai_camera(
 @router.put("/{camera_id}", response_model=CameraResponse)
 def update_ai_camera(
     camera_id: int = Path(..., description="摄像头ID", example=1),
-    camera_data: Union[GB28181CameraUpdateRequest, ProxyStreamCameraUpdateRequest, PushStreamCameraUpdateRequest] = Body(
+    camera_data: CameraUpdateRequest = Body(
         ...,
         description="摄像头更新数据",
         examples={
@@ -530,6 +534,11 @@ def update_ai_camera(
     """
     更新指定AI平台摄像头信息
     
+    支持更新各种类型摄像头的属性：
+    - 国标摄像头：可更新deviceId、channelId等
+    - 代理流摄像头：可更新app、stream、proxy_id等
+    - 推流摄像头：可更新app、stream、push_id等
+    
     Args:
         camera_id: 摄像头ID
         camera_data: 新的摄像头数据，只需要提供需要更新的字段
@@ -538,13 +547,11 @@ def update_ai_camera(
         CameraResponse: 包含更新后的摄像头信息和操作结果
     """
     try:
-        # 将Pydantic模型转换为字典
-        if hasattr(camera_data, "root"):
-            # 如果是RootModel，通过root属性访问内容
-            camera_dict = camera_data.root.model_dump(exclude_unset=True)
-        else:
-            # 普通模型直接调用model_dump()
-            camera_dict = camera_data.model_dump(exclude_unset=True)
+        # 将Pydantic模型转换为字典，只包含设置了的字段
+        camera_dict = camera_data.model_dump(exclude_unset=True)
+        
+        # 记录收到的数据，便于调试
+        logger.info(f"更新摄像头请求，ID: {camera_id}, 数据: {camera_dict}")
         
         # 调用服务层更新摄像头
         result = CameraService.update_ai_camera(camera_id, camera_dict, db)

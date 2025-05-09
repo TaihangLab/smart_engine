@@ -273,7 +273,7 @@ class TagDAO:
     @staticmethod
     def delete_tag(tag_id: int, db: Session) -> bool:
         """
-        删除标签
+        删除标签，同时解除所有摄像头与该标签的关联
         
         Args:
             tag_id: 标签ID
@@ -289,10 +289,21 @@ class TagDAO:
                 logger.warning(f"标签不存在: {tag_id}")
                 return False
             
+            # 获取关联摄像头数量用于日志记录
+            camera_count = len(tag.cameras)
+            
+            # 解除所有摄像头与该标签的关联
+            # 使用list创建一个副本，因为我们会在迭代过程中修改关联关系
+            associated_cameras = list(tag.cameras)
+            for camera in associated_cameras:
+                # 移除标签关联
+                camera.tag_relations.remove(tag)
+                logger.info(f"自动解除摄像头 {camera.id} 与标签 '{tag.name}' 的关联")
+            
             # 删除标签
             db.delete(tag)
             db.commit()
-            logger.info(f"成功删除标签: {tag_id}")
+            logger.info(f"成功删除标签: {tag_id}，同时解除了与 {camera_count} 个摄像头的关联")
             return True
         except Exception as e:
             db.rollback()

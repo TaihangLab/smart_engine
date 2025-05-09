@@ -352,6 +352,9 @@ class CameraDAO:
                     .distinct()
                 query = query.filter(Camera.id.in_(sub_query))
         
+        # 排序：默认按创建时间倒序排列，使新添加的摄像头显示在前面
+        query = query.order_by(Camera.id.desc())
+        
         # 获取总记录数
         total = query.count()
         
