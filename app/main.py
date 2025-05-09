@@ -22,11 +22,26 @@ from app.api import api_router
 from app.services.triton_client import triton_client
 from app.skills.skill_manager import skill_manager
 
+# 导入报警服务相关内容
+import app.services.rabbitmq_client
+import app.services.alert_service
+
 # 配置日志
+log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
 logging.basicConfig(
-    level=logging.INFO,
+    level=log_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler(os.path.join(settings.BASE_DIR, 'app.log'))
+    ]
 )
+
+# 设置特定模块的日志级别
+logging.getLogger('app.services.rabbitmq_client').setLevel(log_level)
+logging.getLogger('app.services.alert_service').setLevel(log_level)
+logging.getLogger('app.api.endpoints.alerts').setLevel(log_level)
+
 logger = logging.getLogger(__name__)
 
 # 创建FastAPI应用
@@ -56,11 +71,18 @@ async def lifespan(app: FastAPI):
     finally:
         db.close()
     
+    # 初始化RabbitMQ和报警服务（这些服务在导入时已自动初始化）
+    logger.info("RabbitMQ和报警服务已初始化")
+    
     yield
     
     # 关闭时执行清理工作
     logger.info("清理应用资源...")
     skill_manager.cleanup_all()
+    
+    # 关闭RabbitMQ连接
+    from app.services.rabbitmq_client import rabbitmq_client
+    rabbitmq_client.close()
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -129,7 +151,8 @@ def serve():
             "app.main:app",
             host="0.0.0.0",
             port=settings.REST_PORT,
-            reload=False
+            reload=False,
+            log_level=settings.LOG_LEVEL.lower()
         )
     except Exception as e:
         logger.error(f"REST API服务器错误: {str(e)}", exc_info=True)

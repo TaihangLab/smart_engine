@@ -1,0 +1,139 @@
+from typing import List, Optional
+from datetime import datetime
+import logging
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
+from sqlalchemy.orm import Session
+import asyncio
+
+from app.db.session import get_db
+from app.models.alert import AlertResponse
+from app.services.alert_service import alert_service, register_sse_client, unregister_sse_client, publish_test_alert
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter()
+
+@router.get("/stream", description="实时报警SSE流")
+async def alert_stream(request: Request):
+    """
+    创建SSE连接，用于实时推送报警信息。
+    这个端点会保持连接打开，并在有新报警时通过SSE协议推送数据。
+    """
+    client_ip = request.client.host if request.client else "unknown"
+    logger.info(f"收到SSE连接请求，客户端IP: {client_ip}")
+    
+    # 注册客户端
+    client_queue = await register_sse_client()
+    logger.info(f"已注册SSE客户端，客户端IP: {client_ip}")
+
+    # 创建响应对象并设置SSE必需的头部
+    response = Response(
+        content_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "Access-Control-Allow-Origin": "*",
+        }
+    )
+    logger.debug(f"已创建SSE响应对象，客户端IP: {client_ip}")
+    
+    # 创建SSE流生成器
+    async def event_generator():
+        message_count = 0
+        try:
+            # 发送初始连接成功消息
+            logger.debug(f"发送SSE连接成功消息，客户端IP: {client_ip}")
+            yield "data: {\"event\": \"connected\"}\n\n"
+            message_count += 1
+            
+            # 等待队列中的消息
+            while True:
+                if await request.is_disconnected():
+                    logger.info(f"检测到SSE客户端断开连接，客户端IP: {client_ip}")
+                    break
+                
+                # 从队列获取消息，设置超时防止阻塞
+                try:
+                    message = await asyncio.wait_for(client_queue.get(), timeout=1.0)
+                    yield message
+                    message_count += 1
+                    logger.debug(f"已向SSE客户端发送消息，客户端IP: {client_ip}, 消息计数: {message_count}")
+                except asyncio.TimeoutError:
+                    # 发送心跳保持连接
+                    yield ": heartbeat\n\n"
+                    logger.debug(f"发送SSE心跳，客户端IP: {client_ip}")
+                    
+        except asyncio.CancelledError:
+            # 连接已取消
+            logger.info(f"SSE连接已取消，客户端IP: {client_ip}")
+            pass
+        finally:
+            # 注销客户端
+            unregister_sse_client(client_queue)
+            logger.info(f"SSE客户端连接已关闭，客户端IP: {client_ip}, 总共发送消息: {message_count}")
+    
+    # 返回SSE响应
+    response.body_iterator = event_generator()
+    return response
+
+@router.get("", response_model=List[AlertResponse])
+def get_alerts(
+    camera_id: Optional[str] = Query(None, description="按摄像头ID过滤"),
+    alert_type: Optional[str] = Query(None, description="按报警类型过滤"),
+    start_time: Optional[datetime] = Query(None, description="开始时间"),
+    end_time: Optional[datetime] = Query(None, description="结束时间"),
+    skip: int = Query(0, description="分页偏移量"),
+    limit: int = Query(100, description="每页记录数"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取报警记录列表，支持多种过滤条件和分页
+    """
+    logger.info(f"收到获取报警列表请求: camera_id={camera_id}, alert_type={alert_type}, "
+               f"start_time={start_time}, end_time={end_time}, skip={skip}, limit={limit}")
+    
+    alerts = alert_service.get_alerts(
+        db, 
+        camera_id=camera_id,
+        alert_type=alert_type,
+        start_time=start_time,
+        end_time=end_time,
+        skip=skip,
+        limit=limit
+    )
+    
+    logger.info(f"获取报警列表成功，返回 {len(alerts)} 条记录")
+    return alerts
+
+@router.get("/{alert_id}", response_model=AlertResponse)
+def get_alert(
+    alert_id: str,
+    db: Session = Depends(get_db)
+):
+    """
+    根据ID获取单个报警记录详情
+    """
+    logger.info(f"收到获取报警详情请求: alert_id={alert_id}")
+    
+    alert = alert_service.get_alert_by_id(db, alert_id)
+    if alert is None:
+        logger.warning(f"报警记录不存在: alert_id={alert_id}")
+        raise HTTPException(status_code=404, detail="报警记录不存在")
+    
+    logger.info(f"获取报警详情成功: alert_id={alert_id}")
+    return alert
+
+@router.post("/test", description="发送测试报警（仅供测试使用）")
+def send_test_alert():
+    """
+    发送测试报警消息到RabbitMQ（仅用于测试）
+    """
+    logger.info("收到发送测试报警请求")
+    
+    success = publish_test_alert()
+    if success:
+        logger.info("测试报警发送成功")
+        return {"message": "测试报警已发送"}
+    else:
+        logger.error("测试报警发送失败")
+        raise HTTPException(status_code=500, detail="发送测试报警失败") 
