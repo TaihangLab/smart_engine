@@ -46,7 +46,8 @@ class GB28181CameraRequest(CameraBaseRequest):
     """国标摄像头请求模型"""
     camera_type: str = Field("gb28181", description="摄像头类型，固定为gb28181", example="gb28181")
     deviceId: str = Field(..., description="国标设备ID", example="34020000001320000001")
-    gb_id: Optional[str] = Field(None, description="国标ID", example="34020000001320000001")
+    channelId: Optional[str] = Field(None, description="国标通道ID", example="34020000001320000001")
+
 
 class ProxyStreamCameraRequest(CameraBaseRequest):
     """代理流摄像头请求模型"""
@@ -81,7 +82,7 @@ class CameraDetailResponse(BaseModel):
     
     # 根据摄像头类型可能存在的字段
     deviceId: Optional[str] = Field(None, description="国标设备ID")
-    gb_id: Optional[str] = Field(None, description="国标ID")
+    channelId: Optional[str] = Field(None, description="国标通道ID")
     app: Optional[str] = Field(None, description="应用名称")
     stream: Optional[str] = Field(None, description="流ID")
     proxy_id: Optional[str] = Field(None, description="代理ID")
@@ -152,7 +153,7 @@ class GB28181CameraUpdateRequest(CameraBaseUpdateRequest):
     """国标摄像头更新请求模型"""
     camera_type: Optional[str] = Field(None, description="摄像头类型，固定为gb28181", example="gb28181")
     deviceId: Optional[str] = Field(None, description="国标设备ID", example="34020000001320000001")
-    gb_id: Optional[str] = Field(None, description="国标ID", example="34020000001320000001")
+    channelId: Optional[str] = Field(None, description="国标通道ID", example="34020000001320000001")
 
 class ProxyStreamCameraUpdateRequest(CameraBaseUpdateRequest):
     """代理流摄像头更新请求模型"""
@@ -452,7 +453,7 @@ def add_ai_camera(
             # 根据摄像头类型提供不同的错误信息
             camera_type = camera_dict.get("camera_type", "")
             if camera_type == "gb28181":
-                error_detail = f"国标摄像头已存在: deviceId={camera_dict.get('deviceId')}"
+                error_detail = f"国标摄像头已存在: deviceId={camera_dict.get('deviceId')}，channelId={camera_dict.get('channelId')}"
             elif camera_type == "proxy_stream":
                 error_detail = f"代理流摄像头已存在: app={camera_dict.get('app')}, stream={camera_dict.get('stream')}"
             elif camera_type == "push_stream":
@@ -496,7 +497,8 @@ def update_ai_camera(
                     "name": "前门摄像头(已更新)",
                     "location": "大楼前门",
                     "tags": ["入口", "重要区域", "已更新"],
-                    "deviceId": "34020000001320000001"
+                    "deviceId": "34020000001320000001",
+                    "channelId": "34020000001320000001"
                 }
             },
             "proxy_stream": {

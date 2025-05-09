@@ -105,8 +105,8 @@ class CameraDAO:
                 # 对于国标设备，保存设备标识信息
                 if 'deviceId' in camera_data:
                     meta_data['deviceId'] = camera_data['deviceId']
-                if 'gb_id' in camera_data:
-                    meta_data['gb_id'] = camera_data['gb_id']
+                if 'channelId' in camera_data:
+                    meta_data['channelId'] = camera_data['channelId']
 
             elif camera_type == 'proxy_stream':
                 # 代理流设备

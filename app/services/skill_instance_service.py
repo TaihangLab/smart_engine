@@ -294,8 +294,8 @@ class SkillInstanceService:
                     if camera.camera_type == "gb28181":
                         if "deviceId" in meta_data:
                             device_info["deviceId"] = meta_data.get("deviceId")
-                        if "gb_id" in meta_data:
-                            device_info["gb_id"] = meta_data.get("gb_id")
+                        if "channelId" in meta_data:
+                            device_info["channelId"] = meta_data.get("channelId")
                     elif camera.camera_type == "proxy_stream":
                         device_info["app"] = meta_data.get("app")
                         device_info["stream"] = meta_data.get("stream")

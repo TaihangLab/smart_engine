@@ -109,6 +109,7 @@ class SkillClassService:
         Args:
             skill_class_id: 技能类ID
             db: 数据库会话
+            is_detail: 是否返回详细信息，默认True
             
         Returns:
             技能类字典或None
@@ -180,6 +181,13 @@ class SkillClassService:
             }
         else:
             #返回简要信息
+            # 只保留default_config中的params字段
+            default_config = skill_class.default_config
+            params_only_config = None
+            
+            if default_config and isinstance(default_config, dict) and 'params' in default_config:
+                params_only_config = {'params': default_config['params']}
+            
             skill_class_dict = {
                 "id": skill_class.id,
                 "name": skill_class.name,
@@ -188,7 +196,7 @@ class SkillClassService:
                 "version": skill_class.version,
                 "description": skill_class.description,
                 "status": skill_class.status,
-                "default_config": skill_class.default_config,
+                "default_config": params_only_config,
             }
         
         return skill_class_dict
@@ -243,8 +251,8 @@ class SkillClassService:
                     if camera.camera_type == "gb28181":
                         if "deviceId" in meta_data:
                             device_info["deviceId"] = meta_data.get("deviceId")
-                        if "gb_id" in meta_data:
-                            device_info["gb_id"] = meta_data.get("gb_id")
+                        if "channelId" in meta_data:
+                            device_info["channelId"] = meta_data.get("channelId")
                     elif camera.camera_type == "proxy_stream":
                         device_info["app"] = meta_data.get("app")
                         device_info["stream"] = meta_data.get("stream")

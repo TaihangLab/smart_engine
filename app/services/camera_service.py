@@ -104,8 +104,8 @@ class CameraService:
                     if db_camera.camera_type == "gb28181":
                         if "deviceId" in meta_data:
                             camera["deviceId"] = meta_data.get("deviceId")
-                        if "gb_id" in meta_data:
-                            camera["gb_id"] = meta_data.get("gb_id")
+                        if "channelId" in meta_data:
+                            camera["channelId"] = meta_data.get("channelId")
                     elif db_camera.camera_type == "proxy_stream":
                         camera["app"] = meta_data.get("app")
                         camera["stream"] = meta_data.get("stream")
@@ -166,6 +166,7 @@ class CameraService:
                 # 创建摄像头信息对象
                 camera = {
                     "deviceId": device.get("deviceId"),
+                    "channelId": device.get("channelId", device.get("deviceId")), # 如果channelId不存在，则使用deviceId
                     "name": device.get("name", "Unknown Camera"),
                     "manufacturer": device.get("manufacturer", ""),
                     "model": device.get("model", ""),
@@ -369,8 +370,8 @@ class CameraService:
                 if camera.camera_type == "gb28181":
                     if "deviceId" in meta_data:
                         result["deviceId"] = meta_data.get("deviceId")
-                    if "gb_id" in meta_data:
-                        result["gb_id"] = meta_data.get("gb_id")
+                    if "channelId" in meta_data:
+                        result["channelId"] = meta_data.get("channelId")
                 elif camera.camera_type == "proxy_stream":
                     result["app"] = meta_data.get("app")
                     result["stream"] = meta_data.get("stream")
@@ -542,8 +543,8 @@ class CameraService:
         # 根据摄像头类型处理必要的字段
         if camera_type == "gb28181":
             # 国标设备
-            if "deviceId"  not in camera_data_copy or "gb_id" not in camera_data_copy:
-                logger.error("国标设备缺少必要字段deviceId或gb_id")
+            if "deviceId"  not in camera_data_copy or "channelId" not in camera_data_copy:
+                logger.error("国标设备缺少必要字段deviceId或channelId")
                 return None
                 
         elif camera_type == "proxy_stream":
@@ -560,7 +561,7 @@ class CameraService:
         
         # 根据设备类型记录适当的标识符
         if camera_type == "gb28181":
-            logger.info(f"添加摄像头: camera_type={camera_type}, deviceId={camera_data_copy.get('deviceId')}")
+            logger.info(f"添加摄像头: camera_type={camera_type}, deviceId={camera_data_copy.get('deviceId')}, channelId={camera_data_copy.get('channelId')}")
         elif camera_type == "proxy_stream":
             logger.info(f"添加摄像头: camera_type={camera_type}, proxy_id={camera_data_copy.get('proxy_id')}")
         elif camera_type == "push_stream":
@@ -605,8 +606,8 @@ class CameraService:
         if updated_camera.camera_type == "gb28181":
             if "deviceId" in meta_data:
                 result["deviceId"] = meta_data.get("deviceId")
-            if "gb_id" in meta_data:
-                result["gb_id"] = meta_data.get("gb_id")
+            if "channelId" in meta_data:
+                result["channelId"] = meta_data.get("channelId")
         elif updated_camera.camera_type == "proxy_stream":
             result["app"] = meta_data.get("app")
             result["stream"] = meta_data.get("stream")
@@ -683,8 +684,8 @@ class CameraService:
         if updated_camera.camera_type == "gb28181":
             if "deviceId" in meta_data:
                 result["deviceId"] = meta_data.get("deviceId")
-            if "gb_id" in meta_data:
-                result["gb_id"] = meta_data.get("gb_id")
+            if "channelId" in meta_data:
+                result["channelId"] = meta_data.get("channelId")
         elif updated_camera.camera_type == "proxy_stream":
             result["app"] = meta_data.get("app")
             result["stream"] = meta_data.get("stream")
@@ -766,7 +767,7 @@ class CameraService:
                 location="前门入口",
                 status=False,
                 camera_type="gb28181", 
-                meta_data=json.dumps({"deviceId": "example_device_001"})
+                meta_data=json.dumps({"deviceId": "example_device_001", "channelId": "example_channel_001"})
             ),
             CameraModel(
                 camera_uuid="cam-example-002",
@@ -774,7 +775,7 @@ class CameraService:
                 location="后门入口",
                 status=False,
                 camera_type="gb28181",
-                meta_data=json.dumps({"deviceId": "example_device_002"})
+                meta_data=json.dumps({"deviceId": "example_device_002", "channelId": "example_channel_002"})
             ),
             CameraModel(
                 camera_uuid="cam-example-003",
@@ -782,7 +783,7 @@ class CameraService:
                 location="侧门入口",
                 status=False,
                 camera_type="gb28181",
-                meta_data=json.dumps({"deviceId": "example_device_003"})
+                meta_data=json.dumps({"deviceId": "example_device_003", "channelId": "example_channel_003"})
             )
         ]
         

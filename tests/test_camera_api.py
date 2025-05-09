@@ -30,7 +30,8 @@ TEST_CAMERA = {
     "running_period": {"enabled": True, "periods": [{"start": "08:00", "end": "18:00"}]},
     "electronic_fence": {"enabled": False, "points": []},
     "camera_type": "gb28181" , # 添加摄像头类型
-    "deviceId": "test_device_004" # 国标设备专有ID
+    "deviceId": "test_device_004", # 国标设备专有ID
+    "channelId": "34020000001320000001" # 国标通道ID
 }
 
 def print_response(resp: requests.Response, message: str = "") -> None:
@@ -60,7 +61,7 @@ def test_create_ai_camera() -> Optional[Dict[str, Any]]:
             all_cameras = test_list_ai_cameras()
             if all_cameras and "cameras" in all_cameras:
                 for camera in all_cameras["cameras"]:
-                    if camera.get("deviceId") == TEST_CAMERA["deviceId"]:
+                    if camera.get("deviceId") == TEST_CAMERA["deviceId"] and camera.get("channelId") == TEST_CAMERA["channelId"]:
                         logger.info(f"找到已存在的摄像头，ID: {camera.get('id')}")
                         return camera
         
@@ -106,12 +107,14 @@ def test_get_ai_camera(camera_id: int) -> Optional[Dict[str, Any]]:
         # 打印基本字段信息
         camera_type = camera_data.get("camera_type", "unknown")
         deviceId = camera_data.get("deviceId", "unknown")
-        logger.info(f"摄像头类型: {camera_type}, 设备ID: {deviceId}")
+        channelId = camera_data.get("channelId", "unknown")
+        logger.info(f"摄像头类型: {camera_type}, 设备ID: {deviceId}, 通道ID: {channelId}")
         
         # 检查元数据
         if camera_type == "gb28181":
             deviceId = camera_data.get("deviceId", "unknown")
-            logger.info(f"国标设备ID: {deviceId}")
+            channelId = camera_data.get("channelId", "unknown")
+            logger.info(f"国标设备ID: {deviceId}, 通道ID: {channelId}")
         elif camera_type == "proxy_stream":
             app = camera_data.get("app", "unknown")
             stream = camera_data.get("stream", "unknown")
@@ -376,7 +379,8 @@ def test_end_to_end():
     logger.info("步骤2.4: 测试获取单个国标设备")
     if gb_list_result.get("devices") and len(gb_list_result.get("devices")) > 0:
         device_id = gb_list_result.get("devices")[0].get("deviceId")
-        logger.info(f"选择国标设备进行测试: {device_id}")
+        channelId = gb_list_result.get("devices")[0].get("channelId")
+        logger.info(f"选择国标设备进行测试: {device_id}, 通道ID: {channelId}")
         gb_device = test_get_gb28181_device(device_id)
         if not gb_device:
             logger.warning(f"获取单个国标设备失败: {device_id}")
@@ -453,15 +457,15 @@ if __name__ == "__main__":
     test_create_ai_camera()
     test_create_ai_camera()
     
-    # if len(sys.argv) > 1 and sys.argv[1] == "--cleanup":
-    #     # 查找并删除测试摄像头
-    #     cameras = test_list_ai_cameras()
-    #     if cameras and "cameras" in cameras:
-    #         for camera in cameras["cameras"]:
-    #             if camera.get("deviceId") == TEST_CAMERA["deviceId"]:
-    #                 camera_id = int(camera.get("id"))
-    #                 logger.info(f"清理：删除测试摄像头 ID: {camera_id}")
-    #                 test_delete_ai_camera(camera_id)
-    # else:
-    #     # 运行端到端测试
-    #     test_end_to_end() 
+    if len(sys.argv) > 1 and sys.argv[1] == "--cleanup":
+        # 查找并删除测试摄像头
+        cameras = test_list_ai_cameras()
+        if cameras and "cameras" in cameras:
+            for camera in cameras["cameras"]:
+                if camera.get("deviceId") == TEST_CAMERA["deviceId"] and camera.get("channelId") == TEST_CAMERA["channelId"]:
+                    camera_id = int(camera.get("id"))
+                    logger.info(f"清理：删除测试摄像头 ID: {camera_id}")
+                    test_delete_ai_camera(camera_id)
+    else:
+        # 运行端到端测试
+        test_end_to_end() 
