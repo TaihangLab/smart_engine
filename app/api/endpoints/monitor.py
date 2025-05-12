@@ -8,6 +8,7 @@ from pydantic import BaseModel
 from app.db.session import get_db
 from app.models.alert import AlertResponse
 from app.services.alert_service import alert_service
+from app.services.wvp_client import wvp_client
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +27,6 @@ class PreAlertInfo(BaseModel):
 # 扩展的报警响应模型
 class AlertDetailResponse(AlertResponse):
     pre_alert_info: Optional[PreAlertInfo] = None
-
 @router.get("/alerts/{alert_id}", response_model=AlertDetailResponse)
 def get_alert_detail(
     alert_id: str = Path(..., description="预警ID"),
@@ -60,4 +60,31 @@ def get_alert_detail(
     )
     
     logger.info(f"获取预警详情成功: alert_id={alert_id}")
-    return result 
+    return result
+
+@router.get("/live/{channel_id}")
+def get_channel_live_stream(
+    channel_id: int = Path(..., description="通道ID（数据库ID，非国标编号）")
+):
+    """
+    获取通道的实时视频流地址
+    
+    参数:
+    - channel_id: 通道ID，这是数据库中的ID，非国标编号
+    
+    返回:
+    - 原始的StreamContent对象，包含各种流地址信息
+    - 如果获取失败，则返回404错误
+    """
+    logger.info(f"收到获取通道实时视频流请求: channel_id={channel_id}")
+    
+    # 调用WVP客户端获取流地址
+    stream_info = wvp_client.play_channel(channel_id)
+    
+    if not stream_info:
+        logger.warning(f"无法获取通道的实时流: channel_id={channel_id}")
+        raise HTTPException(status_code=404, detail="无法获取通道的实时流，通道可能离线或不存在")
+    
+    logger.info(f"成功获取通道实时流地址: channel_id={channel_id}, stream_id={stream_info.get('streamId', 'unknown')}")
+    # 直接返回原始结果，不进行重组
+    return stream_info 

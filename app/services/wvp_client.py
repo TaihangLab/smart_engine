@@ -965,10 +965,28 @@ class WVPClient:
         播放通道
         
         Args:
-            channel_id: 通道ID
+            channel_id: 通道ID (数据库ID，非国标编号)
             
         Returns:
-            Optional[Dict[str, Any]]: 播放信息，获取失败时返回None
+            Optional[Dict[str, Any]]: 返回StreamContent对象，包含流地址信息，获取失败时返回None
+                返回数据结构示例:
+                {
+                    "streamId": "stream_id",
+                    "app": "rtp",
+                    "mediaServerId": "media_server_1",
+                    "flv": "http://server/live/stream_id.flv",
+                    "ws_flv": "ws://server/live/stream_id.flv",
+                    "rtmp": "rtmp://server/live/stream_id",
+                    "rtsp": "rtsp://server/live/stream_id",
+                    "hls": "http://server/live/stream_id/hls.m3u8",
+                    "https_hls": "https://server/live/stream_id/hls.m3u8",
+                    "ws_hls": "ws://server/live/stream_id/hls.m3u8",
+                    "wss_hls": "wss://server/live/stream_id/hls.m3u8",
+                    "fmp4": "http://server/live/stream_id/fmp4.mp4",
+                    "https_fmp4": "https://server/live/stream_id/fmp4.mp4",
+                    "ws_fmp4": "ws://server/live/stream_id/fmp4.mp4",
+                    "wss_fmp4": "wss://server/live/stream_id/fmp4.mp4"
+                }
         """
         url = f"{self.base_url}/api/common/channel/play"
         try:
@@ -976,12 +994,13 @@ class WVPClient:
                 "channelId": channel_id
             }
             
+            logger.info(f"准备播放通道, 通道ID: {channel_id}")
             response = self.session.get(url, params=params)
-            logger.info(f"Play channel response status: {response.status_code}")
+            logger.info(f"播放通道响应状态: {response.status_code}")
             
             if response.status_code != 200:
-                logger.error(f"Play channel failed with status code {response.status_code}")
-                logger.error(f"Response content: {response.text}")
+                logger.error(f"播放通道失败，状态码: {response.status_code}")
+                logger.error(f"响应内容: {response.text}")
                 return None
             
             try:
@@ -989,12 +1008,21 @@ class WVPClient:
                 if data.get("code") != 0:
                     logger.warning(f"播放通道失败: {data.get('msg')}")
                     return None
-                return data.get("data")
+                
+                # 输出流信息用于调试
+                stream_content = data.get("data")
+                if stream_content:
+                    logger.info(f"成功获取流信息，流ID: {stream_content.get('streamId')}")
+                    logger.debug(f"流地址信息: {stream_content}")
+                else:
+                    logger.warning("播放通道成功但未返回流信息")
+                
+                return stream_content
             except ValueError as e:
-                logger.error(f"Response is not valid JSON: {response.text}, {str(e)}")
+                logger.error(f"响应不是有效的JSON格式: {response.text}, 错误: {str(e)}")
                 return None
         except Exception as e:
-            logger.error(f"播放通道异常: {str(e)}")
+            logger.error(f"播放通道过程中发生异常: {str(e)}")
             return None
 
 # 创建全局WVP客户端实例
