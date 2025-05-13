@@ -920,7 +920,7 @@ class WVPClient:
             return {}
 
     @auto_relogin
-    def get_channel_one(self, device_id: str, channel_device_id: str) -> dict:
+    def get_gb28181_device_channel_one(self, device_id: str, channel_device_id: str) -> dict:
         """
         获取单个通道详情
         
@@ -962,13 +962,13 @@ class WVPClient:
     @auto_relogin
     def play_channel(self, channel_id: int) -> Optional[Dict[str, Any]]:
         """
-        播放通道
+        获取通道的播放地址
         
         Args:
             channel_id: 通道ID
             
         Returns:
-            Optional[Dict[str, Any]]: 播放信息，获取失败时返回None
+            Optional[Dict[str, Any]]: 播放信息，包含各种格式的流地址(flv/hls/rtmp/rtsp等)，获取失败时返回None
         """
         url = f"{self.base_url}/api/common/channel/play"
         try:
@@ -987,15 +987,186 @@ class WVPClient:
             try:
                 data = response.json()
                 if data.get("code") != 0:
-                    logger.warning(f"播放通道失败: {data.get('msg')}")
+                    logger.warning(f"获取通道播放地址失败: {data.get('msg')}")
                     return None
                 return data.get("data")
             except ValueError as e:
                 logger.error(f"Response is not valid JSON: {response.text}, {str(e)}")
                 return None
         except Exception as e:
-            logger.error(f"播放通道异常: {str(e)}")
+            logger.error(f"获取通道播放地址异常: {str(e)}")
             return None
+
+    def get_universal_channel_id(self, device_type: str, **kwargs) -> Optional[int]:
+        """
+        获取不同类型设备的通用channelId
+        
+        Args:
+            device_type: 设备类型，可选值: 'gb28181', 'push_stream', 'proxy_stream'
+            **kwargs: 设备特定参数
+                - 对于国标设备(gb28181): device_id, channel_id 参数必须
+                - 对于推流设备(push_stream): app, stream 参数必须
+                - 对于代理流设备(proxy_stream): app, stream 参数必须
+                
+        Returns:
+            Optional[int]: 通用channelId，获取失败时返回None
+        """
+        try:
+            if device_type == "gb28181":
+                # 验证必需参数
+                if 'device_id' not in kwargs or 'channel_id' not in kwargs:
+                    logger.error("国标设备获取通用channelId需要device_id和channel_id参数")
+                    return None
+                    
+                device_id = kwargs.get('device_id')
+                channel_id = kwargs.get('channel_id')
+                
+                # 获取国标设备通道信息
+                channel_info = self.get_gb28181_device_channel_one(device_id, channel_id)
+                if not channel_info:
+                    logger.warning(f"未找到国标设备通道: device_id={device_id}, channel_id={channel_id}")
+                    return None
+                    
+                # 从通道信息中提取通用channelId
+                return channel_info.get('id')
+                
+            elif device_type == "push_stream":
+                # 验证必需参数
+                if 'app' not in kwargs or 'stream' not in kwargs:
+                    logger.error("推流设备获取通用channelId需要app和stream参数")
+                    return None
+                    
+                app = kwargs.get('app')
+                stream = kwargs.get('stream')
+                
+                # 获取推流设备信息
+                push_info = self.get_push_one(app, stream)
+                if not push_info:
+                    logger.warning(f"未找到推流设备: app={app}, stream={stream}")
+                    return None
+                    
+                # 从推流设备信息中提取gbId作为通用channelId
+                return push_info.get('gbId')
+                
+            elif device_type == "proxy_stream":
+                # 验证必需参数
+                if 'app' not in kwargs or 'stream' not in kwargs:
+                    logger.error("代理流设备获取通用channelId需要app和stream参数")
+                    return None
+                    
+                app = kwargs.get('app')
+                stream = kwargs.get('stream')
+                
+                # 获取代理流设备信息
+                proxy_info = self.get_proxy_one(app, stream)
+                if not proxy_info:
+                    logger.warning(f"未找到代理流设备: app={app}, stream={stream}")
+                    return None
+                    
+                # 从代理流设备信息中提取gbId作为通用channelId
+                return proxy_info.get('gbId')
+                
+            else:
+                logger.error(f"不支持的设备类型: {device_type}")
+                return None
+                
+        except Exception as e:
+            logger.error(f"获取通用channelId异常: {str(e)}")
+            return None
+
+    @auto_relogin
+    def play_universal_channel(self, device_type: str, **kwargs) -> Optional[Dict[str, Any]]:
+        """
+        使用通用方式获取任意类型设备通道的播放地址
+        
+        Args:
+            device_type: 设备类型，可选值: 'gb28181', 'push_stream', 'proxy_stream'
+            **kwargs: 设备特定参数
+                - 对于国标设备(gb28181): device_id, channel_id 参数必须
+                - 对于推流设备(push_stream): app, stream 参数必须
+                - 对于代理流设备(proxy_stream): app, stream 参数必须
+                
+        Returns:
+            Optional[Dict[str, Any]]: 播放信息，包含各种格式的流地址(flv/hls/rtmp/rtsp等)，获取失败时返回None
+        """
+        try:
+            # 获取通用channelId
+            channel_id = self.get_universal_channel_id(device_type, **kwargs)
+            if channel_id is None:
+                logger.error(f"获取通用channelId失败，无法获取{device_type}类型通道的播放地址")
+                return None
+                
+            # 使用通用channelId获取播放地址
+            logger.info(f"使用通用channelId获取播放地址: {channel_id}, 设备类型: {device_type}")
+            return self.play_channel(channel_id)
+            
+        except Exception as e:
+            logger.error(f"获取通用通道播放地址异常: {str(e)}")
+            return None
+
+    @auto_relogin
+    def get_channel_list(self, page: int = 1, count: int = 100, query: str = "", 
+                       online: Optional[bool] = None, has_record_plan: Optional[bool] = None,
+                       channel_type: Optional[int] = None) -> Dict[str, Any]:
+        """
+        获取通道列表
+        
+        Args:
+            page: 当前页，默认为1
+            count: 每页查询数量，默认为100
+            query: 查询内容，用于搜索过滤，默认为空字符串
+            online: 是否在线，可选参数
+            has_record_plan: 是否已设置录制计划，可选参数
+            channel_type: 通道类型，可选值：1(国标设备)、2(推流设备)、3(拉流代理)，可选参数
+            
+        Returns:
+            Dict[str, Any]: 通道列表分页数据，包含total和list字段
+        """
+        url = f"{self.base_url}/api/common/channel/list"
+        try:
+            logger.info(f"获取通道列表: page={page}, count={count}, query={query}")
+            
+            params = {
+                "page": page,
+                "count": count,
+                "query": query
+            }
+            
+            # 添加可选参数
+            if online is not None:
+                params["online"] = online
+                
+            if has_record_plan is not None:
+                params["hasRecordPlan"] = has_record_plan
+                
+            if channel_type is not None:
+                params["channelType"] = channel_type
+            
+            response = self.session.get(url, params=params)
+            logger.info(f"获取通道列表响应状态: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"获取通道列表失败，状态码: {response.status_code}")
+                logger.error(f"响应内容: {response.text}")
+                response.raise_for_status()
+            
+            try:
+                data = response.json()
+                logger.info(f"获取通道列表响应码: {data.get('code')}")
+                
+                if data.get("code") != 0:
+                    logger.error(f"获取通道列表失败: {data.get('msg')}")
+                    return {"total": 0, "list": []}
+                    
+                return data.get("data", {"total": 0, "list": []})
+            except ValueError as e:
+                logger.error(f"响应不是有效的JSON: {response.text}, {str(e)}")
+                return {"total": 0, "list": []}
+        except Exception as e:
+            logger.error(f"获取通道列表异常: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"响应内容: {e.response.text}")
+            return {"total": 0, "list": []}
 
 # 创建全局WVP客户端实例
 wvp_client = WVPClient() 
