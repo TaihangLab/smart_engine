@@ -24,12 +24,12 @@ from tests.test_camera_api import (
 )
 
 # 导出技能类API测试函数
-from tests.test_skill_classes_api import (
-    test_get_skill_classes,
-    test_get_skill_class,
-    test_create_skill_class,
-    test_update_skill_class,
-    test_add_model_to_skill_class,
-    test_remove_model_from_skill_class,
-    test_delete_skill_class
-) 
+# from tests.test_skill_classes_api import (
+#     test_get_skill_classes,
+#     test_get_skill_class,
+#     test_create_skill_class,
+#     test_update_skill_class,
+#     test_add_model_to_skill_class,
+#     test_remove_model_from_skill_class,
+#     test_delete_skill_class
+# )

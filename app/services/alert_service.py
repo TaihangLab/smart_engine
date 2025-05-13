@@ -208,6 +208,82 @@ class AlertService:
         else:
             logger.warning(f"未找到报警记录: alert_id={alert_id}")
         return result
+    
+    def get_alerts_count(
+        self, 
+        db: Session, 
+        camera_id: Optional[str] = None,
+        alert_type: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> int:
+        """获取符合条件的报警记录数量"""
+        logger.info(f"查询报警记录数量: camera_id={camera_id}, alert_type={alert_type}, "
+                   f"start_time={start_time}, end_time={end_time}")
+        
+        query = db.query(Alert)
+        
+        # 应用过滤条件
+        if camera_id:
+            query = query.filter(Alert.camera_id == camera_id)
+        
+        if alert_type:
+            query = query.filter(Alert.alert_type == alert_type)
+        
+        if start_time:
+            query = query.filter(Alert.timestamp >= start_time)
+        
+        if end_time:
+            query = query.filter(Alert.timestamp <= end_time)
+        
+        # 使用count()获取记录数
+        count = query.count()
+        
+        logger.info(f"查询报警记录数量结果: 共 {count} 条记录")
+        return count
+    
+    def get_pre_alert_info(self, db: Session, alert: Alert) -> Dict[str, Any]:
+        """获取报警的前置预警信息"""
+        logger.info(f"获取前置预警信息: alert_id={alert.alert_id}")
+        
+        # 获取同一摄像头在当前报警之前的报警记录(最多3条)
+        previous_alerts = (db.query(Alert)
+                          .filter(Alert.camera_id == alert.camera_id)
+                          .filter(Alert.timestamp < alert.timestamp)
+                          .order_by(Alert.timestamp.desc())
+                          .limit(3)
+                          .all())
+        
+        # 构建响应数据
+        previous_alert_list = [
+            {
+                "alert_id": prev.alert_id,
+                "alert_type": prev.alert_type,
+                "timestamp": prev.timestamp
+            }
+            for prev in previous_alerts
+        ]
+        
+        # 生成上下文信息（这里可以根据具体业务逻辑生成更复杂的上下文）
+        context = None
+        if alert.alert_type == "no_helmet":
+            context = "Person detected without helmet in restricted area."
+        elif alert.alert_type == "intrusion":
+            context = "Unauthorized access detected in restricted zone."
+        elif alert.alert_type == "unusual_activity":
+            context = "Unusual behavior pattern detected."
+        elif alert.alert_type == "test_alert":
+            context = "This is a test alert for system verification."
+        else:
+            context = f"Alert of type '{alert.alert_type}' detected."
+        
+        pre_alert_info = {
+            "previous_alerts": previous_alert_list,
+            "context": context
+        }
+        
+        logger.info(f"前置预警信息获取成功: alert_id={alert.alert_id}, 包含 {len(previous_alert_list)} 条历史记录")
+        return pre_alert_info
 
 # 创建全局AlertService实例
 alert_service = AlertService()

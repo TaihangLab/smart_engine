@@ -62,4 +62,5 @@ class AlertResponse(BaseModel):
     minio_video_url: str
     
     class Config:
-        orm_mode = True 
+        from_attributes = True
+        orm_mode = True  # 保留向后兼容 

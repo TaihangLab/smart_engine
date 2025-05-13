@@ -103,6 +103,10 @@ app.add_middleware(
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# 添加特殊路由，确保/api/ai/monitor/alerts/{alert_id}路径可访问
+from app.api.endpoints.monitor import router as monitor_router
+app.include_router(monitor_router, prefix="/api/ai/monitor")
+
 # 配置静态文件
 try:
     app.mount("/static", StaticFiles(directory="static"), name="static")
