@@ -209,6 +209,39 @@ class AlertService:
             logger.warning(f"未找到报警记录: alert_id={alert_id}")
         return result
     
+    def get_alerts_count(
+        self, 
+        db: Session, 
+        camera_id: Optional[str] = None,
+        alert_type: Optional[str] = None,
+        start_time: Optional[datetime] = None,
+        end_time: Optional[datetime] = None
+    ) -> int:
+        """获取符合条件的报警记录数量"""
+        logger.info(f"查询报警记录数量: camera_id={camera_id}, alert_type={alert_type}, "
+                   f"start_time={start_time}, end_time={end_time}")
+        
+        query = db.query(Alert)
+        
+        # 应用过滤条件
+        if camera_id:
+            query = query.filter(Alert.camera_id == camera_id)
+        
+        if alert_type:
+            query = query.filter(Alert.alert_type == alert_type)
+        
+        if start_time:
+            query = query.filter(Alert.timestamp >= start_time)
+        
+        if end_time:
+            query = query.filter(Alert.timestamp <= end_time)
+        
+        # 使用count()获取记录数
+        count = query.count()
+        
+        logger.info(f"查询报警记录数量结果: 共 {count} 条记录")
+        return count
+    
     def get_pre_alert_info(self, db: Session, alert: Alert) -> Dict[str, Any]:
         """获取报警的前置预警信息"""
         logger.info(f"获取前置预警信息: alert_id={alert.alert_id}")

@@ -1,9 +1,10 @@
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
 from sqlalchemy.orm import Session
 import asyncio
+import math
 
 from app.db.session import get_db
 from app.models.alert import AlertResponse
@@ -76,34 +77,60 @@ async def alert_stream(request: Request):
     response.body_iterator = event_generator()
     return response
 
-@router.get("", response_model=List[AlertResponse])
-def get_alerts(
+@router.get("/real-time", response_model=Dict[str, Any])
+def get_realtime_alerts(
+    tag: Optional[str] = Query(None, description="按标签过滤"),
     camera_id: Optional[str] = Query(None, description="按摄像头ID过滤"),
     alert_type: Optional[str] = Query(None, description="按报警类型过滤"),
-    start_time: Optional[datetime] = Query(None, description="开始时间"),
-    end_time: Optional[datetime] = Query(None, description="结束时间"),
-    skip: int = Query(0, description="分页偏移量"),
-    limit: int = Query(100, description="每页记录数"),
+    page: int = Query(1, description="页码"),
+    limit: int = Query(10, description="每页记录数"),
     db: Session = Depends(get_db)
 ):
     """
-    获取报警记录列表，支持多种过滤条件和分页
+    获取实时预警列表，支持分页和过滤
     """
-    logger.info(f"收到获取报警列表请求: camera_id={camera_id}, alert_type={alert_type}, "
-               f"start_time={start_time}, end_time={end_time}, skip={skip}, limit={limit}")
+    logger.info(f"收到获取实时预警列表请求: tag={tag}, camera_id={camera_id}, alert_type={alert_type}, "
+               f"page={page}, limit={limit}")
     
+    # 计算分页跳过的记录数
+    skip = (page - 1) * limit
+    
+    # 获取报警列表
     alerts = alert_service.get_alerts(
         db, 
         camera_id=camera_id,
         alert_type=alert_type,
-        start_time=start_time,
-        end_time=end_time,
         skip=skip,
         limit=limit
     )
     
-    logger.info(f"获取报警列表成功，返回 {len(alerts)} 条记录")
-    return alerts
+    # 如果提供了标签过滤，过滤包含该标签的记录
+    if tag:
+        alerts = [alert for alert in alerts if tag in alert.tags]
+    
+    # 获取总记录数（简化处理，实际应用中可能需要单独查询）
+    total = len(alerts) if tag else alert_service.get_alerts_count(db, camera_id=camera_id, alert_type=alert_type)
+    
+    # 计算总页数
+    try:
+        pages = math.ceil(total / limit)
+    except (TypeError, ValueError):
+        # 处理无法转换为整数的情况
+        pages = 1
+    
+    # 将Alert对象转换为AlertResponse对象
+    alert_responses = [AlertResponse.from_orm(alert) for alert in alerts]
+    
+    logger.info(f"获取实时预警列表成功，返回 {len(alerts)} 条记录，总共 {total} 条")
+    
+    # 返回分页数据
+    return {
+        "alerts": alert_responses,
+        "total": total,
+        "page": page,
+        "limit": limit,
+        "pages": pages
+    }
 
 @router.get("/{alert_id}", response_model=AlertResponse)
 def get_alert(
