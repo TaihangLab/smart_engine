@@ -14,7 +14,11 @@ class Camera(Base):
     location = Column(String(256))
     status = Column(Boolean, default=True)
     camera_type = Column(String(32), default="gb28181")  # 摄像头类型: gb28181, proxy_stream, push_stream
-    meta_data = Column(JSON)  # 存储摄像头额外的元数据信息，包含设备标识等信息
+    
+    gbId = Column(Integer) #国标设备ID
+    source_type = Column(Integer) #1：国标设备，2：推流设备，3：拉流代理
+ 
+    
     created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
     updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
 

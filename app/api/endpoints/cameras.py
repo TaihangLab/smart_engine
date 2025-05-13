@@ -1139,6 +1139,104 @@ def delete_tag(
             detail=str(e)
         )
 
+@router.get("/wvp/channel/list", response_model=Dict[str, Any])
+def list_channels(
+    page: int = Query(1, description="当前页数", ge=1),
+    count: int = Query(100, description="每页数量", ge=1, le=1000),
+    query: str = Query("", description="查询内容，用于搜索过滤"),
+    online: Optional[bool] = Query(None, description="是否在线，可选参数"),
+    has_record_plan: Optional[bool] = Query(None, description="是否已设置录制计划，可选参数"),
+    channel_type: Optional[str] = Query(None, description="通道类型，可选值：gb28181、proxy_stream、push_stream，可选参数")
+):
+    """
+    获取WVP平台中的通道列表
+    
+    此接口查询视频服务器上的所有通道，包括国标设备、推流设备和代理流设备的通道
+    
+    Args:
+        page: 当前页数，默认为1
+        count: 每页数量，默认为100
+        query: 查询内容，用于搜索过滤，默认为空字符串
+        online: 是否在线，可选参数
+        has_record_plan: 是否已设置录制计划，可选参数
+        channel_type: 通道类型，可选值：gb28181(国标设备)、proxy_stream(代理流)、push_stream(推流设备)，可选参数
+        
+    Returns:
+        Dict[str, Any]: 通道列表分页数据，包含total和list字段
+    """
+    try:
+        # 将字符串类型的channel_type转换为对应的数字
+        channel_type_num = None
+        if channel_type:
+            if channel_type == "gb28181":
+                channel_type_num = 1
+            elif channel_type == "push_stream":
+                channel_type_num = 2
+            elif channel_type == "proxy_stream":
+                channel_type_num = 3
+            else:
+                logger.warning(f"未知的通道类型: {channel_type}")
+        
+        # 调用服务层获取通道列表
+        channels_result = CameraService.get_channel_list(
+            page=page, 
+            count=count, 
+            query=query,
+            online=online,
+            has_record_plan=has_record_plan,
+            channel_type=channel_type_num
+        )
+        
+        # 记录结果信息
+        if "list" in channels_result:
+            channels_count = len(channels_result.get("list", []))
+            total_count = channels_result.get("total", 0)
+            logger.info(f"获取到{channels_count}个通道，总数为{total_count}")
+        
+        return channels_result
+    except Exception as e:
+        logger.error(f"获取通道列表失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
+@router.get("/wvp/channel/{channel_id}", response_model=Dict[str, Any])
+def get_channel(
+    channel_id: int = Path(..., description="通道ID", ge=1)
+):
+    """
+    获取WVP平台中单个通道的详细信息
+    
+    此接口查询视频服务器上指定通道的完整信息
+    
+    Args:
+        channel_id: 通道ID
+        
+    Returns:
+        Dict[str, Any]: 通道详细信息
+    """
+    try:
+        # 调用服务层获取通道详情
+        channel_info = CameraService.get_channel_by_id(channel_id)
+        
+        if not channel_info:
+            logger.warning(f"未找到通道: {channel_id}")
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"通道不存在: {channel_id}"
+            )
+        
+        return {"success": True, "data": channel_info}
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取通道详情失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=str(e)
+        )
+
 @router.post("/batch-delete", response_model=BatchDeleteCamerasResponse)
 def batch_delete_ai_cameras(
     request: BatchDeleteCamerasRequest,

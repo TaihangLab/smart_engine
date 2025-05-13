@@ -1106,8 +1106,8 @@ class WVPClient:
 
     @auto_relogin
     def get_channel_list(self, page: int = 1, count: int = 100, query: str = "", 
-                       online: Optional[bool] = None, has_record_plan: Optional[bool] = None,
-                       channel_type: Optional[int] = None) -> Dict[str, Any]:
+                        online: Optional[bool] = None, has_record_plan: Optional[bool] = None,
+                        channel_type: Optional[int] = None) -> Dict[str, Any]:
         """
         获取通道列表
         
@@ -1117,7 +1117,7 @@ class WVPClient:
             query: 查询内容，用于搜索过滤，默认为空字符串
             online: 是否在线，可选参数
             has_record_plan: 是否已设置录制计划，可选参数
-            channel_type: 通道类型，可选值：1(国标设备)、2(推流设备)、3(拉流代理)，可选参数
+            channel_type: 通道类型，数值表示：1(国标设备)、2(推流设备)、3(代理流设备)
             
         Returns:
             Dict[str, Any]: 通道列表分页数据，包含total和list字段
@@ -1158,7 +1158,7 @@ class WVPClient:
                     logger.error(f"获取通道列表失败: {data.get('msg')}")
                     return {"total": 0, "list": []}
                     
-                return data.get("data", {"total": 0, "list": []})
+                return data
             except ValueError as e:
                 logger.error(f"响应不是有效的JSON: {response.text}, {str(e)}")
                 return {"total": 0, "list": []}
@@ -1167,6 +1167,51 @@ class WVPClient:
             if hasattr(e, 'response') and e.response is not None:
                 logger.error(f"响应内容: {e.response.text}")
             return {"total": 0, "list": []}
+
+    @auto_relogin
+    def get_channel_one(self, channel_id: int) -> Optional[Dict[str, Any]]:
+        """
+        查询单个通道的详细信息
+        
+        Args:
+            channel_id: 通道的数据库自增ID
+            
+        Returns:
+            Optional[Dict[str, Any]]: 通道详情信息，查询失败时返回None
+        """
+        url = f"{self.base_url}/api/common/channel/one"
+        try:
+            logger.info(f"获取通道详情: id={channel_id}")
+            
+            params = {
+                "id": channel_id
+            }
+            
+            response = self.session.get(url, params=params)
+            logger.info(f"获取通道详情响应状态: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"获取通道详情失败，状态码: {response.status_code}")
+                logger.error(f"响应内容: {response.text}")
+                response.raise_for_status()
+            
+            try:
+                data = response.json()
+                logger.info(f"获取通道详情响应码: {data.get('code')}")
+                
+                if data.get("code") != 0:
+                    logger.warning(f"获取通道详情失败: {data.get('msg')}")
+                    return None
+                    
+                return data.get("data")
+            except ValueError as e:
+                logger.error(f"响应不是有效的JSON: {response.text}, {str(e)}")
+                return None
+        except Exception as e:
+            logger.error(f"获取通道详情异常: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"响应内容: {e.response.text}")
+            return None
 
 # 创建全局WVP客户端实例
 wvp_client = WVPClient() 

@@ -1161,3 +1161,72 @@ class CameraService:
             logger.error(f"获取摄像头截图过程中出错: {str(e)}", exc_info=True)
             return None 
 
+    @staticmethod
+    def get_channel_list(page: int = 1, count: int = 100, query: str = "", 
+                       online: Optional[bool] = None, has_record_plan: Optional[bool] = None,
+                       channel_type: Optional[int] = None) -> Dict[str, Any]:
+        """
+        获取WVP平台中的通道列表
+        
+        Args:
+            page: 当前页数
+            count: 每页数量
+            query: 查询条件
+            online: 是否在线
+            has_record_plan: 是否已设置录制计划
+            channel_type: 通道类型，数值表示：1(国标设备)、2(推流设备)、3(代理流设备)
+            
+        Returns:
+            Dict[str, Any]: 通道列表及分页信息
+        """
+        try:
+            logger.info(f"获取通道列表: page={page}, count={count}, query={query}")
+            
+            # 调用WVP客户端获取通道列表
+            channels_result = wvp_client.get_channel_list(
+                page=page, 
+                count=count, 
+                query=query,
+                online=online,
+                has_record_plan=has_record_plan,
+                channel_type=channel_type
+            )
+            
+            # 提取通道列表数据
+            if isinstance(channels_result, dict) and "data" in channels_result:
+                return channels_result["data"]
+            
+            # 如果返回结构不是预期的，直接返回结果
+            return channels_result
+            
+        except Exception as e:
+            logger.error(f"获取通道列表失败: {str(e)}", exc_info=True)
+            return {"total": 0, "list": [], "error": str(e)}
+            
+    @staticmethod
+    def get_channel_by_id(channel_id: int) -> Optional[Dict[str, Any]]:
+        """
+        获取单个通道的详细信息
+        
+        Args:
+            channel_id: 通道的数据库自增ID
+            
+        Returns:
+            Optional[Dict[str, Any]]: 通道详情信息，查询失败时返回None
+        """
+        try:
+            logger.info(f"获取通道详情: id={channel_id}")
+            
+            # 调用WVP客户端获取通道详情
+            channel_info = wvp_client.get_channel_one(channel_id)
+            
+            if not channel_info:
+                logger.warning(f"未找到通道: id={channel_id}")
+                return None
+                
+            return channel_info
+            
+        except Exception as e:
+            logger.error(f"获取通道详情失败: {str(e)}", exc_info=True)
+            return None
+
