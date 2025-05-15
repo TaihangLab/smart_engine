@@ -96,15 +96,21 @@ class AlertService:
     def create_alert(self, db: Session, alert: AlertCreate) -> Alert:
         """创建新的报警记录"""
         try:
-            logger.debug(f"创建报警记录: ID={alert.alert_id}, 类型={alert.alert_type}")
+            logger.debug(f"创建报警记录: ID={alert.alert_id}, 类型={alert.alert_type}, 名称={alert.alert_name}")
             
             db_alert = Alert(
                 alert_id=alert.alert_id,
                 timestamp=alert.timestamp,
                 alert_type=alert.alert_type,
+                alert_level=alert.alert_level,
+                alert_name=alert.alert_name,
+                location=alert.location,
                 camera_id=alert.camera_id,
+                camera_name=alert.camera_name,
                 tags=alert.tags,
                 coordinates=alert.coordinates,
+                electronic_fence=alert.electronic_fence,
+                result=alert.result,
                 confidence=alert.confidence,
                 minio_frame_url=alert.minio_frame_url,
                 minio_video_url=alert.minio_video_url
@@ -117,7 +123,7 @@ class AlertService:
             logger.debug(f"数据库事务已提交: {alert.alert_id}")
             
             db.refresh(db_alert)
-            logger.info(f"已创建报警记录: {alert.alert_id}, 时间={alert.timestamp}")
+            logger.info(f"已创建报警记录: {alert.alert_id}, 时间={alert.timestamp}, 名称={alert.alert_name}")
             
             return db_alert
             
@@ -165,15 +171,21 @@ class AlertService:
         self, 
         db: Session, 
         camera_id: Optional[str] = None,
+        camera_name: Optional[str] = None,
         alert_type: Optional[str] = None,
+        alert_level: Optional[int] = None,
+        alert_name: Optional[str] = None,
+        location: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
         skip: int = 0,
         limit: int = 100
     ) -> List[Alert]:
         """获取报警记录列表，支持多种过滤条件"""
-        logger.info(f"查询报警记录列表: camera_id={camera_id}, alert_type={alert_type}, "
-                   f"start_time={start_time}, end_time={end_time}, skip={skip}, limit={limit}")
+        logger.info(f"查询报警记录列表: camera_id={camera_id}, camera_name={camera_name}, "
+                   f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, "
+                   f"location={location}, start_time={start_time}, end_time={end_time}, "
+                   f"skip={skip}, limit={limit}")
         
         query = db.query(Alert)
         
@@ -181,8 +193,20 @@ class AlertService:
         if camera_id:
             query = query.filter(Alert.camera_id == camera_id)
         
+        if camera_name:
+            query = query.filter(Alert.camera_name == camera_name)
+        
         if alert_type:
             query = query.filter(Alert.alert_type == alert_type)
+        
+        if alert_level is not None:
+            query = query.filter(Alert.alert_level == alert_level)
+            
+        if alert_name:
+            query = query.filter(Alert.alert_name == alert_name)
+            
+        if location:
+            query = query.filter(Alert.location == location)
         
         if start_time:
             query = query.filter(Alert.timestamp >= start_time)
@@ -213,22 +237,39 @@ class AlertService:
         self, 
         db: Session, 
         camera_id: Optional[str] = None,
+        camera_name: Optional[str] = None,
         alert_type: Optional[str] = None,
+        alert_level: Optional[int] = None,
+        alert_name: Optional[str] = None,
+        location: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None
     ) -> int:
         """获取符合条件的报警记录数量"""
-        logger.info(f"查询报警记录数量: camera_id={camera_id}, alert_type={alert_type}, "
-                   f"start_time={start_time}, end_time={end_time}")
+        logger.info(f"查询报警记录数量: camera_id={camera_id}, camera_name={camera_name}, "
+                   f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, "
+                   f"location={location}, start_time={start_time}, end_time={end_time}")
         
         query = db.query(Alert)
         
         # 应用过滤条件
         if camera_id:
             query = query.filter(Alert.camera_id == camera_id)
+            
+        if camera_name:
+            query = query.filter(Alert.camera_name == camera_name)
         
         if alert_type:
             query = query.filter(Alert.alert_type == alert_type)
+            
+        if alert_level is not None:
+            query = query.filter(Alert.alert_level == alert_level)
+            
+        if alert_name:
+            query = query.filter(Alert.alert_name == alert_name)
+            
+        if location:
+            query = query.filter(Alert.location == location)
         
         if start_time:
             query = query.filter(Alert.timestamp >= start_time)
@@ -311,9 +352,26 @@ def publish_test_alert() -> bool:
         "alert_id": f"test_{datetime.now().strftime('%Y%m%d%H%M%S')}",
         "timestamp": datetime.now().isoformat(),
         "alert_type": "test_alert",
+        "alert_level": 1,
+        "alert_name": "测试报警",
+        "location": "测试区域",
         "camera_id": "test_camera",
+        "camera_name": "测试摄像头",
         "tags": ["test", "development"],
         "coordinates": [100, 100, 200, 200],
+        "electronic_fence": [[50,50], [250,50], [250,250], [50,250]],
+        "result": [
+            {
+                "score": 0.92,
+                "name": "测试对象",
+                "location": {
+                    "width": 100,
+                    "top": 80,
+                    "left": 120,
+                    "height": 150
+                }
+            }
+        ],
         "confidence": 0.99,
         "minio_frame_url": "https://example.com/test_frame.jpg",
         "minio_video_url": "https://example.com/test_video.mp4"

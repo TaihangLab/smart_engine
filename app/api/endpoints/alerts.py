@@ -81,7 +81,11 @@ async def alert_stream(request: Request):
 def get_realtime_alerts(
     tag: Optional[str] = Query(None, description="按标签过滤"),
     camera_id: Optional[str] = Query(None, description="按摄像头ID过滤"),
+    camera_name: Optional[str] = Query(None, description="按摄像头名称过滤"),
     alert_type: Optional[str] = Query(None, description="按报警类型过滤"),
+    alert_level: Optional[int] = Query(None, description="按预警等级过滤"),
+    alert_name: Optional[str] = Query(None, description="按预警名称过滤"),
+    location: Optional[str] = Query(None, description="按位置过滤"),
     page: int = Query(1, description="页码"),
     limit: int = Query(10, description="每页记录数"),
     db: Session = Depends(get_db)
@@ -89,7 +93,8 @@ def get_realtime_alerts(
     """
     获取实时预警列表，支持分页和过滤
     """
-    logger.info(f"收到获取实时预警列表请求: tag={tag}, camera_id={camera_id}, alert_type={alert_type}, "
+    logger.info(f"收到获取实时预警列表请求: tag={tag}, camera_id={camera_id}, camera_name={camera_name}, " 
+               f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, location={location}, "
                f"page={page}, limit={limit}")
     
     # 计算分页跳过的记录数
@@ -99,7 +104,11 @@ def get_realtime_alerts(
     alerts = alert_service.get_alerts(
         db, 
         camera_id=camera_id,
+        camera_name=camera_name,
         alert_type=alert_type,
+        alert_level=alert_level,
+        alert_name=alert_name,
+        location=location,
         skip=skip,
         limit=limit
     )
@@ -109,7 +118,15 @@ def get_realtime_alerts(
         alerts = [alert for alert in alerts if tag in alert.tags]
     
     # 获取总记录数（简化处理，实际应用中可能需要单独查询）
-    total = len(alerts) if tag else alert_service.get_alerts_count(db, camera_id=camera_id, alert_type=alert_type)
+    total = len(alerts) if tag else alert_service.get_alerts_count(
+        db, 
+        camera_id=camera_id,
+        camera_name=camera_name,
+        alert_type=alert_type,
+        alert_level=alert_level,
+        alert_name=alert_name,
+        location=location
+    )
     
     # 计算总页数
     try:
