@@ -29,9 +29,26 @@ def mock_alerts():
             alert_id="test_alert_1",
             timestamp=now,
             alert_type="no_helmet",
+            alert_level=1,
+            alert_name="未戴安全帽",
+            location="工厂A区",
             camera_id="camera_01",
+            camera_name="大门入口摄像头",
             tags=["entrance", "outdoor"],
             coordinates=[100, 200, 150, 250],
+            electronic_fence=[[100,100], [300,100], [300,300], [100,300]],
+            result=[
+                {
+                    "score": 0.85,
+                    "name": "安全帽缺失",
+                    "location": {
+                        "width": 80,
+                        "top": 120,
+                        "left": 150,
+                        "height": 200
+                    }
+                }
+            ],
             confidence=0.95,
             minio_frame_url="https://minio.example.com/alerts/test_alert_1/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_1/video.mp4"
@@ -40,9 +57,26 @@ def mock_alerts():
             alert_id="test_alert_2",
             timestamp=now - timedelta(hours=1),
             alert_type="intrusion",
+            alert_level=2,
+            alert_name="区域入侵",
+            location="工厂B区",
             camera_id="camera_01",
+            camera_name="大门入口摄像头",
             tags=["perimeter", "outdoor"],
             coordinates=[300, 400, 350, 450],
+            electronic_fence=[[250,250], [450,250], [450,450], [250,450]],
+            result=[
+                {
+                    "score": 0.78,
+                    "name": "人员入侵",
+                    "location": {
+                        "width": 90,
+                        "top": 320,
+                        "left": 380,
+                        "height": 180
+                    }
+                }
+            ],
             confidence=0.88,
             minio_frame_url="https://minio.example.com/alerts/test_alert_2/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_2/video.mp4"
@@ -51,9 +85,26 @@ def mock_alerts():
             alert_id="test_alert_3",
             timestamp=now - timedelta(hours=2),
             alert_type="unusual_activity",
+            alert_level=3,
+            alert_name="异常活动",
+            location="工厂C区",
             camera_id="camera_02",
+            camera_name="大厅摄像头",
             tags=["indoor", "lobby"],
             coordinates=[500, 600, 550, 650],
+            electronic_fence=[[450,450], [650,450], [650,650], [450,650]],
+            result=[
+                {
+                    "score": 0.68,
+                    "name": "异常行为",
+                    "location": {
+                        "width": 120,
+                        "top": 480,
+                        "left": 520,
+                        "height": 160
+                    }
+                }
+            ],
             confidence=0.75,
             minio_frame_url="https://minio.example.com/alerts/test_alert_3/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_3/video.mp4"
@@ -125,9 +176,21 @@ def test_get_alert(override_get_db, mock_alerts):
     data = response.json()
     assert data["alert_id"] == "test_alert_1"
     assert data["alert_type"] == "no_helmet"
+    assert data["alert_level"] == 1
+    assert data["alert_name"] == "未戴安全帽"
+    assert data["location"] == "工厂A区"
     assert data["camera_id"] == "camera_01"
+    assert data["camera_name"] == "大门入口摄像头"
     assert "entrance" in data["tags"]
     assert "outdoor" in data["tags"]
+    assert isinstance(data["electronic_fence"], list)
+    assert len(data["electronic_fence"]) == 4
+    assert data["electronic_fence"][0] == [100, 100]
+    assert isinstance(data["result"], list)
+    assert len(data["result"]) == 1
+    assert data["result"][0]["name"] == "安全帽缺失"
+    assert data["result"][0]["score"] > 0.8
+    assert "width" in data["result"][0]["location"]
 
     # 验证方法调用
     mock_db.query.assert_called_once()
@@ -192,12 +255,12 @@ def test_get_realtime_alerts_with_filters(override_get_db, mock_alerts):
     query_mock.count.return_value = 1
     
     # 执行请求 - 使用过滤参数
-    response = client.get("/api/v1/alerts/real-time?tag=entrance&camera_id=camera_01&alert_type=no_helmet")
+    response = client.get("/api/v1/alerts/real-time?tag=entrance&camera_id=camera_01&alert_type=no_helmet&alert_level=1&location=工厂A区")
     
     # 打印响应状态码和内容
     print("\n===== 获取实时预警列表(带过滤)测试 =====")
     print(f"状态码: {response.status_code}")
-    print("请求参数: tag=entrance&camera_id=camera_01&alert_type=no_helmet")
+    print("请求参数: tag=entrance&camera_id=camera_01&alert_type=no_helmet&alert_level=1&location=工厂A区")
     print("响应内容:")
     pp.pprint(response.json())
 
@@ -210,6 +273,10 @@ def test_get_realtime_alerts_with_filters(override_get_db, mock_alerts):
     assert data["pages"] == 1
     assert data["alerts"][0]["alert_id"] == "test_alert_1"
     assert data["alerts"][0]["alert_type"] == "no_helmet"
+    assert data["alerts"][0]["alert_level"] == 1
+    assert data["alerts"][0]["alert_name"] == "未戴安全帽"
+    assert data["alerts"][0]["location"] == "工厂A区"
+    assert data["alerts"][0]["camera_name"] == "大门入口摄像头"
 
 # 测试发送测试报警
 @patch('app.api.endpoints.alerts.publish_test_alert')
