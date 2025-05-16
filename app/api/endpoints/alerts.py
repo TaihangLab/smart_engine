@@ -85,6 +85,7 @@ def get_realtime_alerts(
     alert_type: Optional[str] = Query(None, description="按报警类型过滤"),
     alert_level: Optional[int] = Query(None, description="按预警等级过滤"),
     alert_name: Optional[str] = Query(None, description="按预警名称过滤"),
+    alert_category: Optional[str] = Query(None, description="按预警档案类别标签过滤"),
     location: Optional[str] = Query(None, description="按位置过滤"),
     page: int = Query(1, description="页码"),
     limit: int = Query(10, description="每页记录数"),
@@ -94,7 +95,8 @@ def get_realtime_alerts(
     获取实时预警列表，支持分页和过滤
     """
     logger.info(f"收到获取实时预警列表请求: tag={tag}, camera_id={camera_id}, camera_name={camera_name}, " 
-               f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, location={location}, "
+               f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, "
+               f"alert_category={alert_category}, location={location}, "
                f"page={page}, limit={limit}")
     
     # 计算分页跳过的记录数
@@ -108,6 +110,7 @@ def get_realtime_alerts(
         alert_type=alert_type,
         alert_level=alert_level,
         alert_name=alert_name,
+        alert_category=alert_category,
         location=location,
         skip=skip,
         limit=limit
@@ -125,6 +128,7 @@ def get_realtime_alerts(
         alert_type=alert_type,
         alert_level=alert_level,
         alert_name=alert_name,
+        alert_category=alert_category,
         location=location
     )
     

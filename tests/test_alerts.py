@@ -31,6 +31,7 @@ def mock_alerts():
             alert_type="no_helmet",
             alert_level=1,
             alert_name="未戴安全帽",
+            alert_category="安全防护类",
             location="工厂A区",
             camera_id="camera_01",
             camera_name="大门入口摄像头",
@@ -59,6 +60,7 @@ def mock_alerts():
             alert_type="intrusion",
             alert_level=2,
             alert_name="区域入侵",
+            alert_category="安全防范类",
             location="工厂B区",
             camera_id="camera_01",
             camera_name="大门入口摄像头",
@@ -87,6 +89,7 @@ def mock_alerts():
             alert_type="unusual_activity",
             alert_level=3,
             alert_name="异常活动",
+            alert_category="异常行为类",
             location="工厂C区",
             camera_id="camera_02",
             camera_name="大厅摄像头",
@@ -178,6 +181,7 @@ def test_get_alert(override_get_db, mock_alerts):
     assert data["alert_type"] == "no_helmet"
     assert data["alert_level"] == 1
     assert data["alert_name"] == "未戴安全帽"
+    assert data["alert_category"] == "安全防护类"
     assert data["location"] == "工厂A区"
     assert data["camera_id"] == "camera_01"
     assert data["camera_name"] == "大门入口摄像头"

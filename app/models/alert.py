@@ -15,6 +15,7 @@ class Alert(Base):
     alert_type = Column(String(50), index=True)
     alert_level = Column(Integer, default=1)
     alert_name = Column(String(100))
+    alert_category = Column(String(100))  # 预警档案类别标签
     location = Column(String(100))
     camera_id = Column(String(50), index=True)
     camera_name = Column(String(100))
@@ -34,6 +35,7 @@ class AlertCreate(BaseModel):
     alert_type: str
     alert_level: int = 1
     alert_name: str
+    alert_category: Optional[str] = None  # 预警档案类别标签
     location: str
     camera_id: str
     camera_name: str
@@ -53,6 +55,7 @@ class AlertCreate(BaseModel):
                 "alert_type": "no_helmet",
                 "alert_level": 1,
                 "alert_name": "未戴安全帽",
+                "alert_category": "安全防护类",
                 "location": "工厂01",
                 "camera_id": "camera_01",
                 "camera_name": "摄像头01",
@@ -85,6 +88,7 @@ class AlertResponse(BaseModel):
     alert_type: str
     alert_level: int
     alert_name: str
+    alert_category: Optional[str] = None  # 预警档案类别标签
     location: str
     camera_id: str
     camera_name: str
