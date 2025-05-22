@@ -12,7 +12,7 @@ from app.models.skill import SkillClass, SkillClassModel
 from app.services.minio_client import minio_client
 from app.services.skill_instance_service import SkillInstanceService
 from app.db.ai_task_dao import AITaskDAO
-from app.db.camera_dao import CameraDAO
+from app.services.camera_service import CameraService
 
 logger = logging.getLogger(__name__)
 
@@ -39,7 +39,7 @@ class SkillClassService:
         
         logger.info(f"分页获取技能类，页码={page}，每页数量={limit}，启用状态={status}，技能类名称={query_name}，技能类类型={query_type}")
         skill_classes, total = SkillClassDAO.get_paginated(db, skip=skip, limit=limit, status=status, query_name=query_name, query_type=query_type)
-        
+    
         # 构建响应数据
         result = []
         for skill_class in skill_classes:
@@ -51,8 +51,9 @@ class SkillClassService:
             # 获取相关AI设备
             
             camera_ids = AITaskDAO.get_distinct_camera_ids_by_skill_class_id(skill_class.id, db)
-            total_device_count = len(camera_ids)
- 
+
+            total_device_count = len(set(camera_ids))
+            
 
             if is_detail:
                 #返回详细信息
@@ -224,45 +225,21 @@ class SkillClassService:
         
         # 获取所有摄像头的详细信息
         for camera_id in camera_ids:
-            camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
+            camera = CameraService.get_ai_camera_by_id(camera_id, db)
             if not camera:
                 continue
 
-            # 从tag_relations获取标签列表
-            tags_list = [tag.name for tag in camera.tag_relations]
-
-            # 解析元数据
-            meta_data = json.loads(camera.meta_data) if camera.meta_data and isinstance(camera.meta_data, str) else {}
             
             # 构建基本设备信息
             device_info = {
-                "id": camera.id,
-                "camera_uuid": camera.camera_uuid,
-                "name": camera.name,
-                "location": camera.location,
-                "tags": tags_list,
-                "camera_type": camera.camera_type,
-                "status": camera.status,
-                
+                "id": camera.get("id"),
+                "name": camera.get("name"),
+                "location": camera.get("location"),
+                "camera_type": camera.get("camera_type"),
+                "status": camera.get("status"),
+                "skill_names": camera.get("skill_names")
            }
             
-            if meta_data:
-                try:
-                    if camera.camera_type == "gb28181":
-                        if "deviceId" in meta_data:
-                            device_info["deviceId"] = meta_data.get("deviceId")
-                        if "channelId" in meta_data:
-                            device_info["channelId"] = meta_data.get("channelId")
-                    elif camera.camera_type == "proxy_stream":
-                        device_info["app"] = meta_data.get("app")
-                        device_info["stream"] = meta_data.get("stream")
-                        device_info["proxy_id"] = meta_data.get("proxy_id")
-                    elif camera.camera_type == "push_stream":
-                        device_info["app"] = meta_data.get("app")
-                        device_info["stream"] = meta_data.get("stream")
-                        device_info["push_id"] = meta_data.get("push_id")
-                except Exception as e:
-                    logger.warning(f"解析摄像头元数据时出错: {str(e)}")
             
             devices.append(device_info)
         

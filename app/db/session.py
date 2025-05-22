@@ -4,7 +4,6 @@ from app.core.config import settings
 
 # 导入所有模型，确保在创建会话前所有模型类都已加载
 from app.db.base import Base
-import app.models.camera
 import app.models.skill
 import app.models.model
 

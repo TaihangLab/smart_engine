@@ -72,7 +72,7 @@ def get_skill_instance(instance_id: int, db: Session = Depends(get_db)):
         )
     
     # 获取技能实例关联的设备
-    related_devices = skill_instance_service.get_related_devices(instance_id, db)
+    related_devices = skill_instance_service.get_devices_by_skill_instance_id(instance_id, db)
     
     # 将关联设备信息添加到实例对象中
     instance["related_devices"] = related_devices
@@ -194,9 +194,9 @@ def delete_skill_instance(instance_id: int, db: Session = Depends(get_db)):
         )
     
     # 检查是否有AI任务使用此技能实例
-    print(f"检查是否有AI任务使用此技能实例: instance_id={instance_id}")
+    # print(f"检查是否有AI任务使用此技能实例: instance_id={instance_id}")
     ai_task_result = AITaskService.get_tasks_by_skill_instance(instance_id, db)
-    print(f"AI任务结果: {ai_task_result}")
+    # print(f"AI任务结果: {ai_task_result}")
     tasks = ai_task_result.get("tasks", [])
     if tasks:
         raise HTTPException(
@@ -207,40 +207,6 @@ def delete_skill_instance(instance_id: int, db: Session = Depends(get_db)):
     # 删除技能实例
     success = skill_instance_service.delete(instance_id, db)
     return {"success": success, "message": "技能实例已删除"}
-
-@router.post("/{instance_id}/clone", response_model=Dict[str, Any])
-def clone_skill_instance(
-    instance_id: int,
-    new_name: str,
-    db: Session = Depends(get_db)
-):
-    """
-    克隆技能实例
-    
-    Args:
-        instance_id: 源技能实例ID
-        new_name: 新实例名称
-        db: 数据库会话
-        
-    Returns:
-        克隆的技能实例
-    """
-    # 克隆实例
-    try:
-        logger.info(f"克隆技能实例: instance_id={instance_id}, new_name={new_name}")
-        cloned = skill_instance_service.clone(instance_id, new_name, db)
-        if not cloned:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"技能实例不存在: ID={instance_id}"
-            )
-        return cloned
-    except Exception as e:
-        logger.error(f"克隆技能实例失败: {str(e)}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"克隆技能实例失败: {str(e)}"
-        )
 
 @router.post("/{instance_id}/enable", response_model=Dict[str, Any])
 def enable_skill_instance(instance_id: int, db: Session = Depends(get_db)):

@@ -10,7 +10,7 @@ from app.db.skill_instance_dao import SkillInstanceDAO
 from app.db.skill_class_dao import SkillClassDAO
 from app.models.skill import SkillInstance
 from app.db.ai_task_dao import AITaskDAO
-from app.db.camera_dao import CameraDAO
+from app.services.camera_service import CameraService
 
 logger = logging.getLogger(__name__)
 
@@ -208,43 +208,7 @@ class SkillInstanceService:
         logger.info(f"禁用技能实例: id={instance_id}")
         return SkillInstanceDAO.set_status(instance_id, False, db)
     
-    @staticmethod
-    def clone(instance_id: int, new_name: str, db: Session) -> Optional[Dict[str, Any]]:
-        """
-        克隆技能实例
-        
-        Args:
-            instance_id: 源实例ID
-            new_name: 新实例名称
-            db: 数据库会话
-            
-        Returns:
-            克隆的技能实例或None
-        """
-        logger.info(f"克隆技能实例: id={instance_id}, new_name={new_name}")
-        
-        # 获取源实例
-        source = SkillInstanceDAO.get_by_id(instance_id, db)
-        if not source:
-            logger.error(f"源技能实例不存在: id={instance_id}")
-            return None
-            
-        # 创建新实例数据
-        new_data = {
-            "name": new_name,
-            "skill_class_id": source.skill_class_id,
-            "config": source.config,
-            "status": source.status,
-            "description": source.description
-        }
-            
-        # 创建新实例
-        try:
-            cloned = SkillInstanceDAO.create(new_data, db)
-            return _convert_instance_to_dict(cloned)
-        except Exception as e:
-            logger.error(f"克隆技能实例失败: {str(e)}")
-            return None
+
 
     @staticmethod
     def get_devices_by_skill_instance_id(skill_instance_id: int, db: Session) -> List[Dict[str, Any]]:
@@ -268,44 +232,22 @@ class SkillInstanceService:
         
         # 获取所有摄像头的详细信息
         for camera_id in camera_ids:
-            camera = CameraDAO.get_ai_camera_by_id(camera_id, db)
+            camera = CameraService.get_ai_camera_by_id(camera_id, db)
+
             if not camera:
                 continue
-
-            # 从tag_relations获取标签列表
-            tags_list = [tag.name for tag in camera.tag_relations]
-
-            # 解析元数据
-            meta_data = json.loads(camera.meta_data) if camera.meta_data and isinstance(camera.meta_data, str) else {}
-            
+                
             # 构建基本设备信息
             device_info = {
-                "id": camera.id,
-                "camera_uuid": camera.camera_uuid,
-                "name": camera.name,
-                "location": camera.location,
-                "tags": tags_list,
-                "camera_type": camera.camera_type,
-                "status": camera.status,
+                "id": camera.get("id"),
+                "name": camera.get("name"),
+                "location": camera.get("location"),
+                "camera_type": camera.get("camera_type"),
+                "status": camera.get("status"),
+                "skill_names": camera.get("skill_names")
             }
             
-            if meta_data:
-                try:
-                    if camera.camera_type == "gb28181":
-                        if "deviceId" in meta_data:
-                            device_info["deviceId"] = meta_data.get("deviceId")
-                        if "channelId" in meta_data:
-                            device_info["channelId"] = meta_data.get("channelId")
-                    elif camera.camera_type == "proxy_stream":
-                        device_info["app"] = meta_data.get("app")
-                        device_info["stream"] = meta_data.get("stream")
-                        device_info["proxy_id"] = meta_data.get("proxy_id")
-                    elif camera.camera_type == "push_stream":
-                        device_info["app"] = meta_data.get("app")
-                        device_info["stream"] = meta_data.get("stream")
-                        device_info["push_id"] = meta_data.get("push_id")
-                except Exception as e:
-                    logger.warning(f"解析摄像头元数据时出错: {str(e)}")
+    
             
             devices.append(device_info)
         
