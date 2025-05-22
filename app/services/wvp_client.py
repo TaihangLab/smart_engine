@@ -15,23 +15,44 @@ def auto_relogin(func):
             # 尝试执行原始方法
             response = func(self, *args, **kwargs)
             
-            # 检查响应状态，看是否有授权问题
-            if isinstance(response, dict):
-                # 直接从返回值检查code
-                if response.get("code") == 401:
-                    logger.warning("授权已过期，尝试重新登录")
-                    self._login()
-                    # 重新调用原始方法
-                    return func(self, *args, **kwargs)
+            # 递归检查返回结果中是否包含401错误码
+            def check_auth_error(obj):
+                if isinstance(obj, dict):
+                    # 检查当前层级
+                    if obj.get("code") == 401:
+                        return True
+                    
+                    # 递归检查所有字典值
+                    for val in obj.values():
+                        if check_auth_error(val):
+                            return True
                 
-                # 检查嵌套的情况 - 返回的是完整API响应
-                if "code" in response and response.get("code") == 401:
-                    logger.warning("授权已过期，尝试重新登录")
+                elif isinstance(obj, list):
+                    # 递归检查列表中的所有项
+                    for item in obj:
+                        if check_auth_error(item):
+                            return True
+                
+                return False
+            
+            # 使用递归函数检查整个返回结构
+            if check_auth_error(response):
+                logger.warning("在返回结果中检测到授权问题，尝试重新登录")
+                self._login()
+                # 重新调用原始方法
+                return func(self, *args, **kwargs)
+            
+            # 检查返回结果是否包含error字符串提示认证问题
+            if isinstance(response, dict) and isinstance(response.get("error"), str):
+                error_msg = response.get("error", "").lower()
+                if "unauthorized" in error_msg or "login" in error_msg or "auth" in error_msg or "401" in error_msg:
+                    logger.warning(f"在错误消息中检测到授权问题: {error_msg}，尝试重新登录")
                     self._login()
                     # 重新调用原始方法
                     return func(self, *args, **kwargs)
             
             return response
+            
         except requests.exceptions.RequestException as e:
             # 检查是否为授权错误
             if hasattr(e, 'response') and e.response is not None:
@@ -1145,6 +1166,11 @@ class WVPClient:
             response = self.session.get(url, params=params)
             logger.info(f"获取通道列表响应状态: {response.status_code}")
             
+            # 检查是否为401状态码，让auto_relogin装饰器处理认证问题
+            if response.status_code == 401:
+                logger.warning("检测到401状态码，抛出异常以便装饰器进行重新登录")
+                response.raise_for_status()  # 这会抛出RequestException异常
+            
             if response.status_code != 200:
                 logger.error(f"获取通道列表失败，状态码: {response.status_code}")
                 logger.error(f"响应内容: {response.text}")
@@ -1154,6 +1180,11 @@ class WVPClient:
                 data = response.json()
                 logger.info(f"获取通道列表响应码: {data.get('code')}")
                 
+                # 检查API响应中的code是否为401，如果是则直接返回，让装饰器处理
+                if data.get("code") == 401:
+                    logger.warning("API响应中检测到401错误码，返回数据以便装饰器进行重新登录")
+                    return data
+                
                 if data.get("code") != 0:
                     logger.error(f"获取通道列表失败: {data.get('msg')}")
                     return {"total": 0, "list": []}
@@ -1162,10 +1193,13 @@ class WVPClient:
             except ValueError as e:
                 logger.error(f"响应不是有效的JSON: {response.text}, {str(e)}")
                 return {"total": 0, "list": []}
+        except requests.exceptions.RequestException as e:
+            # 只捕获请求异常，并重新抛出，让装饰器能够处理
+            logger.error(f"获取通道列表请求异常: {str(e)}")
+            raise
         except Exception as e:
-            logger.error(f"获取通道列表异常: {str(e)}")
-            if hasattr(e, 'response') and e.response is not None:
-                logger.error(f"响应内容: {e.response.text}")
+            # 处理其他非请求相关的异常
+            logger.error(f"获取通道列表其他异常: {str(e)}")
             return {"total": 0, "list": []}
 
     @auto_relogin
