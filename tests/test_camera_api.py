@@ -25,7 +25,7 @@ TEST_CAMERA = {
     "location": "前门",
     "tags": ["测试", "前门"],
     "status": True,
-    "warning_level": 0,
+    "alert_level": 0,
     "frame_rate": 1.0,
     "running_period": {"enabled": True, "periods": [{"start": "08:00", "end": "18:00"}]},
     "electronic_fence": {"enabled": False, "points": []},

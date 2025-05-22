@@ -9,12 +9,10 @@ import traceback
 
 from sqlalchemy.orm import Session
 
-from app.models.camera import Camera
 from app.models.skill import SkillClass, SkillInstance
 from app.db.skill_class_dao import SkillClassDAO
 from app.db.skill_instance_dao import SkillInstanceDAO
 from app.db.model_dao import ModelDAO
-from app.db.camera_dao import CameraDAO
 from app.skills.skill_base import BaseSkill
 from app.skills.skill_factory import skill_factory
 from app.core.config import settings
@@ -334,7 +332,7 @@ class SkillManager:
         self.skill_instances.clear()
         logger.info("已清理所有技能实例")
         
-    def process(self, data: Dict[str, Any], camera: Camera, instance_id: str) -> Dict[str, Any]:
+    def process(self, data: Dict[str, Any], camera_id: int, instance_id: str) -> Dict[str, Any]:
         """
         使用指定技能实例处理数据
         
