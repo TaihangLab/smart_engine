@@ -79,7 +79,7 @@ def test_skill_configuration():
         "name": f"{camera['name']}-{skill_class['name_zh']}任务",
         "description": "通过测试脚本创建的AI任务",
         "status": True,
-        "warning_level": 2,  # 预警等级
+        "alert_level": 2,  # 预警等级
         "frame_rate": 1.0,   # 抽帧频率(每秒抽取多少帧)
         "running_period": {   # 运行时段
             "enabled": True,
@@ -93,7 +93,7 @@ def test_skill_configuration():
         },
         "camera_id": camera_id,
         "skill_class_id": skill_class_id,  # 只提供技能类ID，系统会自动创建技能实例
-        "skill_custom_config": {  # 自定义技能配置，将与技能类默认配置合并
+        "skill_config": {  # 自定义技能配置，将与技能类默认配置合并
             "confidence_threshold": 0.6,
             "custom_param": "自定义参数值"
         }

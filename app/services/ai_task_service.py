@@ -39,21 +39,20 @@ class AITaskService:
             
             task_data = {
                 "id": db_task.id,
-                "task_uuid": db_task.task_uuid,
                 "name": db_task.name,
                 "description": db_task.description,
                 "status": db_task.status,
-                "warning_level": db_task.warning_level,
+                "alert_level": db_task.alert_level,
                 "frame_rate": db_task.frame_rate,
-                "running_period": running_period,
-                "electronic_fence": electronic_fence,
-                "task_type": db_task.task_type,
-                "config": config,
+                "running_period": running_period, #运行周期
+                "electronic_fence": electronic_fence, #电子围栏
+                "task_type": db_task.task_type, #任务类型
+                "config": config, #技能类配置
                 "created_at": db_task.created_at.isoformat() if db_task.created_at else None,
                 "updated_at": db_task.updated_at.isoformat() if db_task.updated_at else None,
                 "camera_id": db_task.camera_id,
                 "skill_instance_id": db_task.skill_instance_id,
-                "skill_config": skill_config
+                "skill_config": skill_config #任务自定义配置（技能实例配置）
             }
             tasks.append(task_data)
         
@@ -82,32 +81,29 @@ class AITaskService:
         config = json.loads(db_task.config) if db_task.config else {}
         skill_config = json.loads(db_task.skill_config) if db_task.skill_config else {}
         
-        # 获取关联的摄像头、技能类和技能实例名称（如果有）
-        camera_name = db_task.camera.name if db_task.camera else None
+        # 获取关联的技能类和技能实例名称（如果有）
         skill_class_name = db_task.skill_class.name_zh if db_task.skill_class else None
         skill_instance_name = db_task.skill_instance.name if db_task.skill_instance else None
         
         task_data = {
             "id": db_task.id,
-            "task_uuid": db_task.task_uuid,
             "name": db_task.name,
             "description": db_task.description,
             "status": db_task.status,
-            "warning_level": db_task.warning_level,
+            "alert_level": db_task.alert_level,
             "frame_rate": db_task.frame_rate,
             "running_period": running_period,
-            "electronic_fence": electronic_fence,
-            "task_type": db_task.task_type,
-            "config": config,
+            "electronic_fence": electronic_fence, #电子围栏
+            "task_type": db_task.task_type, #任务类型
+            "config": config, #技能类配置
             "created_at": db_task.created_at.isoformat() if db_task.created_at else None,
             "updated_at": db_task.updated_at.isoformat() if db_task.updated_at else None,
-            "camera_id": db_task.camera_id,
-            "camera_name": camera_name,
+            "camera_id": db_task.camera_id, #摄像头ID
             "skill_class_id": db_task.skill_class_id,
             "skill_class_name": skill_class_name,
             "skill_instance_id": db_task.skill_instance_id,
             "skill_instance_name": skill_instance_name,
-            "skill_config": skill_config
+            "skill_config": skill_config #任务自定义配置（技能实例配置）
         }
         
         return task_data
@@ -158,8 +154,8 @@ class AITaskService:
             }
             
             # 如果用户提供了自定义的技能配置，合并到实例配置中
-            if 'skill_custom_config' in task_data and isinstance(task_data['skill_custom_config'], dict):
-                user_config = task_data['skill_custom_config']
+            if 'skill_config' in task_data and isinstance(task_data['skill_config'], dict):
+                user_config = task_data['skill_config']
                 instance_config = instance_data['config'] if isinstance(instance_data['config'], dict) else {}
                 instance_data['config'] = {**instance_config, **user_config}
                 

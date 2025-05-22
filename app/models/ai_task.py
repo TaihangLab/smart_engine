@@ -2,20 +2,18 @@ from sqlalchemy import Column, Integer, String, Boolean, Float, ForeignKey, JSON
 from sqlalchemy.orm import relationship
 from app.db.base_class import Base
 from datetime import datetime, timezone, timedelta
-import uuid
 
 class AITask(Base):
     """AI任务模型，包含任务基本信息、配置和关联关系"""
     __tablename__ = "ai_tasks"
 
     id = Column(Integer, primary_key=True, index=True)
-    task_uuid = Column(String(36), unique=True, nullable=False, default=lambda: str(uuid.uuid4()))
     name = Column(String(128), nullable=False)
     description = Column(String(512))
     status = Column(Boolean, default=True)
     
     # 核心配置字段
-    warning_level = Column(Integer, default=0)  # 预警等级
+    alert_level = Column(Integer, default=0)  # 预警等级
     frame_rate = Column(Float, default=1.0)  # 抽帧频率
     running_period = Column(JSON)  # 运行时段 {"enabled": true, "periods": [{"start": "08:00", "end": "18:00"}]}
     electronic_fence = Column(JSON)  # 电子围栏 {"enabled": false, "points": []}
@@ -25,7 +23,7 @@ class AITask(Base):
     config = Column(JSON)  # 任务特定配置
     
     # 关联关系
-    camera_id = Column(Integer, ForeignKey("cameras.id"), nullable=False)
+    camera_id = Column(Integer, nullable=False)
     
     # 使用技能类和技能实例
     skill_class_id = Column(Integer, ForeignKey("skill_classes.id"), nullable=False)  # 技能类ID
@@ -37,7 +35,6 @@ class AITask(Base):
 
     
     # 关系对象
-    camera = relationship("Camera", back_populates="tasks")
     skill_instance = relationship("SkillInstance", back_populates="tasks")
     skill_class = relationship("SkillClass")
 

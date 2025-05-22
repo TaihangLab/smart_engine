@@ -20,17 +20,18 @@ class TaskBase(BaseModel):
     """AI任务基础模型"""
     name: str = Field(..., description="任务名称", example="人流量监控任务")
     description: Optional[str] = Field(None, description="任务描述", example="监控入口区域的人流量变化")
-    warning_level: Optional[int] = Field(None, description="报警级别", example=1)
+    status: Optional[bool] = Field(True, description="任务状态", example=True)
+    alert_level: Optional[int] = Field(None, description="报警级别", example=1)
     frame_rate: Optional[int] = Field(None, description="帧率", example=10)
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行周期", example={"enabled": True, "periods": [{"start": "08:00", "end": "18:00"}]})
-    electronic_fence: Optional[Dict[str, Any]] = Field(None, description="电子围栏配置", example={"enabled": True, "points": [[100, 100], [300, 100], [300, 300], [100, 300]]})
-    status: Optional[bool] = Field(True, description="任务状态", example=True)
+    electronic_fence: Optional[Dict[str, Any]] = Field(None, description="电子围栏配置", example={"enabled": True, "points": [[100, 100], [300, 100], [300, 300], [100, 300]], "trigger_mode": "inside"})
+    
 
 class TaskCreate(TaskBase):
     """创建AI任务请求模型"""
     camera_id: int = Field(..., description="摄像头ID", example=1)
     skill_class_id: int = Field(..., description="技能类ID", example=1)
-    skill_custom_config: Optional[Dict[str, Any]] = Field(None, description="自定义技能配置", example={
+    skill_config: Optional[Dict[str, Any]] = Field(None, description="自定义技能配置", example={
         "params": {
             "classes": ["hat", "person"],
             "conf_thres": 0.6,
@@ -44,12 +45,12 @@ class TaskUpdate(BaseModel):
     """更新AI任务请求模型"""
     name: Optional[str] = Field(None, description="任务名称", example="人流量监控任务(已更新)")
     description: Optional[str] = Field(None, description="任务描述", example="监控入口区域的人流量变化(已更新)")
-    warning_level: Optional[int] = Field(None, description="报警级别", example=2)
+    alert_level: Optional[int] = Field(None, description="报警级别", example=2)
     frame_rate: Optional[int] = Field(None, description="帧率", example=15)
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行周期", example={"enabled": True, "periods": [{"start": "07:00", "end": "23:00"}]})
     electronic_fence: Optional[Dict[str, Any]] = Field(None, description="电子围栏配置", example={"enabled": True, "points": [[150, 150], [350, 150], [350, 350], [150, 350]]})
     status: Optional[bool] = Field(None, description="任务状态", example=False)
-    skill_custom_config: Optional[Dict[str, Any]] = Field(None, description="自定义技能配置", example={
+    skill_config: Optional[Dict[str, Any]] = Field(None, description="自定义技能配置", example={
         "params": {
             "classes": ["hat", "person"],
             "conf_thres": 0.7,
@@ -63,16 +64,22 @@ class TaskResponse(TaskBase):
     """AI任务响应模型"""
     id: int = Field(..., description="任务ID", example=1)
     camera_id: int = Field(..., description="摄像头ID", example=1)
-    camera_name: Optional[str] = Field(None, description="摄像头名称", example="前门摄像头")
-    skill_instance_id: int = Field(..., description="技能实例ID", example=1)
-    skill_name: Optional[str] = Field(None, description="技能名称", example="人流量统计")
+    skill_class_id: int = Field(..., description="技能类ID", example=1)
     skill_config: Optional[Dict[str, Any]] = Field(None, description="技能配置")
-    create_time: Optional[str] = Field(None, description="创建时间", example="2023-10-01 14:30:00")
-    update_time: Optional[str] = Field(None, description="更新时间", example="2023-10-02 15:40:00")
+    created_at: Optional[str] = Field(None, description="创建时间", example="2023-10-01 14:30:00")
+    updated_at: Optional[str] = Field(None, description="更新时间", example="2023-10-02 15:40:00")
+
+class TaskSimpleResponse(BaseModel):
+    """AI任务简单响应模型"""
+    id: int = Field(..., description="任务ID", example=1)
+    name: str = Field(..., description="任务名称", example="人流量监控任务")
+    description: Optional[str] = Field(None, description="任务描述", example="监控入口区域的人流量变化")
+    alert_level: Optional[int] = Field(None, description="报警级别", example=1)
+    status: Optional[bool] = Field(True, description="任务状态", example=True)
 
 class TaskListResponse(BaseModel):
     """AI任务列表响应模型"""
-    tasks: List[TaskResponse] = Field(..., description="任务列表")
+    tasks: List[TaskSimpleResponse] = Field(..., description="任务列表")
     total: int = Field(..., description="总记录数", example=10)
     page: Optional[int] = Field(None, description="当前页码", example=1)
     limit: Optional[int] = Field(None, description="每页数量", example=10)
@@ -325,6 +332,11 @@ def create_task(task_data: TaskCreate = Body(..., description="AI任务创建数
     try:
         # 将Pydantic模型转换为字典
         task_dict = task_data.model_dump()
+
+        # 格式化输出task_dict，便于调试
+        import json
+        logger.info(f"创建AI任务数据: {json.dumps(task_dict, ensure_ascii=False, indent=2)}")
+        
         
         # 创建任务
         task = AITaskService.create_task(task_dict, db)

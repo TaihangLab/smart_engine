@@ -40,20 +40,7 @@ class AITaskDAO:
             Optional[AITask]: 任务对象，如果不存在则返回None
         """
         return db.query(AITask).filter(AITask.id == task_id).first()
-    
-    @staticmethod
-    def get_task_by_uuid(task_uuid: str, db: Session) -> Optional[AITask]:
-        """
-        根据UUID获取任务
-        
-        Args:
-            task_uuid: 任务UUID
-            db: 数据库会话
-            
-        Returns:
-            Optional[AITask]: 找到的任务，如果不存在返回None
-        """
-        return db.query(AITask).filter(AITask.task_uuid == task_uuid).first()
+
         
     @staticmethod
     def get_tasks_by_camera_id(camera_id: int, db: Session) -> List[AITask]:
@@ -67,7 +54,7 @@ class AITaskDAO:
         Returns:
             List[AITask]: 任务列表
         """
-        return db.query(AITask).filter(AITask.camera_id == camera_id).all()
+        return db.query( AITask.id, AITask.name, AITask.description, AITask.alert_level, AITask.status,).filter(AITask.camera_id == camera_id).all()
         
     @staticmethod
     def get_tasks_by_skill_instance_id(skill_instance_id: int, db: Session) -> List[AITask]:
@@ -124,7 +111,7 @@ class AITaskDAO:
                 name=task_data.get('name'),
                 description=task_data.get('description', ''),
                 status=task_data.get('status', True),
-                warning_level=task_data.get('warning_level', 0),
+                alert_level=task_data.get('alert_level', 0),
                 frame_rate=task_data.get('frame_rate', 1.0),
                 running_period=running_period,
                 electronic_fence=electronic_fence,
@@ -171,8 +158,8 @@ class AITaskDAO:
                 task.description = task_data['description']
             if 'status' in task_data:
                 task.status = task_data['status']
-            if 'warning_level' in task_data:
-                task.warning_level = task_data['warning_level']
+            if 'alert_level' in task_data:
+                task.alert_level = task_data['alert_level']
             if 'frame_rate' in task_data:
                 task.frame_rate = task_data['frame_rate']
             if 'task_type' in task_data:
@@ -271,20 +258,55 @@ class AITaskDAO:
     @staticmethod
     def get_distinct_skill_instance_ids_by_camera_id(camera_id: int, db: Session) -> List[int]:
         """
-        获取与指定摄像头关联的所有任务的技能实例ID（去重）
+        使用WVP的通道ID作为摄像头ID
+        获取摄像头关联的不同技能实例ID（去重）
         
         Args:
             camera_id: 摄像头ID
             db: 数据库会话
             
         Returns:
-            List[int]: 去重后的技能类ID列表
+            List[int]: 关联的技能实例ID列表
         """
-        # 使用distinct直接获取去重的skill_instance_id
-        skill_instance_ids = db.query(distinct(AITask.skill_instance_id)).filter(
-            AITask.camera_id == camera_id,
-            AITask.skill_instance_id != None  # 排除skill_instance_id为null的情况
-        ).all()
+        try:
+            # 查询与该摄像头关联的所有任务
+            tasks = db.query(AITask).filter(AITask.camera_id == camera_id).all()
+            
+            # 提取不同的技能实例ID
+            skill_instance_ids = set()
+            for task in tasks:
+                if task.skill_instance_id:
+                    skill_instance_ids.add(task.skill_instance_id)
+            
+            return list(skill_instance_ids)
+        except Exception as e:
+            logger.error(f"获取摄像头关联技能实例ID时出错: {str(e)}")
+            return []
+            
+    @staticmethod
+    def get_distinct_skill_class_ids_by_camera_id(camera_id: int, db: Session) -> List[int]:
+        """
+        使用WVP的通道ID作为摄像头ID
+        获取摄像头关联的不同技能类ID（去重）
         
-        # 将结果从元组列表转换为整数列表
-        return [skill_instance_id[0] for skill_instance_id in skill_instance_ids] 
+        Args:
+            camera_id: 摄像头ID
+            db: 数据库会话
+            
+        Returns:
+            List[int]: 关联的技能类ID列表
+        """
+        try:
+            # 查询与该摄像头关联的所有任务
+            tasks = db.query(AITask).filter(AITask.camera_id == camera_id).all()
+            
+            # 提取不同的技能实例ID
+            skill_class_ids = set()
+            for task in tasks:
+                if task.skill_class_id:
+                    skill_class_ids.add(task.skill_class_id)
+            
+            return list(skill_class_ids)
+        except Exception as e:
+            logger.error(f"获取摄像头关联技能类ID时出错: {str(e)}")
+            return []

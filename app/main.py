@@ -21,6 +21,7 @@ from app.db.base_class import Base
 from app.api import api_router
 from app.services.triton_client import triton_client
 from app.skills.skill_manager import skill_manager
+from app.services.ai_task_executor import task_executor
 
 # 导入报警服务相关内容
 import app.services.rabbitmq_client
@@ -74,6 +75,14 @@ async def lifespan(app: FastAPI):
     # 初始化RabbitMQ和报警服务（这些服务在导入时已自动初始化）
     logger.info("RabbitMQ和报警服务已初始化")
     
+    # 初始化AI任务执行器并为所有任务创建调度计划
+    logger.info("初始化AI任务执行器...")
+    try:
+        task_executor.schedule_all_tasks()
+        logger.info("已为所有AI任务创建调度计划")
+    except Exception as e:
+        logger.error(f"初始化AI任务执行器失败: {str(e)}", exc_info=True)
+    
     yield
     
     # 关闭时执行清理工作
@@ -83,6 +92,13 @@ async def lifespan(app: FastAPI):
     # 关闭RabbitMQ连接
     from app.services.rabbitmq_client import rabbitmq_client
     rabbitmq_client.close()
+    
+    # 关闭任务执行器的调度器
+    try:
+        task_executor.scheduler.shutdown()
+        logger.info("AI任务执行器调度器已关闭")
+    except Exception as e:
+        logger.error(f"关闭AI任务执行器调度器失败: {str(e)}")
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
