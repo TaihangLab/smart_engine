@@ -11,7 +11,7 @@ from app.models.skill import SkillClass, SkillClassModel
 from app.services.minio_client import minio_client
 from app.db.ai_task_dao import AITaskDAO
 from app.services.camera_service import CameraService
-
+from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 class SkillClassService:
@@ -59,7 +59,7 @@ class SkillClassService:
                 # 获取技能示例图片
                 image_object_name = skill_class.image_object_name
                 if image_object_name:
-                    image_url = minio_client.get_presigned_url(image_object_name)
+                    image_url = minio_client.get_presigned_url(settings.MINIO_BUCKET, settings.MINIO_SKILL_IMAGE_PREFIX, image_object_name)
                 else:
                     image_url = None
 
@@ -159,7 +159,7 @@ class SkillClassService:
             # 获取技能示例图片
             image_object_name = skill_class.image_object_name
             if image_object_name:
-                image_url = minio_client.get_presigned_url(image_object_name)
+                image_url = minio_client.get_presigned_url(settings.MINIO_BUCKET, settings.MINIO_SKILL_IMAGE_PREFIX, image_object_name)
             else:
                 image_url = None
             

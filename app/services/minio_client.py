@@ -148,11 +148,13 @@ class MinioClient:
             logger.error(f"数据上传失败: {err}")
             raise HTTPException(status_code=500, detail=f"数据上传失败: {str(err)}")
     
-    def get_presigned_url(self, object_name: str, expires: int = 3600) -> str:
+    def get_presigned_url(self,bucket_name: str, prefix: str, object_name: str, expires: int = 3600) -> str:
         """
         获取对象的临时访问URL
         
         Args:
+            bucket_name: 存储桶名称
+            prefix: 对象前缀
             object_name: 对象名称
             expires: 链接有效期（秒），默认1小时            
         Returns:
@@ -160,11 +162,11 @@ class MinioClient:
         """
         try:
             
-            object_name = f"{settings.MINIO_SKILL_IMAGE_PREFIX}{object_name}"
+            object_name = f"{prefix}{object_name}"
 
             # 生成临时URL
             url = self.client.presigned_get_object(
-                bucket_name=settings.MINIO_BUCKET,
+                bucket_name=bucket_name,
                 object_name=object_name,
                 expires=timedelta(seconds=expires)
             )

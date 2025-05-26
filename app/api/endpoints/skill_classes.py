@@ -399,7 +399,7 @@ async def upload_skill_class_image(
         skill_class_service.update(skill_class_id, updated_data, db)
         
         # 获取临时URL用于返回
-        temp_url = minio_client.get_presigned_url(object_name)
+        temp_url = minio_client.get_presigned_url(settings.MINIO_BUCKET, settings.MINIO_SKILL_IMAGE_PREFIX, object_name)
         
         return {
             "success": True,
