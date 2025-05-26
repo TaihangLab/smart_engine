@@ -416,19 +416,22 @@ def get_model_skill_classes(model_name: str, db: Session = Depends(get_db)):
         )
 
 # @router.get("/{model_name}/instances", response_model=Dict[str, Any])
-def get_model_instances(model_name: str, db: Session = Depends(get_db)):
+def get_model_usage_info_legacy(model_name: str, db: Session = Depends(get_db)):
     """
-    获取使用指定模型的所有技能实例
+    获取使用指定模型的使用情况信息（兼容性端点）
     
     Args:
         model_name: 模型名称
         
     Returns:
-        Dict: 包含使用该模型的所有技能实例信息，按技能类分组
+        Dict: 包含使用该模型的技能类和AI任务信息
+        
+    Note:
+        此端点为兼容性保留，建议使用 /api/v1/models/{model_name}/usage 端点
     """
     try:
-        # 调用服务层获取模型实例信息
-        result = ModelService.get_model_instances(model_name, db)
+        # 调用服务层获取模型使用情况信息
+        result = ModelService.get_model_usage_info(model_name, db)
         
         if not result:
             raise HTTPException(
@@ -440,8 +443,32 @@ def get_model_instances(model_name: str, db: Session = Depends(get_db)):
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"获取模型实例信息失败: {str(e)}", exc_info=True)
+        logger.error(f"获取模型使用情况信息失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取模型实例信息失败: {str(e)}"
+            detail=f"获取模型使用情况信息失败: {str(e)}"
         )
+
+@router.get("/{model_name}/usage", response_model=Dict[str, Any])
+def get_model_usage_info(model_name: str, db: Session = Depends(get_db)):
+    """
+    获取指定模型的使用情况信息
+    
+    Args:
+        model_name: 模型名称
+        db: 数据库会话
+        
+    Returns:
+        模型使用情况信息
+    """
+    logger.info(f"获取模型使用情况: model_name={model_name}")
+    
+    try:
+        result = ModelService.get_model_usage_info(model_name, db)
+        if result is None:
+            raise HTTPException(status_code=404, detail=f"模型 '{model_name}' 不存在")
+        
+        return {"success": True, "data": result}
+    except Exception as e:
+        logger.error(f"获取模型使用情况失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取模型使用情况失败: {str(e)}")

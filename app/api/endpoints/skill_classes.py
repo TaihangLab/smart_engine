@@ -312,17 +312,17 @@ def remove_model_from_skill_class(
         )
     return {"success": True, "message": "成功从技能类移除模型"}
 
-# @router.get("/{skill_class_id}/instances", response_model=Dict[str, Any])
-def get_skill_class_instances(skill_class_id: int, db: Session = Depends(get_db)):
+# @router.get("/{skill_class_id}/tasks", response_model=Dict[str, Any])
+def get_skill_class_tasks(skill_class_id: int, db: Session = Depends(get_db)):
     """
-    获取指定技能类的所有技能实例
+    获取指定技能类的所有AI任务
     
     Args:
         skill_class_id: 技能类ID
         db: 数据库会话
         
     Returns:
-        技能实例列表
+        AI任务列表
     """
     # 检查技能类是否存在
     skill_class = skill_class_service.get_by_id(skill_class_id, db)
@@ -332,8 +332,8 @@ def get_skill_class_instances(skill_class_id: int, db: Session = Depends(get_db)
             detail=f"技能类不存在: ID={skill_class_id}"
         )
     
-    # 获取该技能类的所有实例
-    instances = skill_instance_service.get_by_class_id(skill_class_id, db)
+    # 获取该技能类的所有AI任务
+    ai_tasks = skill_class.get("ai_tasks", [])
     
     return {
         "skill_class": {
@@ -341,8 +341,8 @@ def get_skill_class_instances(skill_class_id: int, db: Session = Depends(get_db)
             "name": skill_class["name"],
             "name_zh": skill_class["name_zh"]
         },
-        "instances": instances,
-        "total": len(instances)
+        "ai_tasks": ai_tasks,
+        "total": len(ai_tasks)
     }
 
 @router.post("/{skill_class_id}/image", response_model=Dict[str, Any])
@@ -443,7 +443,7 @@ class ReloadSkillsResponse(BaseModel):
     success: bool = Field(..., description="操作是否成功", example=True)
     message: str = Field(..., description="操作结果消息", example="技能热加载成功")
     skill_classes: Optional[Dict[str, Any]] = Field(None, description="技能类加载统计")
-    skill_instances: Optional[Dict[str, Any]] = Field(None, description="技能实例加载统计")
+    skill_tasks: Optional[Dict[str, Any]] = Field(None, description="技能任务加载统计")
     elapsed_time: Optional[str] = Field(None, description="执行耗时")
 
 @router.post("/reload", response_model=ReloadSkillsResponse)

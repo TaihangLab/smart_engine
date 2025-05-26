@@ -162,8 +162,8 @@ class ModelService:
             
 
             #usage_status
-            model_instances = ModelService.get_model_instances(db_model.name, db)
-            usage_status = model_instances.get("has_instances",False)
+            model_usage_info = ModelService.get_model_usage_info(db_model.name, db)
+            usage_status = model_usage_info.get("has_tasks", False)
 
 
 
@@ -255,8 +255,8 @@ class ModelService:
         
 
         #usage_status
-        model_instances = ModelService.get_model_instances(model.name, db)
-        usage_status = model_instances.get("has_instances",False)
+        model_usage_info = ModelService.get_model_usage_info(model.name, db)
+        usage_status = model_usage_info.get("has_tasks", False)
 
         #获取技能类
         skill_classes = ModelService.get_model_skill_classes(model.name, db)    
@@ -525,12 +525,14 @@ class ModelService:
         if not model:
             return False, []
         
-        # 获取使用该模型的技能实例
-        skill_instances = ModelService.get_model_instances(model.name, db)
-        skill_names = [sc.get("skill_class",{}).get("name_zh", "") for sc in skill_instances.get("skill_classes", [])]
+        # 获取使用该模型的技能类和AI任务信息
+        model_usage = ModelService.get_model_usage_info(model.name, db)
+        if not model_usage:
+            return False, []
+            
+        skill_names = [sc.get("skill_class", {}).get("name_zh", "") for sc in model_usage.get("skill_classes", [])]
 
-
-        return skill_instances.get("has_enabled_instances",False),skill_names
+        return model_usage.get("has_enabled_tasks", False), skill_names
     
     
     @staticmethod
@@ -579,20 +581,20 @@ class ModelService:
         }
 
     @staticmethod
-    def get_model_instances(model_name: str, db: Session) -> Dict[str, Any]:
+    def get_model_usage_info(model_name: str, db: Session) -> Dict[str, Any]:
         """
-        获取使用指定模型的所有技能实例，按技能类分组
+        获取使用指定模型的技能类和AI任务信息
         
         Args:
             model_name: 模型名称
             db: 数据库会话
             
         Returns:
-            Dict[str, Any]: 包含使用该模型的所有技能实例信息，按技能类分组
+            Dict[str, Any]: 包含使用该模型的技能类和AI任务信息
         """
         from app.db.model_dao import ModelDAO
         from app.db.skill_class_dao import SkillClassDAO
-        from app.services.skill_instance_service import skill_instance_service
+        from app.db.ai_task_dao import AITaskDAO
         
         # 查找模型
         model = ModelDAO.get_model_by_name(model_name, db)
@@ -603,13 +605,17 @@ class ModelService:
         # 使用DAO层查找关联的技能类
         skill_classes = SkillClassDAO.get_by_model_id(model.id, db)
         
-        # 获取每个技能类的实例信息
+        # 获取每个技能类的AI任务信息
         result_data = []
-        total_instances = 0
+        total_tasks = 0
+        has_enabled_tasks = False
         
         for skill_class in skill_classes:
-            # 获取该技能类的所有实例
-            instances = skill_instance_service.get_by_class_id(skill_class.id, db)
+            # 获取该技能类的所有AI任务
+            ai_tasks = AITaskDAO.get_tasks_by_skill_class_id(skill_class.id, db)
+            
+            # 统计启用的任务
+            enabled_tasks = [task for task in ai_tasks if task.status]
             
             # 组织数据
             class_data = {
@@ -621,22 +627,28 @@ class ModelService:
                     "description": skill_class.description,
                     "status": skill_class.status
                 },
-                "instances": instances,
-                "instance_count": len(instances),
-                "has_enabled_instances": any(instance.get("status", False) for instance in instances)
+                "ai_tasks": [{
+                    "id": task.id,
+                    "name": task.name,
+                    "status": task.status,
+                    "camera_id": task.camera_id
+                } for task in ai_tasks],
+                "task_count": len(ai_tasks),
+                "enabled_task_count": len(enabled_tasks),
+                "has_enabled_tasks": len(enabled_tasks) > 0
             }
             
             result_data.append(class_data)
-            total_instances += len(instances)
-        
+            total_tasks += len(ai_tasks)
+            if len(enabled_tasks) > 0:
+                has_enabled_tasks = True
+
         return {
             "model_name": model_name,
             "model_id": model.id,
             "skill_classes": result_data,
             "skill_class_count": len(skill_classes),
-            "total_instances": total_instances,
-            "has_instances": total_instances > 0, #是否存在技能实例
-            "has_enabled_instances": any(
-                class_data["has_enabled_instances"] for class_data in result_data 
-            )  #是否存在启用技能实例
+            "total_tasks": total_tasks,
+            "has_tasks": total_tasks > 0,  # 是否存在AI任务
+            "has_enabled_tasks": has_enabled_tasks  # 是否存在启用的AI任务
         } 
