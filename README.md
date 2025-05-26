@@ -1,11 +1,12 @@
 # Smart Vision Engine
 
-基于WVP的视觉AI平台后端服务，提供摄像头管理、技能管理和模型推理等功能。
+基于WVP的视觉AI平台后端服务，提供摄像头管理、技能管理和AI任务执行等功能。
 
 ## 功能特点
 
 - **摄像头管理**：支持从WVP同步设备，配置摄像头属性（位置、标签、预警等级等）
 - **技能管理**：支持创建和管理视觉AI技能，一个技能可以包含多个模型
+- **AI任务管理**：支持创建AI分析任务，直接使用技能类+自定义配置的灵活模式
 - **模型管理**：支持管理Triton推理服务器上的模型，自动同步模型到数据库
 - **技能模块化**：采用插件式技能架构，可以轻松扩展新的视觉分析能力
 - **技能热加载**：支持动态加载技能插件，无需重启系统
@@ -33,7 +34,7 @@ app/
 ├── services/       # 业务服务层
 └── skills/         # 技能系统核心
     ├── skill_base.py             # 技能基类
-    ├── skill_factory.py          # 技能工厂，负责创建技能实例
+    ├── skill_factory.py          # 技能工厂，负责创建技能对象
     └── skill_manager.py          # 技能管理器，负责管理技能生命周期
 ```
 
@@ -118,6 +119,14 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 ## 技能系统
 
+### 技能架构概述
+
+本系统采用**技能类+任务配置**的直接模式，简化了原有的多层架构：
+
+- **技能类(Skill Class)**：定义AI分析算法的Python类，包含默认配置和处理逻辑
+- **AI任务(AI Task)**：使用特定技能类执行分析的任务，可以自定义配置覆盖默认设置
+- **动态配置合并**：任务级别的配置会与技能类的默认配置深度合并，提供最大灵活性
+
 ### 技能描述
 
 技能（Skill）是系统中用于执行特定AI分析任务的模块，每个技能都包含以下部分：
@@ -125,6 +134,31 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 - **配置信息**：技能的名称、类型、描述等
 - **所需模型**：技能执行所需的Triton模型
 - **处理逻辑**：实现特定分析功能的代码
+- **默认配置**：技能的标准参数设置
+
+### 创建AI任务
+
+现在创建AI任务变得更加直接和灵活：
+
+```json
+{
+  "name": "安全帽检测任务",
+  "camera_id": 1,
+  "skill_class_id": 2,
+  "skill_config": {
+    "params": {
+      "conf_thres": 0.7,
+      "classes": ["helmet", "person"],
+      "max_det": 500
+    }
+  }
+}
+```
+
+系统会自动：
+1. 获取技能类的默认配置
+2. 与任务的`skill_config`进行深度合并
+3. 使用合并后的配置直接创建技能对象执行任务
 
 ### 创建自定义技能
 
@@ -148,7 +182,11 @@ class MyCustomSkill(BaseSkill):
         "type": "detection",             # 技能类型
         "description": "这是一个自定义技能", # 描述
         "required_models": ["model_name"], # 所需模型
-        # 其他配置...
+        "params": {
+            "conf_thres": 0.5,
+            "iou_thres": 0.45,
+            "max_det": 300
+        }
     }
     
     def process(self, frame, **kwargs):
@@ -182,11 +220,6 @@ POST /api/v1/skill-classes/reload
     "db_updated": 0,
     "failed": 0
   },
-  "skill_instances": {
-    "before": 3,
-    "after": 4,
-    "delta": 1
-  },
   "elapsed_time": "0.53秒"
 }
 ```
@@ -219,35 +252,29 @@ file=@your_skill.py
 - `PUT /api/v1/cameras/{id}` - 更新摄像头信息
 - `DELETE /api/v1/cameras/{id}` - 删除摄像头
 
-### 技能接口
+### 技能类接口
 - `GET /api/v1/skill-classes` - 获取技能类列表
-- `GET /api/v1/skill-instances` - 获取技能实例列表
-- `POST /api/v1/skill-instances` - 创建技能实例
-- `PUT /api/v1/skill-instances/{id}` - 更新技能实例
-- `DELETE /api/v1/skill-instances/{id}` - 删除技能实例
-- `POST /api/v1/skill-instances/{id}/clone` - 克隆技能实例
-- `POST /api/v1/skill-instances/{id}/enable` - 启用技能实例
-- `POST /api/v1/skill-instances/{id}/disable` - 禁用技能实例
+- `GET /api/v1/skill-classes/{id}` - 获取特定技能类信息
+- `POST /api/v1/skill-classes/reload` - 热加载技能
+- `POST /api/v1/skill-classes/upload` - 上传技能文件
+
+### AI任务接口
+- `GET /api/v1/ai-tasks` - 获取AI任务列表
+- `GET /api/v1/ai-tasks/{id}` - 获取特定AI任务信息
+- `POST /api/v1/ai-tasks` - 创建新AI任务
+- `PUT /api/v1/ai-tasks/{id}` - 更新AI任务
+- `DELETE /api/v1/ai-tasks/{id}` - 删除AI任务
+- `GET /api/v1/ai-tasks/camera/id/{camera_id}` - 获取指定摄像头的任务
+- `GET /api/v1/ai-tasks/skill-classes` - 获取可用于创建任务的技能类
 
 ### 模型接口
 - `GET /api/v1/models` - 获取模型列表
 - `GET /api/v1/models/{id}` - 获取特定模型信息
 - `GET /api/v1/models/sync` - 从Triton同步模型
 
-## 技能实例测试
-
-项目提供了自动化测试脚本用于验证技能实例API功能：
-
-```bash
-# 运行技能实例API测试
-python tests/test_skill_instances.py
-```
-
-测试脚本会执行以下操作：
-1. 验证API服务可用性
-2. 获取所有技能实例和技能类
-3. 测试创建、更新、启用/禁用、克隆和删除技能实例
-4. 测试各种错误处理情况
+### 报警接口
+- `GET /api/v1/alerts` - 获取报警列表
+- `GET /api/v1/alerts/{id}` - 获取特定报警信息
 
 ## 系统健康检查
 
@@ -287,7 +314,8 @@ DEBUG=1 python -m app.main
 
 - 推理服务使用批处理模式提高性能
 - 使用连接池优化数据库性能
-- 定期清理不使用的技能实例和任务记录
+- 技能对象按需创建，避免不必要的内存占用
+- 定期清理不使用的任务记录
 
 ## 许可证 
 
