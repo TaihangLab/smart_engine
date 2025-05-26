@@ -98,6 +98,19 @@ class SkillClassDAO:
         return db.query(SkillClass).filter(SkillClass.name == name).first()
         
     @staticmethod
+    def get_all_enabled(db: Session) -> List[SkillClass]:
+        """
+        获取所有启用的技能类
+        
+        Args:
+            db: 数据库会话
+            
+        Returns:
+            启用的技能类列表
+        """
+        return db.query(SkillClass).filter(SkillClass.status == True).all()
+        
+    @staticmethod
     def create(data: Dict[str, Any], db: Session) -> SkillClass:
         """
         创建技能类

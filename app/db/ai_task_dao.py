@@ -45,7 +45,7 @@ class AITaskDAO:
     @staticmethod
     def get_tasks_by_camera_id(camera_id: int, db: Session) -> List[AITask]:
         """
-        获取与指定摄像头关联的所有任务
+        根据摄像头ID获取任务列表
         
         Args:
             camera_id: 摄像头ID
@@ -54,26 +54,12 @@ class AITaskDAO:
         Returns:
             List[AITask]: 任务列表
         """
-        return db.query( AITask.id, AITask.name, AITask.description, AITask.alert_level, AITask.status,).filter(AITask.camera_id == camera_id).all()
+        return db.query(AITask).filter(AITask.camera_id == camera_id).all()
         
     @staticmethod
-    def get_tasks_by_skill_instance_id(skill_instance_id: int, db: Session) -> List[AITask]:
+    def get_tasks_by_skill_class_id(skill_class_id: int, db: Session) -> List[AITask]:
         """
-        获取与指定技能实例关联的所有任务
-        
-        Args:
-            skill_instance_id: 技能实例ID
-            db: 数据库会话
-            
-        Returns:
-            List[AITask]: 任务列表
-        """
-        return db.query(AITask).filter(AITask.skill_instance_id == skill_instance_id).all()
-    
-    @staticmethod
-    def get_by_skill_class_id(skill_class_id: int, db: Session) -> List[AITask]:
-        """
-        获取与指定技能类关联的所有任务
+        根据技能类ID获取任务列表
         
         Args:
             skill_class_id: 技能类ID
@@ -119,7 +105,6 @@ class AITaskDAO:
                 config=config,
                 camera_id=task_data.get('camera_id'),
                 skill_class_id=task_data.get('skill_class_id'),
-                skill_instance_id=task_data.get('skill_instance_id'),
                 skill_config=skill_config_json
             )
             
@@ -166,9 +151,9 @@ class AITaskDAO:
                 task.task_type = task_data['task_type']
             if 'camera_id' in task_data:
                 task.camera_id = task_data['camera_id']
-            if 'skill_instance_id' in task_data:
-                task.skill_instance_id = task_data['skill_instance_id']
-                
+            if 'skill_class_id' in task_data:
+                task.skill_class_id = task_data['skill_class_id']
+            
             # 更新JSON字段
             if 'running_period' in task_data:
                 running_period = json.dumps(task_data['running_period']) if isinstance(task_data['running_period'], dict) else task_data['running_period']
@@ -235,55 +220,6 @@ class AITaskDAO:
         return [camera_id[0] for camera_id in camera_ids]
     
     @staticmethod
-    def get_distinct_camera_ids_by_skill_instance_id(skill_instance_id: int, db: Session) -> List[int]:
-        """
-        获取与指定技能实例关联的所有任务的摄像头ID（去重）
-        
-        Args:
-            skill_instance_id: 技能实例ID
-            db: 数据库会话
-            
-        Returns:
-            List[int]: 去重后的摄像头ID列表
-        """
-        # 使用distinct直接获取去重的camera_id
-        camera_ids = db.query(distinct(AITask.camera_id)).filter(
-            AITask.skill_instance_id == skill_instance_id,
-            AITask.camera_id != None  # 排除camera_id为null的情况
-        ).all()
-        
-        # 将结果从元组列表转换为整数列表
-        return [camera_id[0] for camera_id in camera_ids]
-    
-    @staticmethod
-    def get_distinct_skill_instance_ids_by_camera_id(camera_id: int, db: Session) -> List[int]:
-        """
-        使用WVP的通道ID作为摄像头ID
-        获取摄像头关联的不同技能实例ID（去重）
-        
-        Args:
-            camera_id: 摄像头ID
-            db: 数据库会话
-            
-        Returns:
-            List[int]: 关联的技能实例ID列表
-        """
-        try:
-            # 查询与该摄像头关联的所有任务
-            tasks = db.query(AITask).filter(AITask.camera_id == camera_id).all()
-            
-            # 提取不同的技能实例ID
-            skill_instance_ids = set()
-            for task in tasks:
-                if task.skill_instance_id:
-                    skill_instance_ids.add(task.skill_instance_id)
-            
-            return list(skill_instance_ids)
-        except Exception as e:
-            logger.error(f"获取摄像头关联技能实例ID时出错: {str(e)}")
-            return []
-            
-    @staticmethod
     def get_distinct_skill_class_ids_by_camera_id(camera_id: int, db: Session) -> List[int]:
         """
         使用WVP的通道ID作为摄像头ID
@@ -300,7 +236,7 @@ class AITaskDAO:
             # 查询与该摄像头关联的所有任务
             tasks = db.query(AITask).filter(AITask.camera_id == camera_id).all()
             
-            # 提取不同的技能实例ID
+            # 提取不同的技能类ID
             skill_class_ids = set()
             for task in tasks:
                 if task.skill_class_id:

@@ -1,395 +1,174 @@
 """
-技能管理模块，负责技能的加载、初始化、运行和管理
+技能管理器模块，负责管理技能类的生命周期
 """
-import logging
 import os
-from typing import Dict, Any, List, Optional, Tuple, Union
 import time
-import traceback
-
+import logging
+from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 
-from app.models.skill import SkillClass, SkillInstance
 from app.db.skill_class_dao import SkillClassDAO
-from app.db.skill_instance_dao import SkillInstanceDAO
-from app.db.model_dao import ModelDAO
-from app.skills.skill_base import BaseSkill
 from app.skills.skill_factory import skill_factory
-from app.core.config import settings
+from app.skills.skill_base import BaseSkill
 
 logger = logging.getLogger(__name__)
 
-# 定义技能目录路径
-SKILL_PLUGINS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "plugins", "skills")
+# 技能插件目录
+SKILL_PLUGINS_DIR = os.path.join(os.path.dirname(__file__), '..', 'plugins', 'skills')
 
 class SkillManager:
     """
-    技能管理器，负责管理技能实例的创建和生命周期
-    
-    技能相关概念解释：
-    - 技能类(Skill Class): 继承自BaseSkill的Python类，定义了技能的逻辑
-    - 技能实例(Skill Instance): 运行时创建的技能类实例，具有特定配置
-    - SkillClass: 数据库中存储的技能类信息，包含技能类名称、类型和默认配置等
-    - SkillInstance: 数据库中存储的技能实例信息，关联到特定的技能类并有具体配置
-    - skill_name: 技能名称，如'FaceDetection'，用于标识和查找技能类
-    - instance_id: 技能实例ID，数据库中的主键，用于引用具体的技能实例
+    技能管理器，负责管理技能类的生命周期
     """
+    
     def __init__(self, db: Session = None):
         """
         初始化技能管理器
         
         Args:
-            db: 数据库会话，如果提供则立即进行初始化
+            db: 数据库会话
         """
         self.db = db
-        self.skill_instances: Dict[str, BaseSkill] = {}  # 按ID索引的技能实例
-        self.initialized = False
         
-        # 如果提供了数据库会话，则立即初始化
-        if db:
+        if self.db:
             self.initialize()
-        
+    
     def initialize_with_db(self, db: Session) -> bool:
         """
-        使用提供的数据库会话初始化技能管理器
+        使用数据库会话初始化技能管理器
         
         Args:
             db: 数据库会话
             
         Returns:
-            初始化是否成功
+            bool: 是否初始化成功
         """
         self.db = db
         return self.initialize()
-        
+    
     def initialize(self) -> bool:
         """
-        初始化技能管理器，扫描注册技能类并从数据库加载技能实例
+        初始化技能管理器
         
         Returns:
-            初始化是否成功
+            bool: 是否初始化成功
         """
-        if self.initialized:
-            logger.warning("技能管理器已经初始化，请勿重复初始化")
-            return True
-            
         if not self.db:
-            logger.error("初始化技能管理器失败：未提供数据库会话")
+            logger.error("未提供数据库会话，无法初始化技能管理器")
             return False
             
         try:
-            # 1. 扫描所有技能目录并注册技能类
-            success, result = self._scan_all_skill_dirs()
-            
-            if not success:
-                logger.error("扫描注册技能类失败")
+            # 扫描并同步技能类到数据库
+            success, _ = self._scan_all_skill_dirs()
+            if success:
+                logger.info("技能管理器初始化成功")
+                return True
+            else:
+                logger.error("技能管理器初始化失败：扫描技能目录失败")
                 return False
-                
-            logger.info(f"技能类扫描结果: 发现{result['total_found']}个, "
-                        f"注册{result['registered']}个, "
-                        f"数据库新增{result['db_created']}个, "
-                        f"数据库更新{result['db_updated']}个, "
-                        f"失败{result['failed']}个, "
-                        f"扫描目录{result['dirs_scanned']}个, "
-                        f"扫描文件{result['files_scanned']}个")
-            
-            # 2. 从数据库加载已启用的技能实例并创建实例
-            self._load_skill_instances()
-            
-            self.initialized = True
-            logger.info(f"技能管理器初始化完成，已加载 {len(self.skill_instances)} 个技能实例")
-            return True
         except Exception as e:
             logger.exception(f"初始化技能管理器失败: {e}")
             return False
-            
+    
     def _scan_all_skill_dirs(self) -> Tuple[bool, Dict[str, Any]]:
         """
         扫描所有技能目录并注册技能类
         
         Returns:
-            (成功标志, 结果统计)
+            Tuple[bool, Dict[str, Any]]: (成功标志, 扫描结果)
         """
         skill_dirs = self._get_skill_dirs()
-        logger.info(f"将扫描以下技能目录: {skill_dirs}")
-        return skill_factory.scan_and_register_skills(skill_dirs, self.db)
+        all_results = {"total_found": 0, "registered": 0, "db_created": 0, "db_updated": 0, "failed": 0}
+        
+        for skill_dir in skill_dirs:
+            success, result = skill_factory.scan_and_register_skills(skill_dir, self.db)
+            if success:
+                # 累加结果
+                for key in all_results:
+                    all_results[key] += result.get(key, 0)
+            else:
+                logger.error(f"扫描技能目录失败: {skill_dir}")
+        
+        return True, all_results
     
     def _get_skill_dirs(self) -> List[str]:
         """
-        获取所有需要扫描的技能目录
+        获取技能目录列表
         
         Returns:
-            技能目录路径列表
+            List[str]: 技能目录路径列表
         """
-        dirs = []
+        skill_dirs = []
         
-        # 添加插件目录（如果存在）
+        # 添加插件目录
         if os.path.exists(SKILL_PLUGINS_DIR):
-            dirs.append(SKILL_PLUGINS_DIR)
-        else:
-            # 确保插件目录存在，如果不存在则创建
-            try:
-                os.makedirs(SKILL_PLUGINS_DIR, exist_ok=True)
-                dirs.append(SKILL_PLUGINS_DIR)
-                logger.info(f"已创建技能插件目录: {SKILL_PLUGINS_DIR}")
-            except Exception as e:
-                logger.error(f"创建技能插件目录失败: {e}")
+            skill_dirs.append(SKILL_PLUGINS_DIR)
         
-        return dirs
+        # 可以添加其他技能目录
+        base_skills_dir = os.path.join(os.path.dirname(__file__))
+        if os.path.exists(base_skills_dir):
+            skill_dirs.append(base_skills_dir)
+        
+        return skill_dirs
+
+    def create_skill_for_task(self, skill_class_id: int, skill_config: Dict[str, Any] = None) -> Optional[BaseSkill]:
+        """
+        为任务创建技能对象
+        
+        Args:
+            skill_class_id: 技能类ID
+            skill_config: 技能配置
             
-    def _load_skill_instances(self) -> None:
+        Returns:
+            技能对象或None
         """
-        从数据库加载所有已启用的技能实例并创建实例
-        """
-        logger.info("从数据库加载技能实例")
         try:
-            # 获取数据库中所有已启用的技能实例
-            enabled_instances = SkillInstanceDAO.get_all_enabled(self.db)
-            logger.info(f"数据库中有 {len(enabled_instances)} 个已启用的技能实例")
+            # 获取技能类信息
+            skill_class = SkillClassDAO.get_by_id(skill_class_id, self.db)
+            if not skill_class:
+                logger.error(f"未找到技能类: {skill_class_id}")
+                return None
             
-            # 清空现有技能实例
-            self.skill_instances.clear()
+            # 合并默认配置和任务特定配置
+            default_config = skill_class.default_config if skill_class.default_config else {}
+            task_config = skill_config or {}
             
-            # 为每个技能实例创建运行时实例
-            for db_instance in enabled_instances:
-                # 使用工厂方法直接从数据库记录创建技能实例
-                runtime_instance = skill_factory.create_skill_from_db_instance(db_instance.id, self.db)
+            # 深度合并配置
+            merged_config = self._merge_config(default_config, task_config)
+            
+            # 使用技能工厂创建技能对象
+            skill_instance = skill_factory.create_skill(skill_class.name, merged_config)
+            
+            if not skill_instance:
+                logger.error(f"无法创建技能对象: class={skill_class.name}")
+                return None
                 
-                if runtime_instance:
-                    # 存储技能实例，使用技能实例ID作为键
-                    self.skill_instances[str(db_instance.id)] = runtime_instance
-                    logger.info(f"已创建技能运行时实例: 名称={db_instance.name}, ID={db_instance.id}")
-                else:
-                    logger.error(f"创建技能运行时实例失败: 名称={db_instance.name}, ID={db_instance.id}")
+            logger.info(f"成功创建技能对象: {skill_class.name}")
+            return skill_instance
+            
         except Exception as e:
-            logger.exception(f"加载技能实例失败: {e}")
+            logger.error(f"创建技能对象时出错: {str(e)}")
+            return None
     
-    def get_skill_instance(self, instance_id: str) -> Optional[BaseSkill]:
-        """
-        根据ID获取技能实例
+    def _merge_config(self, default_config: dict, task_config: dict) -> dict:
+        """深度合并配置"""
+        merged = default_config.copy()
         
-        Args:
-            instance_id: 技能实例ID (数据库主键)
-            
-        Returns:
-            技能实例或None
-        """
-        return self.skill_instances.get(instance_id)
+        for key, value in task_config.items():
+            if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+                # 如果两个值都是字典，递归合并
+                merged[key] = self._merge_config(merged[key], value)
+            else:
+                # 否则直接覆盖
+                merged[key] = value
         
-    def get_instances_by_class_name(self, class_name: str) -> List[BaseSkill]:
-        """
-        获取指定技能类名称的所有技能实例
-        
-        Args:
-            class_name: 技能类名称
-            
-        Returns:
-            技能实例列表
-        """
-        return [instance for instance in self.skill_instances.values() 
-                if instance.config.get("name") == class_name]
-        
-    def get_instances_by_class_id(self, class_id: int) -> List[BaseSkill]:
-        """
-        获取指定技能类ID的所有技能实例
-        
-        Args:
-            class_id: 技能类ID
-            
-        Returns:
-            技能实例列表
-        """
-        return [instance for instance in self.skill_instances.values() 
-                if instance.config.get("class_id") == str(class_id)]
-        
-    def get_all_skill_instances(self) -> List[BaseSkill]:
-        """
-        获取所有技能实例
-        
-        Returns:
-            技能实例列表
-        """
-        return list(self.skill_instances.values())
-        
-    def get_all_skills(self) -> List[BaseSkill]:
-        """
-        获取所有技能实例（兼容旧方法）
-        
-        Returns:
-            技能实例列表
-        """
-        return self.get_all_skill_instances()
-        
-    def add_skill_instance(self, instance: BaseSkill) -> bool:
-        """
-        添加技能实例
-        
-        Args:
-            instance: 技能实例
-            
-        Returns:
-            是否添加成功
-        """
-        # 获取技能实例ID
-        instance_id = instance.config.get("id")
-        if not instance_id:
-            logger.error("技能配置缺少ID，无法添加")
-            return False
-            
-        # 检查是否已存在同ID的技能实例
-        if instance_id in self.skill_instances:
-            logger.warning(f"技能实例ID {instance_id} 已存在，将覆盖原有实例")
-            
-        # 添加技能实例
-        self.skill_instances[instance_id] = instance
-        logger.info(f"添加技能实例: 名称={instance.config.get('instance_name')}, ID={instance_id}")
-        return True
-        
-    def remove_skill_instance(self, instance_id: str) -> bool:
-        """
-        移除技能实例
-        
-        Args:
-            instance_id: 技能实例ID
-            
-        Returns:
-            是否移除成功
-        """
-        if instance_id not in self.skill_instances:
-            logger.warning(f"技能实例ID {instance_id} 不存在，无法移除")
-            return False
-            
-        # 获取技能信息用于日志
-        instance = self.skill_instances.pop(instance_id)
-        instance_name = instance.config.get('instance_name', '')
-        
-        logger.info(f"已移除技能实例: 名称={instance_name}, ID={instance_id}")
-        return True
-        
-    def reload_skill_instance(self, instance_id: str) -> bool:
-        """
-        重新加载技能实例
-        
-        Args:
-            instance_id: 技能实例ID
-            
-        Returns:
-            是否重新加载成功
-        """
-        # 1. 从数据库获取最新的技能实例配置
-        db_instance = SkillInstanceDAO.get_by_id(instance_id, self.db)
-        if not db_instance:
-            logger.error(f"数据库中不存在技能实例ID {instance_id}，无法重新加载")
-            return False
-        
-        # 2. 移除旧的技能实例
-        if instance_id in self.skill_instances:
-            self.remove_skill_instance(instance_id)
-            
-        # 3. 使用工厂方法直接从数据库记录创建技能实例
-        runtime_instance = skill_factory.create_skill_from_db_instance(instance_id, self.db)
-        if not runtime_instance:
-            logger.error(f"重新创建技能实例失败: 名称={db_instance.name}, ID={instance_id}")
-            return False
-            
-        # 4. 添加新的技能实例
-        self.skill_instances[instance_id] = runtime_instance
-        logger.info(f"已重新加载技能实例: 名称={db_instance.name}, ID={instance_id}")
-        return True
-        
-    def reload_all_instances(self) -> bool:
-        """
-        重新加载所有技能实例
-        
-        Returns:
-            是否重新加载成功
-        """
-        try:
-            # 记录当前加载的技能实例ID
-            current_instance_ids = list(self.skill_instances.keys())
-            
-            # 清空现有技能实例
-            self.skill_instances.clear()
-            
-            # 重新加载所有已启用的技能实例
-            self._load_skill_instances()
-            
-            # 记录已重新加载和已删除的实例
-            reloaded_ids = set(self.skill_instances.keys())
-            removed_ids = set(current_instance_ids) - reloaded_ids
-            
-            logger.info(f"重新加载技能实例完成: 已加载 {len(reloaded_ids)} 个, 已删除 {len(removed_ids)} 个")
-            return True
-        except Exception as e:
-            logger.exception(f"重新加载所有技能实例失败: {e}")
-            return False
-    
+        return merged
+
     def cleanup_all(self) -> None:
         """
-        清理所有技能实例
+        清理资源
         """
-        # 清空技能实例字典
-        self.skill_instances.clear()
-        logger.info("已清理所有技能实例")
-        
-    def process(self, data: Dict[str, Any], camera_id: int, instance_id: str) -> Dict[str, Any]:
-        """
-        使用指定技能实例处理数据
-        
-        Args:
-            data: 要处理的数据
-            camera: 摄像头对象
-            instance_id: 技能实例ID
-            
-        Returns:
-            处理结果
-        """
-        # 初始化结果
-        result = {
-            "success": False,
-            "message": "",
-            "data": {},
-            "instance_id": instance_id
-        }
-        
-        # 获取技能实例
-        skill_instance = self.get_skill_instance(instance_id)
-        if not skill_instance:
-            result["message"] = f"技能实例不存在: ID={instance_id}"
-            logger.error(result["message"])
-            return result
-            
-        # 记录处理开始时间
-        start_time = time.time()
-        
-        try:
-            # 调用技能实例处理数据
-            skill_result = skill_instance.process(data)
-            
-            # 计算处理时间
-            process_time = time.time() - start_time
-            
-            # 添加技能处理结果到返回值
-            result["success"] = True
-            result["data"] = skill_result
-            result["process_time"] = process_time
-            result["instance_name"] = skill_instance.config.get("instance_name", "")
-            result["class_name"] = skill_instance.config.get("name", "")
-            
-            logger.debug(f"技能处理完成: 实例={result['instance_name']}, 耗时={process_time:.4f}秒")
-            return result
-        except Exception as e:
-            # 记录异常
-            error_msg = f"技能处理异常: {str(e)}"
-            logger.error(error_msg)
-            logger.error(traceback.format_exc())
-            
-            # 更新结果
-            result["success"] = False
-            result["message"] = error_msg
-            result["process_time"] = time.time() - start_time
-            
-            return result
+        logger.info("技能管理器清理完成")
             
     def get_available_skill_classes(self) -> List[Dict[str, Any]]:
         """
@@ -413,9 +192,6 @@ class SkillManager:
                 models = SkillClassDAO.get_models(db_class.id, self.db)
                 model_names = [model.name for model in models]
                 
-                # 获取技能类的实例数量
-                instances = SkillInstanceDAO.get_by_skill_class(db_class.id, self.db)
-                
                 # 构建技能类信息
                 class_info = {
                     "id": db_class.id,
@@ -424,8 +200,7 @@ class SkillManager:
                     "type": db_class.type,
                     "description": db_class.description,
                     "python_class": db_class.python_class,
-                    "models": model_names,
-                    "instance_count": len(instances)
+                    "models": model_names
                 }
                 
                 result.append(class_info)
@@ -455,16 +230,12 @@ class SkillManager:
                 logger.error("扫描技能目录失败")
                 return {"success": False, "message": "扫描技能目录失败", "detail": result}
                 
-            # 重新加载技能实例
-            reload_success = self.reload_all_instances()
-            
             # 构建结果
             response = {
-                "success": success and reload_success,
-                "message": "扫描同步技能成功" if (success and reload_success) else "扫描同步技能部分成功",
+                "success": success,
+                "message": "扫描同步技能成功",
                 "detail": {
-                    "scan_result": result,
-                    "reload_success": reload_success
+                    "scan_result": result
                 }
             }
             
@@ -475,8 +246,8 @@ class SkillManager:
 
     def reload_skills(self) -> Dict[str, Any]:
         """
-        热加载技能：重新扫描技能目录并重新加载技能实例
-        不需要重启应用即可加载新的技能类和实例
+        热加载技能：重新扫描技能目录
+        不需要重启应用即可加载新的技能类
         
         Returns:
             Dict[str, Any]: 加载结果统计
@@ -491,7 +262,7 @@ class SkillManager:
             # 记录开始时间
             start_time = time.time()
             
-            # 1. 重新扫描所有技能目录
+            # 重新扫描所有技能目录
             success, scan_result = self._scan_all_skill_dirs()
             if not success:
                 logger.error("热加载技能失败：扫描技能目录失败")
@@ -500,11 +271,6 @@ class SkillManager:
                     "message": "扫描技能目录失败",
                     "details": scan_result
                 }
-            
-            # 2. 重新加载技能实例
-            before_count = len(self.skill_instances)
-            self._load_skill_instances()
-            after_count = len(self.skill_instances)
             
             # 计算执行时间
             elapsed_time = time.time() - start_time
@@ -520,16 +286,11 @@ class SkillManager:
                     "db_updated": scan_result["db_updated"],
                     "failed": scan_result["failed"]
                 },
-                "skill_instances": {
-                    "before": before_count,
-                    "after": after_count,
-                    "delta": after_count - before_count
-                },
                 "elapsed_time": f"{elapsed_time:.2f}秒"
             }
             
             logger.info(f"技能热加载成功: 发现{scan_result['total_found']}个技能类, "
-                        f"加载{after_count}个技能实例, 耗时{elapsed_time:.2f}秒")
+                        f"耗时{elapsed_time:.2f}秒")
             
             return result
         except Exception as e:

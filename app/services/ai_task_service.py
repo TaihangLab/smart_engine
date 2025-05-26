@@ -47,12 +47,13 @@ class AITaskService:
                 "running_period": running_period, #运行周期
                 "electronic_fence": electronic_fence, #电子围栏
                 "task_type": db_task.task_type, #任务类型
-                "config": config, #技能类配置
+                "config": config, #任务配置
                 "created_at": db_task.created_at.isoformat() if db_task.created_at else None,
                 "updated_at": db_task.updated_at.isoformat() if db_task.updated_at else None,
                 "camera_id": db_task.camera_id,
-                "skill_instance_id": db_task.skill_instance_id,
-                "skill_config": skill_config #任务自定义配置（技能实例配置）
+                "skill_class_id": db_task.skill_class_id,
+                "skill_class_name": db_task.skill_class.name_zh if db_task.skill_class else None,
+                "skill_config": skill_config #任务的技能配置
             }
             tasks.append(task_data)
         
@@ -81,9 +82,8 @@ class AITaskService:
         config = json.loads(db_task.config) if db_task.config else {}
         skill_config = json.loads(db_task.skill_config) if db_task.skill_config else {}
         
-        # 获取关联的技能类和技能实例名称（如果有）
+        # 获取关联的技能类名称
         skill_class_name = db_task.skill_class.name_zh if db_task.skill_class else None
-        skill_instance_name = db_task.skill_instance.name if db_task.skill_instance else None
         
         task_data = {
             "id": db_task.id,
@@ -95,15 +95,13 @@ class AITaskService:
             "running_period": running_period,
             "electronic_fence": electronic_fence, #电子围栏
             "task_type": db_task.task_type, #任务类型
-            "config": config, #技能类配置
+            "config": config, #任务配置
             "created_at": db_task.created_at.isoformat() if db_task.created_at else None,
             "updated_at": db_task.updated_at.isoformat() if db_task.updated_at else None,
             "camera_id": db_task.camera_id, #摄像头ID
             "skill_class_id": db_task.skill_class_id,
             "skill_class_name": skill_class_name,
-            "skill_instance_id": db_task.skill_instance_id,
-            "skill_instance_name": skill_instance_name,
-            "skill_config": skill_config #任务自定义配置（技能实例配置）
+            "skill_config": skill_config #任务的技能配置
         }
         
         return task_data
@@ -111,7 +109,7 @@ class AITaskService:
     @staticmethod
     def create_task(task_data: Dict[str, Any], db: Session) -> Dict[str, Any]:
         """
-        创建新AI任务，并自动创建关联的技能实例
+        创建新AI任务
         
         Args:
             task_data: 任务数据
@@ -126,61 +124,28 @@ class AITaskService:
         if not task_data.get('camera_id'):
             logger.error("缺少摄像头ID (camera_id)")
             return None
-        
+
         if not task_data.get('skill_class_id'):
             logger.error("缺少技能类ID (skill_class_id)")
             return None
-        
+
         try:
             # 导入需要的服务
-            from app.services.skill_instance_service import skill_instance_service
             from app.services.skill_class_service import skill_class_service
             
-            # 获取技能类信息
+            # 验证技能类是否存在
             skill_class_id = task_data.get('skill_class_id')
             skill_class = skill_class_service.get_by_id(skill_class_id, db)
             if not skill_class:
                 logger.error(f"技能类不存在: id={skill_class_id}")
                 return None
-            
-            # 基于技能类自动创建技能实例
-            instance_name = f"{skill_class.get('name_zh', 'Skill')}实例-{task_data.get('name')}"
-            instance_data = {
-                'name': instance_name,
-                'skill_class_id': skill_class_id,
-                'config': skill_class.get('default_config', {}),  # 使用技能类的默认配置
-                'status': True,
-                'description': f"由任务'{task_data.get('name')}'自动创建的技能实例"
-            }
-            
-            # 如果用户提供了自定义的技能配置，合并到实例配置中
-            if 'skill_config' in task_data and isinstance(task_data['skill_config'], dict):
-                user_config = task_data['skill_config']
-                instance_config = instance_data['config'] if isinstance(instance_data['config'], dict) else {}
-                instance_data['config'] = {**instance_config, **user_config}
-                
-                # 同时也保存到任务的skill_config字段
-                task_data['skill_config'] = user_config
-            
-            # 创建技能实例
-            new_instance = skill_instance_service.create(instance_data, db)
-            if not new_instance:
-                logger.error("自动创建技能实例失败")
-                return None
-            
-            # 更新任务数据，添加技能实例ID
-            task_data['skill_instance_id'] = new_instance['id']
-            
-            # 使用DAO创建任务
+
+            # 直接使用DAO创建任务
             new_task = AITaskDAO.create_task(task_data, db)
             if not new_task:
-                # 如果任务创建失败，尝试删除刚刚创建的技能实例
-                try:
-                    skill_instance_service.delete(new_instance['id'], db)
-                except Exception as e:
-                    logger.warning(f"清理临时技能实例失败: {str(e)}")
+                logger.error("创建AI任务失败")
                 return None
-            
+
             # 返回创建后的任务数据
             return AITaskService.get_task_by_id(new_task.id, db)
         except Exception as e:
@@ -250,19 +215,19 @@ class AITaskService:
         return {"tasks": tasks, "total": len(tasks)}
     
     @staticmethod
-    def get_tasks_by_skill_instance(skill_instance_id: int, db: Session) -> Dict[str, Any]:
+    def get_tasks_by_skill_class(skill_class_id: int, db: Session) -> Dict[str, Any]:
         """
-        获取与指定技能实例关联的所有任务
+        获取与指定技能类关联的所有任务
         
         Args:
-            skill_instance_id: 技能实例ID
+            skill_class_id: 技能类ID
             db: 数据库会话
             
         Returns:
             Dict[str, Any]: 任务列表及总数
         """
-        logger.info(f"获取技能实例相关任务: skill_instance_id={skill_instance_id}")
-        db_tasks = AITaskDAO.get_tasks_by_skill_instance_id(skill_instance_id, db)
+        logger.info(f"获取技能类相关任务: skill_class_id={skill_class_id}")
+        db_tasks = AITaskDAO.get_tasks_by_skill_class_id(skill_class_id, db)
         
         # 转换为响应格式
         tasks = []

@@ -1,5 +1,5 @@
 """
-技能相关数据模型，包含技能类和技能实例
+技能相关数据模型，包含技能类
 """
 from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, ForeignKey
 from sqlalchemy.orm import relationship
@@ -24,7 +24,6 @@ class SkillClass(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
     
     # 关联
-    instances = relationship("SkillInstance", back_populates="skill_class")
     models = relationship("SkillClassModel", back_populates="skill_class")
 
     def __repr__(self):
@@ -43,24 +42,3 @@ class SkillClassModel(Base):
     # 关联
     skill_class = relationship("SkillClass", back_populates="models")
     model = relationship("app.models.model.Model", backref="skill_classes")
-
-class SkillInstance(Base):
-    """技能实例数据模型，表示已创建的技能实例"""
-    __tablename__ = "skill_instances"
-
-    id = Column(Integer, primary_key=True, index=True)
-    name = Column(String(128), nullable=False)  # 实例名称
-    skill_class_id = Column(Integer, ForeignKey("skill_classes.id"), nullable=False)  # 关联的技能类
-    config = Column(JSON)  # 实例特定配置
-    status = Column(Boolean, default=True)  # 实例是否启用
-    description = Column(String(512))  # 实例描述
-    created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
-    updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
-    
-    # 关联到技能类 (多对一关系)
-    skill_class = relationship("SkillClass", back_populates="instances")
-    # 关联到使用此实例的AI任务 (一对多关系)
-    tasks = relationship("AITask", back_populates="skill_instance")
-
-    def __repr__(self):
-        return f"<SkillInstance(id={self.id}, name={self.name}, skill_class_id={self.skill_class_id})>"

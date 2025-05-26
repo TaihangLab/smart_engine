@@ -16,21 +16,19 @@ from sqlalchemy.orm import Session
 
 from app.skills.skill_base import BaseSkill
 from app.db.skill_class_dao import SkillClassDAO
-from app.db.skill_instance_dao import SkillInstanceDAO
 from app.db.model_dao import ModelDAO
-from app.models.skill import SkillClass, SkillInstance
+from app.models.skill import SkillClass
 
 logger = logging.getLogger(__name__)
 
 class SkillFactory:
     """
-    技能工厂类，负责注册技能类和创建技能实例
+    技能工厂类，负责注册技能类和创建技能对象
     
     技能相关概念:
     - 技能类(Skill Class): 继承自BaseSkill的Python类，定义了技能的算法逻辑和行为
-    - 技能实例(Skill Instance): 技能类的实例化对象，运行时根据配置创建的具体实例
+    - 技能对象(Skill Object): 技能类的实例化对象，运行时根据配置创建的具体实例
     - SkillClass: 数据库中存储的技能类信息，包含技能类名称、类型和默认配置等
-    - SkillInstance: 数据库中存储的技能实例信息，关联到特定的技能类并有具体配置
     """
     
     # 技能类别常量
@@ -109,130 +107,76 @@ class SkillFactory:
         """
         return self._skill_classes.copy()
         
-    def create_skill_instance(self, skill_name: str, config: Dict[str, Any] = None) -> Optional[BaseSkill]:
+    def create_skill(self, skill_name: str, config: Dict[str, Any] = None) -> Optional[BaseSkill]:
         """
-        创建技能实例
+        根据技能名称和配置创建技能对象
         
         Args:
             skill_name: 技能名称
-            config: 技能配置，如果为None则使用默认配置
+            config: 技能配置，如果不提供则使用默认配置
             
         Returns:
-            技能实例或None
-        """
-        # 获取技能类
-        skill_class = self.get_skill_class(skill_name)
-        if not skill_class:
-            logger.error(f"创建技能实例失败: 未找到技能类 {skill_name}")
-            return None
-            
-        try:
-            # 创建技能实例，传入配置
-            skill_instance = skill_class(config=config)
-            return skill_instance
-        except Exception as e:
-            logger.exception(f"创建技能实例失败: {e}")
-            return None
-            
-    def create_skill_from_db_instance(self, instance_id: Union[str, int], db: Session) -> Optional[BaseSkill]:
-        """
-        从数据库技能实例创建运行时技能实例
-        
-        Args:
-            instance_id: 技能实例ID
-            db: 数据库会话
-            
-        Returns:
-            技能实例或None
+            技能对象或None
         """
         try:
-            # 从数据库获取技能实例记录
-            db_instance = SkillInstanceDAO.get_by_id(instance_id, db)
-            if not db_instance:
-                logger.error(f"创建技能实例失败: 数据库中不存在技能实例ID {instance_id}")
-                return None
-                
-            # 确认技能实例是启用状态
-            if not db_instance.status:
-                logger.warning(f"技能实例 {db_instance.name} (ID={instance_id}) 已禁用，跳过创建")
-                return None
-                
-            # 获取关联的技能类
-            db_skill_class = SkillClassDAO.get_by_id(db_instance.skill_class_id, db)
-            if not db_skill_class:
-                logger.error(f"创建技能实例失败: 未找到关联的技能类 ID={db_instance.skill_class_id}")
-                return None
-                
-            # 获取对应的Python技能类
-            skill_class = self.get_skill_class(db_skill_class.name)
+            # 获取技能类
+            skill_class = self.get_skill_class(skill_name)
             if not skill_class:
-                logger.error(f"创建技能实例失败: 未找到注册的Python技能类 {db_skill_class.name}")
+                logger.error(f"未找到技能类: {skill_name}")
                 return None
-                
-            # 使用数据库中的配置创建技能实例
-            try:
-                # 合并技能类默认配置和实例特定配置
-                config = db_skill_class.default_config or {}
-                instance_config = db_instance.config or {}
-                config.update(instance_config)
-                
-                # 添加必要的字段到配置中
-                config["id"] = str(db_instance.id)
-                config["class_id"] = str(db_skill_class.id)
-                config["name"] = db_skill_class.name
-                config["instance_name"] = db_instance.name 
-                config["type"] = db_skill_class.type
-                config["name_zh"] = db_skill_class.name_zh
-                
-                # 创建技能实例 - 不使用关键字参数，直接传递配置对象
-                skill_instance = skill_class(config)
-                
-                # 获取技能类关联的模型
-                db_models = SkillClassDAO.get_models(db_skill_class.id, db)
-                
-                # 检查技能所需的模型是否已注册
-                required_models = skill_instance.get_required_models()
-                db_model_names = [model.name for model in db_models]
-                
-                # 检查是否所有必需的模型都已关联
-                missing_models = [name for name in required_models if name not in db_model_names]
-                if missing_models:
-                    logger.warning(f"技能类 {db_skill_class.name} 缺少必需的模型: {', '.join(missing_models)}")
-                
-                return skill_instance
-            except Exception as e:
-                logger.exception(f"从数据库记录创建技能实例失败: {e}")
+            
+            # 使用配置创建技能实例
+            if config is None:
+                config = getattr(skill_class, "DEFAULT_CONFIG", {})
+            
+            # 创建技能实例
+            skill_instance = skill_class(config)
+            
+            # 验证技能配置
+            if hasattr(skill_instance, 'validate_config') and not skill_instance.validate_config():
+                logger.error(f"技能配置验证失败: {skill_name}")
                 return None
+            
+            logger.info(f"成功创建技能对象: {skill_name}")
+            return skill_instance
+            
         except Exception as e:
-            logger.exception(f"从数据库记录创建技能实例失败: {e}")
+            logger.exception(f"创建技能对象失败: {e}")
             return None
             
     def validate_config(self, skill_name: str, config: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
         """
-        验证技能配置
+        验证技能配置是否有效
         
         Args:
             skill_name: 技能名称
-            config: 技能配置
+            config: 配置数据
             
         Returns:
             (是否有效, 错误信息)
         """
-        # 获取技能类
-        skill_class = self.get_skill_class(skill_name)
-        if not skill_class:
-            return False, f"未找到技能类 {skill_name}"
-            
         try:
-            # 创建临时实例并验证配置
-            temp_instance = skill_class(config)
-            result = temp_instance.validate_config()
-            if not result[0]:
-                return False, result[1]
-            return True, None
+            # 获取技能类
+            skill_class = self.get_skill_class(skill_name)
+            if not skill_class:
+                return False, f"未找到技能类: {skill_name}"
+            
+            # 尝试创建技能实例来验证配置
+            try:
+                temp_instance = skill_class(config)
+                if hasattr(temp_instance, 'validate_config'):
+                    if temp_instance.validate_config():
+                        return True, None
+                    else:
+                        return False, "技能配置验证失败"
+                else:
+                    return True, None
+            except Exception as e:
+                return False, f"配置验证异常: {str(e)}"
+                
         except Exception as e:
             logger.exception(f"验证技能配置失败: {e}")
-            return False, str(e)
+            return False, f"验证异常: {str(e)}"
             
     def scan_and_register_skills(self, skill_dirs: Union[str, List[str]], db: Session = None) -> Tuple[bool, Dict[str, Any]]:
         """
@@ -444,23 +388,6 @@ class SkillFactory:
                 
                 # 处理技能类与模型的关联关系
                 self._update_skill_class_models(new_skill.id, required_models, db)
-                
-                # 如果有默认实例配置，创建默认实例
-                default_instance_config = default_config.get("default_instance", None)
-                
-                if default_instance_config:
-                    try:
-                        instance_data = {
-                            "name": f"{skill_name}_默认实例",
-                            "skill_class_id": new_skill.id,
-                            "config": default_instance_config,
-                            "status": True,
-                            "description": f"{skill_name} 的默认实例"
-                        }
-                        
-                        SkillInstanceDAO.create(instance_data, db)
-                    except Exception as e:
-                        logger.error(f"创建默认实例失败: {e}")
             
             return result
         except Exception as e:

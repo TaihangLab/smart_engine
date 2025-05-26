@@ -133,7 +133,7 @@ def get_all_tasks(
     page: int = Query(1, description="当前页码", ge=1),
     limit: int = Query(10, description="每页数量", ge=1, le=100),
     camera_id: Optional[int] = Query(None, description="按摄像头ID过滤"),
-    skill_instance_id: Optional[int] = Query(None, description="按技能实例ID过滤"),
+    skill_class_id: Optional[int] = Query(None, description="按技能类ID过滤"),
     db: Session = Depends(get_db)
 ):
     """
@@ -143,7 +143,7 @@ def get_all_tasks(
         page: 当前页码
         limit: 每页数量
         camera_id: 按摄像头ID过滤
-        skill_instance_id: 按技能实例ID过滤
+        skill_class_id: 按技能类ID过滤
         db: 数据库会话
         
     Returns:
@@ -153,9 +153,9 @@ def get_all_tasks(
         if camera_id:
             # 获取特定摄像头的任务
             result = AITaskService.get_tasks_by_camera(camera_id, db)
-        elif skill_instance_id:
-            # 获取特定技能实例的任务
-            result = AITaskService.get_tasks_by_skill_instance(skill_instance_id, db)
+        elif skill_class_id:
+            # 获取特定技能类的任务
+            result = AITaskService.get_tasks_by_skill_class(skill_class_id, db)
         else:
             # 获取所有任务
             result = AITaskService.get_all_tasks(db)
@@ -432,33 +432,6 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除AI任务失败: {str(e)}"
-        )
-
-
-
-# @router.get("/skill-instance/{skill_instance_id}", response_model=Dict[str, Any])
-def get_tasks_by_skill_instance(
-    skill_instance_id: int, 
-    db: Session = Depends(get_db)
-):
-    """
-    获取使用指定技能实例的所有AI任务
-    
-    Args:
-        skill_instance_id: 技能实例ID
-        db: 数据库会话
-        
-    Returns:
-        任务列表及总数
-    """
-    try:
-        result = AITaskService.get_tasks_by_skill_instance(skill_instance_id, db)
-        return result
-    except Exception as e:
-        logger.error(f"获取技能实例任务失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"获取技能实例任务失败: {str(e)}"
         )
 
 @router.get("/camera/id/{camera_id}", response_model=TaskListResponse)

@@ -7,10 +7,8 @@ import logging
 import json
 
 from app.db.skill_class_dao import SkillClassDAO
-from app.db.skill_instance_dao import SkillInstanceDAO
 from app.models.skill import SkillClass, SkillClassModel
 from app.services.minio_client import minio_client
-from app.services.skill_instance_service import SkillInstanceService
 from app.db.ai_task_dao import AITaskDAO
 from app.services.camera_service import CameraService
 
@@ -124,36 +122,39 @@ class SkillClassService:
         models = SkillClassDAO.get_models(skill_class_id, db)
         model_info = [(model.id, model.name if hasattr(model, 'name') else None) for model in models]
         
-        # 获取关联的实例
-        instances = SkillInstanceDAO.get_by_skill_class(skill_class_id, db)
-        
-        # 获取相关AI设备, 并按照技能实例分组
-        instances_with_devices = []
-        total_devices = set()  # 用于统计总设备数，避免重复
-        
-        for instance in instances:
-            # 获取该实例的基本信息
-            instance_info = {
-                "id": instance.id,
-                "name": instance.name,
-                "status": instance.status,
-                "description": instance.description,
-                "config": json.dumps(instance.config)
-            }
-            
-            # 获取关联设备
-            related_devices = SkillInstanceService.get_devices_by_skill_instance_id(instance.id, db)
-            instance_info["related_devices"] = related_devices
-            instance_info["device_count"] = len(related_devices)
-            
-            # 添加设备ID到总集合中，用于统计不重复的总数
-            for device in related_devices:
-                total_devices.add(device.get("id"))
-            
-            instances_with_devices.append(instance_info)
+        # 获取关联的AI任务和设备（替代原有的技能实例逻辑）
+        camera_ids = AITaskDAO.get_distinct_camera_ids_by_skill_class_id(skill_class_id, db)
+        total_devices = set(camera_ids)  # 去重的设备集合
         
         if is_detail:
-            #返回详细信息
+            # 返回详细信息
+            
+            # 获取使用该技能类的AI任务列表（替代技能实例）
+            ai_tasks = AITaskDAO.get_tasks_by_skill_class_id(skill_class_id, db)
+            tasks_with_devices = []
+            
+            for task in ai_tasks:
+                # 获取任务关联的摄像头信息
+                camera = CameraService.get_ai_camera_by_id(task.camera_id, db) if task.camera_id else None
+                camera_info = None
+                if camera:
+                    camera_info = {
+                        "id": camera.get("id"),
+                        "name": camera.get("name"),
+                        "location": camera.get("location")
+                    }
+                
+                task_info = {
+                    "id": task.id,
+                    "name": task.name,
+                    "status": task.status,
+                    "description": task.description,
+                    "camera_info": camera_info,
+                    "skill_config": task.skill_config,  # 任务级别的技能配置
+                    "created_at": task.created_at.isoformat() if task.created_at else None,
+                    "updated_at": task.updated_at.isoformat() if task.updated_at else None
+                }
+                tasks_with_devices.append(task_info)
                 
             # 获取技能示例图片
             image_object_name = skill_class.image_object_name
@@ -176,12 +177,12 @@ class SkillClassService:
                 "created_at": skill_class.created_at.isoformat() if skill_class.created_at else None,
                 "updated_at": skill_class.updated_at.isoformat() if skill_class.updated_at else None,
                 "model_info": model_info,
-                "instances": instances_with_devices,
-                "instance_count": len(instances),
+                "ai_tasks": tasks_with_devices,  # 使用该技能类的AI任务列表
+                "task_count": len(tasks_with_devices),  # AI任务数量
                 "total_device_count": len(total_devices)
             }
         else:
-            #返回简要信息
+            # 返回简要信息
             # 只保留default_config中的params字段
             default_config = skill_class.default_config
             params_only_config = None
@@ -340,17 +341,13 @@ class SkillClassService:
         """
         logger.info(f"删除技能类: id={skill_class_id}")
         
-        # 检查技能类是否有关联的实例
-        instances = SkillInstanceDAO.get_by_skill_class(skill_class_id, db)
-        if instances:
-            logger.error(f"无法删除技能类: 存在 {len(instances)} 个关联的技能实例")
-            # 构建关联实例信息字符串
-            instance_names = [f"{instance.name}(ID:{instance.id})" for instance in instances]
-            instance_names_str = "、".join(instance_names)
-            
+        # 检查技能类是否有关联的AI任务
+        camera_ids = AITaskDAO.get_distinct_camera_ids_by_skill_class_id(skill_class_id, db)
+        if camera_ids:
+            logger.error(f"无法删除技能类: 存在 {len(camera_ids)} 个关联的AI任务")
             return {
                 "success": False, 
-                "message": f"存在 {len(instances)} 个关联的技能实例，关联技能实例有：{instance_names_str}",
+                "message": f"存在 {len(camera_ids)} 个关联的AI任务，请先删除相关任务后再删除技能类",
             }
             
         # 检查技能类是否有关联的模型

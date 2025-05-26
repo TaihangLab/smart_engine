@@ -15,7 +15,6 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from app.services.ai_task_service import AITaskService
 from app.services.wvp_client import wvp_client
-from app.services.skill_instance_service import skill_instance_service
 from app.models.ai_task import AITask
 from app.db.session import get_db
 
@@ -174,7 +173,6 @@ class AITaskExecutor:
                 config=json.dumps(task_data["config"]) if isinstance(task_data["config"], dict) else task_data["config"],
                 camera_id=task_data["camera_id"],
                 skill_class_id=task_data["skill_class_id"],
-                skill_instance_id=task_data["skill_instance_id"],
                 skill_config=json.dumps(task_data["skill_config"]) if isinstance(task_data["skill_config"], dict) else task_data["skill_config"]
             )
                 
@@ -235,7 +233,7 @@ class AITaskExecutor:
                 return
                 
             # 加载技能实例
-            skill_instance = self._load_skill_instance(task, db)
+            skill_instance = self._load_skill_for_task(task, db)
             if not skill_instance:
                 logger.error(f"加载任务 {task.id} 的技能实例失败")
                 return
@@ -319,30 +317,53 @@ class AITaskExecutor:
             logger.error(f"获取摄像头 {camera_id} 流地址时出错: {str(e)}")
             return None
     
-    def _load_skill_instance(self, task: AITask, db: Session) -> Optional[Any]:
-        """加载技能实例"""
+    def _load_skill_for_task(self, task: AITask, db: Session) -> Optional[Any]:
+        """根据任务配置直接创建技能对象"""
         try:
-            # 导入技能管理器
-            from app.skills.skill_manager import skill_manager
+            # 导入技能工厂和技能管理器
+            from app.skills.skill_factory import skill_factory
+            from app.db.skill_class_dao import SkillClassDAO
             
-            # 使用技能管理器获取对应的技能实例
-            skill_instance = skill_manager.get_skill_instance(task.skill_instance_id)
+            # 获取技能类信息
+            skill_class = SkillClassDAO.get_by_id(task.skill_class_id, db)
+            if not skill_class:
+                logger.error(f"未找到技能类: {task.skill_class_id}")
+                return None
+            
+            # 合并默认配置和任务特定配置
+            default_config = skill_class.default_config if skill_class.default_config else {}
+            task_config = json.loads(task.skill_config) if isinstance(task.skill_config, str) else (task.skill_config or {})
+            
+            # 深度合并配置
+            merged_config = self._merge_config(default_config, task_config)
+            
+            # 使用技能工厂创建技能对象
+            skill_instance = skill_factory.create_skill(skill_class.name, merged_config)
+            
             if not skill_instance:
-                logger.error(f"未找到技能实例: {task.skill_instance_id}")
+                logger.error(f"无法创建技能对象: class={skill_class.name}")
                 return None
                 
-            # 如果任务有特定的技能配置，应用到技能实例中
-            if task.skill_config:
-                skill_config = json.loads(task.skill_config) if isinstance(task.skill_config, str) else task.skill_config
-                if skill_config:
-                    # 使用服务更新技能实例配置
-                    skill_instance_service.update(task.skill_instance_id, {'config': skill_config}, db)
-                    
+            logger.info(f"成功创建技能对象: {skill_class.name} for task {task.id}")
             return skill_instance
             
         except Exception as e:
-            logger.error(f"加载技能实例时出错: {str(e)}")
+            logger.error(f"创建技能对象时出错: {str(e)}")
             return None
+    
+    def _merge_config(self, default_config: dict, task_config: dict) -> dict:
+        """深度合并配置"""
+        merged = default_config.copy()
+        
+        for key, value in task_config.items():
+            if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
+                # 如果两个值都是字典，递归合并
+                merged[key] = self._merge_config(merged[key], value)
+            else:
+                # 否则直接覆盖
+                merged[key] = value
+        
+        return merged
     
     def _is_in_electronic_fence(self, frame, task: AITask) -> bool:
         """判断是否触发电子围栏规则"""

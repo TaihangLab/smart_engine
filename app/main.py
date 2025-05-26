@@ -66,7 +66,8 @@ async def lifespan(app: FastAPI):
     try:
         # 初始化技能管理器，这会自动加载技能并同步到数据库
         skill_manager.initialize_with_db(db)
-        logger.info(f"SkillManager初始化完成，已加载 {len(skill_manager.get_all_skills())} 个技能")
+        available_skills = skill_manager.get_available_skill_classes()
+        logger.info(f"SkillManager初始化完成，已加载 {len(available_skills)} 个技能类")
     except Exception as e:
         logger.error(f"初始化SkillManager失败: {str(e)}", exc_info=True)
     finally:

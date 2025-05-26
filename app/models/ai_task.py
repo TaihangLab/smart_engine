@@ -25,17 +25,14 @@ class AITask(Base):
     # 关联关系
     camera_id = Column(Integer, nullable=False)
     
-    # 使用技能类和技能实例
+    # 直接使用技能类，移除技能实例层
     skill_class_id = Column(Integer, ForeignKey("skill_classes.id"), nullable=False)  # 技能类ID
-    skill_instance_id = Column(Integer, ForeignKey("skill_instances.id"), nullable=True)  # 技能实例ID，可为空
     skill_config = Column(JSON)  # 技能在此任务中的特定配置
     
     created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
     updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
 
-    
     # 关系对象
-    skill_instance = relationship("SkillInstance", back_populates="tasks")
     skill_class = relationship("SkillClass")
 
     def __repr__(self):
