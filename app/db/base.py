@@ -1,6 +1,6 @@
 # 导入所有模型，便于Alembic和SQLAlchemy一起使用
 from app.db.base_class import Base
-from app.models.skill import SkillClass, SkillClassModel, SkillInstance
+from app.models.skill import SkillClass, SkillClassModel
 from app.models.model import Model
 from app.models.ai_task import AITask
 

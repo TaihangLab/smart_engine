@@ -1,5 +1,5 @@
 # 导入所有模型类
-from app.models.skill import SkillClass, SkillClassModel, SkillInstance
+from app.models.skill import SkillClass, SkillClassModel
 from app.models.model import Model
 from app.models.ai_task import AITask
 from app.models.alert import Alert, AlertCreate, AlertResponse

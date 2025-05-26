@@ -10,7 +10,6 @@ import logging
 
 from app.db.session import get_db
 from app.services.skill_class_service import skill_class_service
-from app.services.skill_instance_service import skill_instance_service
 from app.services.minio_client import minio_client
 from app.core.config import settings
 from app.skills.skill_manager import skill_manager
