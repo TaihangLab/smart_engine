@@ -29,7 +29,7 @@ async def alert_stream(request: Request):
 
     # 创建响应对象并设置SSE必需的头部
     response = Response(
-        content_type="text/event-stream",
+        media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",

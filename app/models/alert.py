@@ -24,7 +24,7 @@ class Alert(Base):
     electronic_fence = Column(JSON)
     result = Column(JSON)
     confidence = Column(Float)
-    minio_frame_url = Column(String(255))
+    image_object_name = Column(String(255))
     minio_video_url = Column(String(255))
 
 
@@ -44,7 +44,7 @@ class AlertCreate(BaseModel):
     electronic_fence: Optional[List[List[int]]] = None
     result: Optional[List[Dict[str, Any]]] = None
     confidence: float
-    minio_frame_url: str
+    image_object_name: str
     minio_video_url: str
 
     class Config:
@@ -75,7 +75,7 @@ class AlertCreate(BaseModel):
                     }
                 ],
                 "confidence": 0.95,
-                "minio_frame_url": "https://minio.example.com/alerts/5678/frame.jpg",
+                "image_object_name": "5678/frame.jpg",
                 "minio_video_url": "https://minio.example.com/alerts/5678/video.mp4"
             }
         }
@@ -99,6 +99,36 @@ class AlertResponse(BaseModel):
     confidence: float
     minio_frame_url: str
     minio_video_url: str
+    
+    @classmethod
+    def from_orm(cls, obj):
+        """从ORM对象创建AlertResponse，将image_object_name转换为minio_frame_url"""
+        # 获取所有字段的值
+        data = {}
+        for field_name in cls.__fields__.keys():
+            if field_name == 'minio_frame_url':
+                # 调用现有minio_client实例的get_presigned_url方法
+                if hasattr(obj, 'image_object_name') and obj.image_object_name:
+                    try:
+                        from app.services.minio_client import minio_client
+                        from app.core.config import settings
+                        
+                        # 调用现有minio_client实例的get_presigned_url方法
+                        url = minio_client.get_presigned_url(
+                            settings.MINIO_BUCKET,
+                            settings.MINIO_ALERT_IMAGE_PREFIX,
+                            obj.image_object_name
+                        )
+                        data[field_name] = url
+                    except Exception as e:
+                        # 如果生成预签名URL失败，使用空字符串
+                        data[field_name] = ""
+                else:
+                    data[field_name] = ""
+            elif hasattr(obj, field_name):
+                data[field_name] = getattr(obj, field_name)
+        
+        return cls(**data)
     
     class Config:
         from_attributes = True

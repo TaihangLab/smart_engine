@@ -113,7 +113,7 @@ class AlertService:
                 electronic_fence=alert.electronic_fence,
                 result=alert.result,
                 confidence=alert.confidence,
-                minio_frame_url=alert.minio_frame_url,
+                image_object_name=alert.image_object_name,
                 minio_video_url=alert.minio_video_url
             )
             
@@ -383,7 +383,7 @@ def publish_test_alert() -> bool:
             }
         ],
         "confidence": 0.99,
-        "minio_frame_url": "https://example.com/test_frame.jpg",
+        "image_object_name": "test_frame.jpg",
         "minio_video_url": "https://example.com/test_video.mp4"
     }
     

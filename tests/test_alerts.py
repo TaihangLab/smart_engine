@@ -51,7 +51,7 @@ def mock_alerts():
                 }
             ],
             confidence=0.95,
-            minio_frame_url="https://minio.example.com/alerts/test_alert_1/frame.jpg",
+            image_object_name="alerts/test_alert_1/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_1/video.mp4"
         ),
         Alert(
@@ -80,7 +80,7 @@ def mock_alerts():
                 }
             ],
             confidence=0.88,
-            minio_frame_url="https://minio.example.com/alerts/test_alert_2/frame.jpg",
+            image_object_name="alerts/test_alert_2/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_2/video.mp4"
         ),
         Alert(
@@ -109,7 +109,7 @@ def mock_alerts():
                 }
             ],
             confidence=0.75,
-            minio_frame_url="https://minio.example.com/alerts/test_alert_3/frame.jpg",
+            image_object_name="alerts/test_alert_3/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_3/video.mp4"
         )
     ]

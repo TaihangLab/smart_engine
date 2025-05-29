@@ -56,6 +56,7 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_BUCKET: str = "visionai"
     MINIO_SKILL_IMAGE_PREFIX: str = "skill-images/"
+    MINIO_ALERT_IMAGE_PREFIX: str = "alerts/"
     
     # RabbitMQ配置
     RABBITMQ_HOST: str = os.getenv("RABBITMQ_HOST", "127.0.0.1")
