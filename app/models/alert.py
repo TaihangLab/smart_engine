@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, JSON, Integer
+from sqlalchemy import Column, String, DateTime, Float, JSON, BigInteger, Integer
 from pydantic import BaseModel
 
 from app.db.base_class import Base
@@ -10,7 +10,7 @@ class Alert(Base):
     """报警数据模型"""
     __tablename__ = "alerts"
 
-    alert_id = Column(String(36), primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     timestamp = Column(DateTime, index=True)
     alert_type = Column(String(50), index=True)
     alert_level = Column(Integer, default=1)
@@ -19,7 +19,6 @@ class Alert(Base):
     location = Column(String(100))
     camera_id = Column(String(50), index=True)
     camera_name = Column(String(100))
-    tags = Column(JSON)
     coordinates = Column(JSON)
     electronic_fence = Column(JSON)
     result = Column(JSON)
@@ -30,7 +29,6 @@ class Alert(Base):
 
 class AlertCreate(BaseModel):
     """创建报警的模型"""
-    alert_id: str
     timestamp: datetime
     alert_type: str
     alert_level: int = 1
@@ -39,7 +37,6 @@ class AlertCreate(BaseModel):
     location: str
     camera_id: str
     camera_name: str
-    tags: List[str]
     coordinates: List[float]
     electronic_fence: Optional[List[List[int]]] = None
     result: Optional[List[Dict[str, Any]]] = None
@@ -50,7 +47,6 @@ class AlertCreate(BaseModel):
     class Config:
         json_schema_extra = {
             "example": {
-                "alert_id": "5678",
                 "timestamp": "2025-04-06T12:30:00",
                 "alert_type": "no_helmet",
                 "alert_level": 1,
@@ -59,7 +55,6 @@ class AlertCreate(BaseModel):
                 "location": "工厂01",
                 "camera_id": "camera_01",
                 "camera_name": "摄像头01",
-                "tags": ["entrance", "outdoor"],
                 "coordinates": [100, 200, 150, 250],
                 "electronic_fence": [[100,100],[300,100],[300,300],[100,300]],
                 "result": [
@@ -83,7 +78,7 @@ class AlertCreate(BaseModel):
 
 class AlertResponse(BaseModel):
     """报警响应模型"""
-    alert_id: str
+    id: int
     timestamp: datetime
     alert_type: str
     alert_level: int
@@ -92,7 +87,6 @@ class AlertResponse(BaseModel):
     location: str
     camera_id: str
     camera_name: str
-    tags: List[str]
     coordinates: List[float]
     electronic_fence: Optional[List[List[int]]] = None
     result: Optional[List[Dict[str, Any]]] = None
@@ -131,5 +125,4 @@ class AlertResponse(BaseModel):
         return cls(**data)
     
     class Config:
-        from_attributes = True
-        orm_mode = True  # 保留向后兼容 
+        from_attributes = True 

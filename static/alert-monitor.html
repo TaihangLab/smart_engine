@@ -212,7 +212,8 @@
         
         .actions {
             display: flex;
-            justify-content: flex-end;
+            justify-content: space-between;
+            align-items: center;
             margin-bottom: 15px;
         }
         
@@ -228,6 +229,45 @@
         
         .test-button:hover {
             background-color: #096dd9;
+        }
+        
+        .test-button:disabled {
+            background-color: #ccc;
+            cursor: not-allowed;
+        }
+        
+        .status-message {
+            padding: 8px 12px;
+            border-radius: 4px;
+            margin-left: 10px;
+            display: none;
+        }
+        
+        .status-message.success {
+            background-color: #f6ffed;
+            border: 1px solid #b7eb8f;
+            color: #52c41a;
+        }
+        
+        .status-message.error {
+            background-color: #fff1f0;
+            border: 1px solid #ffa39e;
+            color: #ff4d4f;
+        }
+        
+        .loading {
+            display: inline-block;
+            width: 12px;
+            height: 12px;
+            border: 2px solid #ffffff;
+            border-radius: 50%;
+            border-top-color: transparent;
+            animation: spin 1s ease-in-out infinite;
+            margin-right: 5px;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
         }
         
         @media screen and (max-width: 768px) {
@@ -255,13 +295,18 @@
     <!-- 状态栏 -->
     <div class="status-bar">
         <div class="status-item">
-            <span>连接状态:</span>
+            <span>SSE连接:</span>
             <span id="connection-status" class="disconnected">未连接</span>
         </div>
         
         <div class="status-item">
             <span>报警数量:</span>
             <span id="alert-count" class="alert-count">0</span>
+        </div>
+        
+        <div class="status-item">
+            <span>连接ID:</span>
+            <span id="connection-id" class="alert-count">-</span>
         </div>
         
         <div class="filters">
@@ -287,7 +332,14 @@
     <!-- 主内容区域 -->
     <div class="content">
         <div class="actions">
-            <button id="send-test-alert" class="test-button">发送测试报警</button>
+            <div>
+                <button id="send-test-alert" class="test-button">🚀 发送测试报警</button>
+                <span id="status-message" class="status-message"></span>
+            </div>
+            <div>
+                <button id="refresh-alerts" class="test-button" style="background-color: #52c41a;">🔄 刷新报警</button>
+                <button id="check-sse-status" class="test-button" style="background-color: #1890ff;">📊 连接状态</button>
+            </div>
         </div>
         
         <div id="alert-container" class="alert-container">
@@ -297,7 +349,615 @@
         </div>
     </div>
     
-    <!-- 引入JavaScript -->
-    <script src="/static/js/alert-monitor.js"></script>
+    <script>
+        // 报警类型和对应的显示文本
+        const ALERT_TYPES = {
+          'no_helmet': '未佩戴安全帽',
+          'intrusion': '入侵警告',
+          'fire': '火灾警告',
+          'smoke': '烟雾警告',
+          'loitering': '徘徊行为',
+          'abnormal_behavior': '异常行为',
+          'test_alert': '测试报警'
+        };
+
+        // 全局变量
+        let eventSource = null;
+        let alertCount = 0;
+        let reconnectTimeout = null;
+        let connectionId = null;
+        let isConnecting = false;
+        const MAX_ALERTS = 100; // 最多显示的报警数量
+        
+        // 添加连接统计
+        let connectionStats = {
+          totalConnections: 0,
+          totalReconnects: 0,
+          lastConnectTime: null,
+          lastDisconnectTime: null,
+          connectionHistory: []
+        };
+
+        // DOM元素
+        let alertContainer;
+        let connectionStatus;
+        let alertCountElement;
+        let connectionIdElement;
+        let cameraFilter;
+        let alertTypeFilter;
+        let statusMessage;
+
+        // 生成唯一连接ID
+        function generateConnectionId() {
+            return 'conn_' + Date.now() + '_' + Math.random().toString(36).substr(2, 9);
+        }
+
+        // 初始化函数
+        function initAlertMonitor() {
+          console.log('初始化报警监控系统...');
+          
+          // 生成连接ID
+          connectionId = generateConnectionId();
+          
+          // 获取DOM元素
+          alertContainer = document.getElementById('alert-container');
+          connectionStatus = document.getElementById('connection-status');
+          alertCountElement = document.getElementById('alert-count');
+          connectionIdElement = document.getElementById('connection-id');
+          cameraFilter = document.getElementById('camera-filter');
+          alertTypeFilter = document.getElementById('alert-type-filter');
+          statusMessage = document.getElementById('status-message');
+          
+          // 显示连接ID
+          if (connectionIdElement) {
+            connectionIdElement.textContent = connectionId.substr(-8);
+          }
+          
+          // 初始化过滤器事件
+          if (cameraFilter) {
+            cameraFilter.addEventListener('change', filterAlerts);
+          }
+          
+          if (alertTypeFilter) {
+            alertTypeFilter.addEventListener('change', filterAlerts);
+          }
+          
+          // 连接到SSE
+          connectSSE();
+          
+          // 加载历史报警数据
+          loadHistoricalAlerts();
+          
+          // 添加测试按钮事件监听器
+          const testButton = document.getElementById('send-test-alert');
+          if (testButton) {
+            testButton.addEventListener('click', sendTestAlert);
+          }
+          
+          // 添加刷新按钮事件监听器
+          const refreshButton = document.getElementById('refresh-alerts');
+          if (refreshButton) {
+            refreshButton.addEventListener('click', loadHistoricalAlerts);
+          }
+          
+          // 添加连接状态检查按钮事件监听器
+          const checkStatusButton = document.getElementById('check-sse-status');
+          if (checkStatusButton) {
+            checkStatusButton.addEventListener('click', checkSSEStatus);
+          }
+          
+          // 页面卸载时清理连接
+          window.addEventListener('beforeunload', function() {
+            cleanupConnection();
+          });
+          
+          // 页面可见性变化时管理连接
+          document.addEventListener('visibilitychange', function() {
+            if (document.hidden) {
+              console.log('页面隐藏，暂停重连');
+              // 🔧 优化：页面隐藏时取消重连计时器，但不关闭连接
+              if (reconnectTimeout) {
+                clearTimeout(reconnectTimeout);
+                reconnectTimeout = null;
+                console.log('已取消重连计时器');
+              }
+            } else {
+              console.log('页面显示，检查连接状态');
+              // 🔧 优化：更严格的连接状态检查
+              if (!eventSource) {
+                console.log('🔄 eventSource不存在，建立新连接');
+                connectSSE();
+              } else if (eventSource.readyState === EventSource.CLOSED) {
+                console.log('🔄 连接已关闭，建立新连接');
+                connectSSE();
+              } else if (eventSource.readyState === EventSource.CONNECTING) {
+                console.log('⏳ 连接正在建立中，等待...');
+              } else if (eventSource.readyState === EventSource.OPEN) {
+                console.log('✅ 连接正常，无需重新连接');
+              }
+            }
+          });
+        }
+
+        // 清理连接
+        function cleanupConnection() {
+          console.log('清理SSE连接:', connectionId);
+          
+          if (reconnectTimeout) {
+            clearTimeout(reconnectTimeout);
+            reconnectTimeout = null;
+          }
+          
+          if (eventSource) {
+            eventSource.close();
+            eventSource = null;
+          }
+          
+          isConnecting = false;
+        }
+
+        // 连接到SSE服务器
+        function connectSSE() {
+          // 🔧 优化：更严格的重复连接检查
+          if (isConnecting) {
+            console.log('⚠️ 正在连接中，跳过重复连接请求');
+            return;
+          }
+          
+          // 🔧 优化：检查现有连接状态，包括CONNECTING状态
+          if (eventSource) {
+            if (eventSource.readyState === EventSource.OPEN) {
+              console.log('✅ SSE连接已存在且正常，无需重新连接');
+              return;
+            } else if (eventSource.readyState === EventSource.CONNECTING) {
+              console.log('⏳ SSE连接正在建立中，等待完成...');
+              return;
+            }
+          }
+          
+          // 清理旧连接
+          cleanupConnection();
+          
+          isConnecting = true;
+          console.log('🔗 开始建立SSE连接:', connectionId);
+          console.log('🔍 调用栈:', new Error().stack);  // 添加调用栈跟踪
+          
+          // 记录连接统计
+          connectionStats.totalConnections++;
+          connectionStats.lastConnectTime = new Date();
+          connectionStats.connectionHistory.push({
+            type: 'connect_attempt',
+            time: new Date(),
+            connectionId: connectionId
+          });
+          
+          // 保持历史记录在合理范围内
+          if (connectionStats.connectionHistory.length > 50) {
+            connectionStats.connectionHistory = connectionStats.connectionHistory.slice(-50);
+          }
+          
+          console.log('📊 连接统计:', connectionStats);
+          
+          // 更新状态
+          updateConnectionStatus('正在连接...');
+          
+          // 创建新连接
+          eventSource = new EventSource('/api/v1/alerts/stream');
+          
+          // 连接打开事件
+          eventSource.addEventListener('open', function() {
+            console.log('✅ SSE连接已建立:', connectionId);
+            updateConnectionStatus('已连接');
+            isConnecting = false;
+            
+            // 取消重连计时器
+            if (reconnectTimeout) {
+              clearTimeout(reconnectTimeout);
+              reconnectTimeout = null;
+            }
+          });
+          
+          // 消息事件
+          eventSource.addEventListener('message', function(event) {
+            try {
+              const data = JSON.parse(event.data);
+              
+              // 如果是连接成功消息，忽略
+              if (data.event === 'connected') {
+                console.log('📡 收到SSE连接确认消息');
+                return;
+              }
+              
+              // 处理报警消息
+              console.log('🚨 收到SSE报警消息:', data);
+              handleAlertMessage(data);
+              
+            } catch (error) {
+              console.error('❌ 解析报警消息失败:', error, event.data);
+            }
+          });
+          
+          // 错误事件
+          eventSource.addEventListener('error', function(event) {
+            console.log('❌ SSE连接错误:', event);
+            console.log('🔍 错误时连接状态:', eventSource ? eventSource.readyState : 'null');
+            console.log('🔍 页面可见性:', document.hidden ? '隐藏' : '可见');
+            
+            // 记录断开统计
+            connectionStats.lastDisconnectTime = new Date();
+            connectionStats.connectionHistory.push({
+              type: 'disconnect',
+              time: new Date(),
+              connectionId: connectionId,
+              readyState: eventSource ? eventSource.readyState : null
+            });
+            
+            updateConnectionStatus('连接断开');
+            isConnecting = false;
+            
+            // 🔧 优化：更精确的重连条件判断
+            if (eventSource && eventSource.readyState === EventSource.CLOSED) {
+              // 只有在页面可见、无重连计时器且连接真正关闭时才重连
+              if (!document.hidden && !reconnectTimeout) {
+                console.log('⏳ 10秒后尝试重连...');
+                connectionStats.totalReconnects++;
+                reconnectTimeout = setTimeout(() => {
+                  console.log('🔄 执行重连...');
+                  reconnectTimeout = null;
+                  // 🔧 优化：重连前再次检查连接状态
+                  if (!eventSource || eventSource.readyState === EventSource.CLOSED) {
+                    connectSSE();
+                  } else {
+                    console.log('🚫 连接状态已恢复，取消重连');
+                  }
+                }, 10000); // 增加重连间隔到10秒
+              } else {
+                console.log('🚫 跳过重连 - 页面隐藏:', document.hidden, '或已有重连计时器:', !!reconnectTimeout);
+              }
+            } else {
+              console.log('🔍 连接状态非CLOSED，等待状态变化...');
+            }
+          });
+        }
+
+        // 更新连接状态显示
+        function updateConnectionStatus(status) {
+          if (connectionStatus) {
+            connectionStatus.textContent = status;
+            connectionStatus.className = status === '已连接' ? 'connected' : 'disconnected';
+          }
+        }
+
+        // 处理报警消息
+        function handleAlertMessage(alert) {
+          console.log('处理报警消息:', alert);
+          
+          // 创建报警元素
+          const alertElement = createAlertElement(alert);
+          
+          // 清除"等待报警数据"提示
+          const noAlertsElement = alertContainer.querySelector('.no-alerts');
+          if (noAlertsElement) {
+            noAlertsElement.remove();
+          }
+          
+          // 添加到容器顶部
+          if (alertContainer) {
+            alertContainer.insertBefore(alertElement, alertContainer.firstChild);
+            
+            // 如果报警太多，移除旧的
+            while (alertContainer.children.length > MAX_ALERTS) {
+              alertContainer.removeChild(alertContainer.lastChild);
+            }
+          }
+          
+          // 🔧 修复：基于实际显示的报警元素数量更新计数
+          const currentAlertElements = alertContainer.querySelectorAll('.alert-item');
+          alertCount = currentAlertElements.length;
+          if (alertCountElement) {
+            alertCountElement.textContent = alertCount;
+          }
+          
+          console.log(`📊 实时报警已添加，当前显示 ${alertCount} 条报警`);
+          
+          // 播放声音提示
+          playAlertSound();
+        }
+
+        // 创建报警元素
+        function createAlertElement(alert) {
+          const alertDiv = document.createElement('div');
+          alertDiv.className = 'alert-item';
+          alertDiv.dataset.alertId = alert.id;
+          alertDiv.dataset.cameraId = alert.camera_id;
+          alertDiv.dataset.alertType = alert.alert_type;
+          
+          // 设置报警类型样式
+          alertDiv.classList.add(`alert-type-${alert.alert_type}`);
+          
+          // 格式化时间
+          const alertTime = new Date(alert.timestamp);
+          const formattedTime = alertTime.toLocaleString('zh-CN');
+          
+          // 获取报警类型显示文本
+          const alertTypeText = ALERT_TYPES[alert.alert_type] || alert.alert_type;
+          
+          // 构建HTML内容
+          alertDiv.innerHTML = `
+            <div class="alert-header">
+              <span class="alert-type">${alertTypeText}</span>
+              <span class="alert-time">${formattedTime}</span>
+            </div>
+            <div class="alert-body">
+              <div class="alert-info">
+                <p><strong>ID:</strong> ${alert.id || '未知'}</p>
+                <p><strong>报警名称:</strong> ${alert.alert_name || '未知'}</p>
+                <p><strong>报警类别:</strong> ${alert.alert_category || '未分类'}</p>
+                <p><strong>摄像头:</strong> ${alert.camera_name || alert.camera_id}</p>
+                <p><strong>位置:</strong> ${alert.location || '未知'}</p>
+                <p><strong>报警等级:</strong> ${alert.alert_level || 1}</p>
+                <p><strong>置信度:</strong> ${alert.confidence ? (alert.confidence * 100).toFixed(2) + '%' : '未知'}</p>
+              </div>
+              <div class="alert-image">
+                <img src="${alert.minio_frame_url || '/static/img/no-image.png'}" alt="报警截图" onerror="this.src='/static/img/no-image.png'">
+              </div>
+            </div>
+            <div class="alert-footer">
+              <a href="${alert.minio_video_url || '#'}" target="_blank" class="alert-video-link">查看视频</a>
+              <button class="alert-dismiss" onclick="dismissAlert(this.parentNode.parentNode)">忽略</button>
+            </div>
+          `;
+          
+          return alertDiv;
+        }
+
+        // 播放报警声音
+        function playAlertSound() {
+          const audio = document.getElementById('alert-sound');
+          if (audio) {
+            audio.play().catch(error => {
+              // 忽略用户交互限制导致的错误
+              console.log('无法播放声音:', error);
+            });
+          }
+        }
+
+        // 忽略报警
+        function dismissAlert(alertElement) {
+          if (alertElement && alertElement.parentNode) {
+            alertElement.parentNode.removeChild(alertElement);
+            
+            // 🔧 修复：移除报警后更新计数
+            const currentAlertElements = alertContainer.querySelectorAll('.alert-item');
+            alertCount = currentAlertElements.length;
+            if (alertCountElement) {
+              alertCountElement.textContent = alertCount;
+            }
+            
+            console.log(`📊 报警已忽略，当前显示 ${alertCount} 条报警`);
+            
+            // 如果没有报警了，显示提示
+            if (alertCount === 0) {
+              alertContainer.innerHTML = '<div class="no-alerts"><p>暂无报警数据</p></div>';
+            }
+          }
+        }
+
+        // 过滤报警
+        function filterAlerts() {
+          const cameraId = cameraFilter ? cameraFilter.value : '';
+          const alertType = alertTypeFilter ? alertTypeFilter.value : '';
+          
+          // 遍历所有报警元素
+          const alerts = alertContainer.getElementsByClassName('alert-item');
+          for (let i = 0; i < alerts.length; i++) {
+            const alert = alerts[i];
+            let visible = true;
+            
+            // 按摄像头过滤
+            if (cameraId && alert.dataset.cameraId !== cameraId) {
+              visible = false;
+            }
+            
+            // 按报警类型过滤
+            if (alertType && alert.dataset.alertType !== alertType) {
+              visible = false;
+            }
+            
+            // 设置可见性
+            alert.style.display = visible ? 'block' : 'none';
+          }
+        }
+
+        // 加载历史报警数据
+        async function loadHistoricalAlerts() {
+          try {
+            showStatusMessage('正在加载历史报警...', 'info');
+            
+            const response = await fetch('/api/v1/alerts/real-time?limit=20');
+            if (!response.ok) {
+              throw new Error('获取历史报警失败');
+            }
+            
+            const data = await response.json();
+            const alerts = data.alerts || [];
+            
+            console.log('📊 加载报警数据:', {
+              loaded_alerts: alerts.length,
+              total_in_db: data.total,
+              pages: data.pages,
+              current_page: data.page
+            });
+            
+            // 清空容器
+            if (alertContainer) {
+              alertContainer.innerHTML = '';
+            }
+            
+            if (alerts.length === 0) {
+              alertContainer.innerHTML = '<div class="no-alerts"><p>暂无报警数据</p></div>';
+              // 🔧 修复：没有数据时，显示记录数为0
+              alertCount = 0;
+              if (alertCountElement) {
+                alertCountElement.textContent = 0;
+              }
+              showStatusMessage('暂无报警数据', 'info');
+            } else {
+              // 添加报警
+              alerts.forEach(alert => {
+                const alertElement = createAlertElement(alert);
+                alertContainer.appendChild(alertElement);
+              });
+              
+              // 🔧 修复：显示当前页面加载的记录数，而不是数据库总数
+              alertCount = alerts.length;
+              if (alertCountElement) {
+                alertCountElement.textContent = alerts.length;
+              }
+              
+              // 🔧 修复：状态消息显示更详细的信息
+              const totalRecords = data.total || alerts.length;
+              const statusMsg = totalRecords > alerts.length 
+                ? `加载完成，显示最新 ${alerts.length} 条记录（数据库共 ${totalRecords} 条）`
+                : `加载完成，共 ${alerts.length} 条记录`;
+              
+              showStatusMessage(statusMsg, 'success');
+              
+              console.log(`✅ 报警数据加载完成: 显示${alerts.length}条，总计${totalRecords}条`);
+            }
+            
+          } catch (error) {
+            console.error('加载历史报警失败:', error);
+            showStatusMessage('加载失败: ' + error.message, 'error');
+            
+            // 🔧 修复：出错时重置计数器
+            alertCount = 0;
+            if (alertCountElement) {
+              alertCountElement.textContent = 0;
+            }
+          }
+        }
+
+        // 发送测试报警
+        async function sendTestAlert() {
+          const button = document.getElementById('send-test-alert');
+          const originalText = button.innerHTML;
+          
+          try {
+            // 禁用按钮并显示加载状态
+            button.disabled = true;
+            button.innerHTML = '<span class="loading"></span>发送中...';
+            
+            showStatusMessage('正在发送测试报警...', 'info');
+            console.log('发送测试报警请求, 连接ID:', connectionId);
+            
+            const response = await fetch('/api/v1/alerts/test', {
+              method: 'POST',
+              headers: {
+                'Content-Type': 'application/json'
+              }
+            });
+            
+            if (!response.ok) {
+              throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            console.log('测试报警发送成功:', result);
+            
+            showStatusMessage('✅ 测试报警发送成功！', 'success');
+            
+          } catch (error) {
+            console.error('发送测试报警失败:', error);
+            showStatusMessage('❌ 发送失败: ' + error.message, 'error');
+          } finally {
+            // 恢复按钮状态
+            button.disabled = false;
+            button.innerHTML = originalText;
+          }
+        }
+
+        // 显示状态消息
+        function showStatusMessage(message, type) {
+          if (statusMessage) {
+            statusMessage.textContent = message;
+            statusMessage.className = `status-message ${type}`;
+            statusMessage.style.display = 'inline-block';
+            
+            // 3秒后自动隐藏成功消息
+            if (type === 'success') {
+              setTimeout(() => {
+                statusMessage.style.display = 'none';
+              }, 3000);
+            }
+          }
+        }
+
+        // 检查SSE连接状态
+        async function checkSSEStatus() {
+          try {
+            showStatusMessage('正在检查SSE连接状态...', 'info');
+            
+            // 检查服务器端的连接统计
+            const response = await fetch('/api/v1/alerts/sse/status');
+            if (!response.ok) {
+              throw new Error('获取服务器SSE状态失败');
+            }
+            
+            const data = await response.json();
+            console.log('服务器SSE状态:', data);
+            
+            // 检查客户端连接状态
+            const clientStatus = eventSource ? 
+              (eventSource.readyState === EventSource.OPEN ? '已连接' : 
+               eventSource.readyState === EventSource.CONNECTING ? '连接中' : '已断开') : '未连接';
+            
+            // 构建详细状态信息
+            const statusInfo = {
+              client: {
+                status: clientStatus,
+                connectionId: connectionId,
+                readyState: eventSource ? eventSource.readyState : null,
+                isConnecting: isConnecting,
+                hasReconnectTimeout: !!reconnectTimeout
+              },
+              server: data,
+              stats: connectionStats,
+              page: {
+                hidden: document.hidden,
+                url: window.location.href,
+                userAgent: navigator.userAgent.substring(0, 100)
+              }
+            };
+            
+            console.log('🔍 完整连接状态:', statusInfo);
+            
+            const statusText = `🖥️ 客户端: ${clientStatus} | 🌐 服务器: ${data.connected_clients} 个连接 | 📊 总连接: ${connectionStats.totalConnections} 次`;
+            showStatusMessage(statusText, 'success');
+            
+            // 如果连接异常频繁，给出警告
+            if (connectionStats.totalConnections > 10) {
+              console.warn('⚠️ 检测到异常频繁的连接！连接统计:', connectionStats);
+              showStatusMessage(`⚠️ 警告：检测到 ${connectionStats.totalConnections} 次连接，可能存在问题`, 'error');
+            }
+            
+          } catch (error) {
+            console.error('检查SSE连接状态失败:', error);
+            showStatusMessage('❌ 检查失败: ' + error.message, 'error');
+          }
+        }
+
+        // 页面加载完成后初始化
+        document.addEventListener('DOMContentLoaded', function() {
+          // 确保只初始化一次
+          if (window.alertMonitorInitialized) {
+            console.log('报警监控已经初始化，跳过重复初始化');
+            return;
+          }
+          
+          window.alertMonitorInitialized = true;
+          initAlertMonitor();
+        });
+    </script>
 </body>
 </html> 
