@@ -124,11 +124,11 @@ class AITaskService:
         if not task_data.get('camera_id'):
             logger.error("缺少摄像头ID (camera_id)")
             return None
-
+        
         if not task_data.get('skill_class_id'):
             logger.error("缺少技能类ID (skill_class_id)")
             return None
-
+        
         try:
             # 导入需要的服务
             from app.services.skill_class_service import skill_class_service
@@ -139,15 +139,27 @@ class AITaskService:
             if not skill_class:
                 logger.error(f"技能类不存在: id={skill_class_id}")
                 return None
-
+            
             # 直接使用DAO创建任务
             new_task = AITaskDAO.create_task(task_data, db)
             if not new_task:
                 logger.error("创建AI任务失败")
                 return None
-
-            # 返回创建后的任务数据
-            return AITaskService.get_task_by_id(new_task.id, db)
+            
+            # 获取创建后的任务数据
+            task_result = AITaskService.get_task_by_id(new_task.id, db)
+            
+            # 如果任务状态为启用，立即为新任务创建调度
+            if task_result and task_result.get('status', False):
+                try:
+                    from app.services.ai_task_executor import task_executor
+                    task_executor.schedule_task(new_task.id, db)
+                    logger.info(f"已为新创建的任务 {new_task.id} 设置调度")
+                except Exception as e:
+                    logger.warning(f"为新任务 {new_task.id} 设置调度失败: {str(e)}")
+                    # 不影响任务创建，只记录警告
+            
+            return task_result
         except Exception as e:
             logger.error(f"创建AI任务失败: {str(e)}", exc_info=True)
             return None
@@ -172,8 +184,29 @@ class AITaskService:
         if not updated_task:
             return None
         
-        # 返回更新后的任务数据
-        return AITaskService.get_task_by_id(updated_task.id, db)
+        # 获取更新后的任务数据
+        task_result = AITaskService.get_task_by_id(updated_task.id, db)
+        
+        # 处理任务调度更新
+        try:
+            from app.services.ai_task_executor import task_executor
+            
+            # 如果更新了状态、运行时段等关键配置，重新调度任务
+            if any(key in task_data for key in ['status', 'running_period', 'frame_rate', 'electronic_fence', 'skill_config']):
+                if task_result and task_result.get('status', False):
+                    # 任务启用，重新调度
+                    task_executor.schedule_task(task_id, db)
+                    logger.info(f"已重新调度任务 {task_id}")
+                else:
+                    # 任务禁用，清除调度
+                    task_executor._clear_task_jobs(task_id)
+                    task_executor._stop_task_thread(task_id)
+                    logger.info(f"已停止并清除任务 {task_id} 的调度")
+        except Exception as e:
+            logger.warning(f"更新任务 {task_id} 调度失败: {str(e)}")
+            # 不影响任务更新，只记录警告
+        
+        return task_result
     
     @staticmethod
     def delete_task(task_id: int, db: Session) -> bool:
@@ -188,6 +221,18 @@ class AITaskService:
             bool: 是否成功删除
         """
         logger.info(f"删除AI任务: id={task_id}")
+        
+        # 先清理任务调度和运行状态
+        try:
+            from app.services.ai_task_executor import task_executor
+            task_executor._clear_task_jobs(task_id)
+            task_executor._stop_task_thread(task_id)
+            logger.info(f"已清理任务 {task_id} 的调度和运行状态")
+        except Exception as e:
+            logger.warning(f"清理任务 {task_id} 调度失败: {str(e)}")
+            # 继续删除任务，不因调度清理失败而中断
+        
+        # 删除任务
         return AITaskDAO.delete_task(task_id, db)
     
     @staticmethod
