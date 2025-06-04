@@ -9,14 +9,17 @@ import json
 import os
 import logging
 from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
+from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
+from concurrent.futures import ThreadPoolExecutor
 from app.services.ai_task_service import AITaskService
 from app.services.wvp_client import wvp_client
 from app.models.ai_task import AITask
 from app.db.session import get_db
+from app.services.camera_service import CameraService
+from app.services.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
 
@@ -32,13 +35,22 @@ class AITaskExecutor:
         self.scheduler = BackgroundScheduler()
         self.scheduler.start()
         
+        # 创建线程池用于异步处理预警
+        self.alert_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="AlertGen")
+        
         # 初始化目录
         os.makedirs("alerts", exist_ok=True)
         
     def __del__(self):
-        """析构函数，确保调度器关闭"""
+        """析构函数，确保调度器和线程池关闭"""
         try:
-            self.scheduler.shutdown()
+            if hasattr(self, 'alert_executor'):
+                self.alert_executor.shutdown(wait=True)
+        except:
+            pass
+        try:
+            if hasattr(self, 'scheduler'):
+                self.scheduler.shutdown()
         except:
             pass
     
@@ -227,8 +239,21 @@ class AITaskExecutor:
             db = next(get_db())
             
             # 获取视频流
-            stream_url = self._get_stream_url(task.camera_id)
-            if not stream_url:
+            stream_url, should_delete = self._get_stream_url(task.camera_id)
+            if should_delete:
+                logger.warning(f"摄像头 {task.camera_id} 通道不存在，将自动删除任务 {task.id}")
+                # 删除任务
+                try:
+                    AITaskService.delete_task(task.id, db)
+                    logger.info(f"已删除任务 {task.id}，因为关联的摄像头 {task.camera_id} 不存在")
+                    
+                    # 清理调度作业
+                    self._clear_task_jobs(task.id)
+                    logger.info(f"已清理任务 {task.id} 的调度作业")
+                except Exception as e:
+                    logger.error(f"删除任务 {task.id} 时出错: {str(e)}")
+                return
+            elif stream_url is None:
                 logger.error(f"获取任务 {task.id} 的视频流失败")
                 return
                 
@@ -271,16 +296,16 @@ class AITaskExecutor:
                         break
                     continue
                 
-                # 应用电子围栏过滤（如果配置了）
-                if self._is_in_electronic_fence(frame, task):
-                    # 直接调用技能实例的process方法处理单帧
-                    result = skill_instance.process(frame)
-                    
-                    # 处理技能返回的结果
-                    if result.success:
-                        self._handle_skill_result(result, task, frame, db)
-                    else:
-                        logger.warning(f"任务 {task.id} 处理结果失败: {result.error_message}")
+                # 直接调用技能实例的process方法处理单帧
+                # 将电子围栏配置传递给技能
+                fence_config = self._parse_fence_config(task)
+                result = skill_instance.process(frame, fence_config)
+                
+                # 处理技能返回的结果
+                if result.success:
+                    self._handle_skill_result(result, task, frame, db)
+                else:
+                    logger.warning(f"任务 {task.id} 处理结果失败: {result.error_message}")
                 
             # 释放资源
             cap.release()
@@ -291,31 +316,44 @@ class AITaskExecutor:
         finally:
             db.close()
     
-    def _get_stream_url(self, camera_id: int) -> Optional[str]:
-        """获取摄像头流地址"""
+    def _get_stream_url(self, camera_id: int) -> Tuple[Optional[str], bool]:
+        """获取摄像头流地址
+        
+        Returns:
+            Tuple[Optional[str], bool]: (流地址, 是否应该删除任务)
+            - 当通道不存在时，返回 (None, True) 表示应该删除任务
+            - 当通道存在但其他原因失败时，返回 (None, False) 表示不删除任务
+            - 当成功获取流地址时，返回 (stream_url, False)
+        """
         try:
+            # 首先检查通道是否存在
+            channel_info = wvp_client.get_channel_one(camera_id)
+            if not channel_info:
+                logger.warning(f"摄像头通道 {camera_id} 不存在")
+                return None, True  # 通道不存在，应该删除任务
+            
             # 调用WVP客户端获取通道播放地址
             play_info = wvp_client.play_channel(camera_id)
             if not play_info:
                 logger.error(f"获取摄像头 {camera_id} 播放信息失败")
-                return None
+                return None, False  # 通道存在但播放信息获取失败，不删除任务
                 
             # 优先使用RTSP流
             if play_info.get("rtsp"):
-                return play_info["rtsp"]
+                return play_info["rtsp"], False
             elif play_info.get("flv"):
-                return play_info["flv"]
+                return play_info["flv"], False
             elif play_info.get("hls"):
-                return play_info["hls"]
+                return play_info["hls"], False
             elif play_info.get("rtmp"):
-                return play_info["rtmp"]
+                return play_info["rtmp"], False
             else:
                 logger.error(f"摄像头 {camera_id} 无可用的流地址")
-                return None
+                return None, False  # 通道存在但无流地址，不删除任务
                 
         except Exception as e:
             logger.error(f"获取摄像头 {camera_id} 流地址时出错: {str(e)}")
-            return None
+            return None, False  # 异常情况，不删除任务
     
     def _load_skill_for_task(self, task: AITask, db: Session) -> Optional[Any]:
         """根据任务配置直接创建技能对象"""
@@ -365,66 +403,20 @@ class AITaskExecutor:
         
         return merged
     
-    def _is_in_electronic_fence(self, frame, task: AITask) -> bool:
-        """判断是否触发电子围栏规则"""
+    def _parse_fence_config(self, task: AITask) -> Dict:
+        """解析任务的电子围栏配置"""
         try:
-            # 解析电子围栏配置
-            fence_config = json.loads(task.electronic_fence) if isinstance(task.electronic_fence, str) else task.electronic_fence
+            if not task.electronic_fence:
+                return {}
             
-            # 如果未启用电子围栏，返回True
-            if not fence_config or not fence_config.get("enabled", False):
-                return True
-                
-            # 获取围栏点
-            polygons = fence_config.get("points", [])
-            if not polygons or len(polygons) == 0:
-                return True  # 没有多边形定义，不限制处理
-            
-            # 获取触发模式
-            trigger_mode = fence_config.get("trigger_mode", "inside")
-            
-            # 检测图像中的对象（简化版：使用整个图像中心点作为检测对象）
-            height, width = frame.shape[:2]
-            center_point = (width // 2, height // 2)
-            
-            # 判断点是否在任一多边形内
-            is_inside_any = False
-            for polygon in polygons:
-                if len(polygon) < 3:
-                    continue  # 跳过点数不足的多边形
-                
-                # 转换多边形点格式
-                poly_points = [(p["x"], p["y"]) for p in polygon]
-                
-                # 判断点是否在多边形内（使用射线法）
-                if self._point_in_polygon(center_point, poly_points):
-                    is_inside_any = True
-                    break
-            
-            # 获取任务ID，用于存储状态
-            task_id = task.id
-            
-            # 初始化状态跟踪字典（如果不存在）
-            if not hasattr(self, '_fence_status'):
-                self._fence_status = {}
-            
-            # 获取上一帧的状态（如果没有，假设为False，即围栏外）
-            prev_inside = self._fence_status.get(task_id, False)
-            
-            # 更新状态
-            self._fence_status[task_id] = is_inside_any
-            
-            # 判断触发条件
-            if trigger_mode == "inside":
-                # "进入围栏触发"：从外到内的变化
-                return not prev_inside and is_inside_any
+            if isinstance(task.electronic_fence, str):
+                return json.loads(task.electronic_fence)
             else:
-                # "离开围栏触发"：从内到外的变化
-                return prev_inside and not is_inside_any
-            
+                return task.electronic_fence
+                
         except Exception as e:
-            logger.error(f"判断电子围栏时出错: {str(e)}")
-            return True  # 出错时默认返回True，不阻止处理
+            logger.error(f"解析电子围栏配置失败: {str(e)}")
+            return {}
     
     def _point_in_polygon(self, point, polygon):
         """使用射线法判断点是否在多边形内"""
@@ -491,61 +483,306 @@ class AITaskExecutor:
                 if not detections:
                     return
                 
+                # 获取安全分析结果（技能已经处理了电子围栏过滤）
+                safety_metrics = data.get("safety_metrics", {})
+                
                 # 判断是否需要生成报警
                 if task.alert_level > 0:
-                    # 检查安全分析结果
-                    safety_metrics = data.get("safety_metrics", {})
+                    # 检查技能返回的预警信息
+                    alert_info_data = safety_metrics.get("alert_info", {})
+                    alert_triggered = alert_info_data.get("alert_triggered", False)
+                    skill_alert_level = alert_info_data.get("alert_level", 0)
                     
-                    # 根据不同技能类型检查是否有安全风险
-                    has_risk = False
-                    
-                    # 检查是否安全（以安全帽检测为例）
-                    if "is_safe" in safety_metrics:
-                        has_risk = not safety_metrics["is_safe"]
-                    # 或者检查是否有风险（以安全带检测为例）
-                    elif "has_risk" in safety_metrics:
-                        has_risk = safety_metrics["has_risk"]
-                    
-                    # 如果有风险，生成报警
-                    if has_risk:
-                        self._generate_alert(task, safety_metrics, frame, db, task.alert_level)
+                    # 只有当技能触发预警且预警等级达到或超过任务配置的预警等级时才生成预警
+                    # 注意：1级为最高预警，4级为最低预警，所以数字越小预警等级越高
+                    if alert_triggered and skill_alert_level <= task.alert_level:
+                        # 🚀 异步生成预警，不阻塞视频处理
+                        # 传递完整的data，包含detections数据
+                        self._schedule_alert_generation(task, data, frame.copy(), skill_alert_level)
+                        logger.info(f"任务 {task.id} 触发预警（异步处理中）: 技能预警等级={skill_alert_level}, 任务预警等级阈值={task.alert_level}")
+                    elif alert_triggered:
+                        logger.debug(f"任务 {task.id} 预警被过滤: 技能预警等级={skill_alert_level} > 任务预警等级阈值={task.alert_level}")
             
             # 可以添加其他类型任务的处理逻辑
             
         except Exception as e:
             logger.error(f"处理技能结果时出错: {str(e)}")
     
+    def _schedule_alert_generation(self, task: AITask, alert_data: Dict, frame: np.ndarray, level: int):
+        """异步调度预警生成
+        
+        Args:
+            task: AI任务对象
+            alert_data: 报警数据（安全分析结果）
+            frame: 报警截图帧（已复制）
+            level: 预警等级
+        """
+        try:
+            # 提交到线程池异步执行
+            future = self.alert_executor.submit(
+                self._generate_alert_async,
+                task, alert_data, frame, level
+            )
+            
+            # 可选：添加回调处理结果
+            future.add_done_callback(self._alert_generation_callback)
+            
+        except Exception as e:
+            logger.error(f"调度预警生成失败: {str(e)}")
+    
+    def _alert_generation_callback(self, future):
+        """预警生成完成的回调"""
+        try:
+            result = future.result()
+            if result:
+                logger.info(f"预警生成成功: alert_id={result.get('alert_id', 'N/A')}")
+            else:
+                logger.warning("预警生成失败")
+        except Exception as e:
+            logger.error(f"预警生成异常: {str(e)}")
+    
+    def _generate_alert_async(self, task: AITask, alert_data: Dict, frame: np.ndarray, level: int) -> Optional[Dict]:
+        """异步生成预警（在独立线程中执行）
+        
+        Args:
+            task: AI任务对象
+            alert_data: 报警数据（安全分析结果）
+            frame: 报警截图帧
+            level: 预警等级
+            
+        Returns:
+            生成的预警信息字典，失败时返回None
+        """
+        # 创建新的数据库会话（因为在新线程中）
+        db = next(get_db())
+        try:
+            return self._generate_alert(task, alert_data, frame, db, level)
+        finally:
+            db.close()
+    
     def _generate_alert(self, task: AITask, alert_data, frame, db: Session, level: int):
-        """生成报警"""
+        """生成报警
+        
+        Args:
+            task: AI任务对象
+            alert_data: 报警数据（安全分析结果）
+            frame: 报警截图帧
+            db: 数据库会话
+            level: 预警等级（技能返回的实际预警等级）
+        """
         try:
             from app.services.alert_service import alert_service
+            from app.services.camera_service import CameraService
+            from app.services.minio_client import minio_client
+            from datetime import datetime
+            import cv2
             
-            # 保存报警截图
-            timestamp = int(time.time())
-            img_filename = f"{task.id}_{task.camera_id}_{timestamp}.jpg"
-            img_path = f"alerts/{img_filename}"
-            os.makedirs("alerts", exist_ok=True)
-            cv2.imwrite(img_path, frame)
+            # 获取摄像头信息
+            camera_info = CameraService.get_ai_camera_by_id(task.camera_id, db)
+            camera_name = camera_info.get("name", f"摄像头{task.camera_id}") if camera_info else f"摄像头{task.camera_id}"
+            location = camera_info.get("location", "未知位置") if camera_info else "未知位置"
             
-            # 准备报警数据
+            # 直接从alert_data中获取预警信息
+            alert_info_data = alert_data.get("alert_info", {})
             alert_info = {
-                "task_id": task.id,
-                "camera_id": task.camera_id,
-                "level": level,
-                "type": task.task_type,
-                "content": str(alert_data),
-                "image_path": img_path,
-                "timestamp": timestamp,
-                "status": "未处理"
+                "name": alert_info_data.get("alert_name", "系统预警"),
+                "type": alert_info_data.get("alert_type", "安全生产预警"),
+                "description": alert_info_data.get("alert_description", f"{camera_name}检测到安全风险，请及时处理。")
             }
             
-            # 创建报警记录
-            alert_service.create_alert(alert_info, db)
+            # 在frame上绘制检测框
+            annotated_frame = self._draw_detections_on_frame(frame.copy(), alert_data)
             
-            logger.info(f"已生成报警: task_id={task.id}, camera_id={task.camera_id}, level={level}")
+            # 直接将annotated_frame编码为字节数据并上传到MinIO
+            timestamp = int(time.time())
+            img_filename = f"alert_{task.id}_{task.camera_id}_{timestamp}.jpg"
+            
+            # 上传截图到MinIO
+            minio_frame_object_name = ""
+            minio_video_object_name = ""  # TODO: 实现视频录制和上传
+            
+            try:
+                # 将绘制了检测框的frame编码为JPEG字节数据
+                success, img_encoded = cv2.imencode('.jpg', annotated_frame)
+                if not success:
+                    raise Exception("图像编码失败")
+                
+                # 转换为bytes
+                image_data = img_encoded.tobytes()
+                
+                # 直接上传字节数据到MinIO
+                from app.core.config import settings
+                
+                # 构建MinIO路径，简单拼接即可
+                minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{task.id}/{task.camera_id}"
+                
+                minio_frame_object_name = minio_client.upload_bytes(
+                    data=image_data,
+                    object_name=img_filename,
+                    content_type="image/jpeg",
+                    prefix=minio_prefix
+                )
+                
+                logger.info(f"预警截图已直接上传到MinIO: {minio_frame_object_name}")
+                
+            except Exception as e:
+                logger.error(f"上传预警截图到MinIO失败: {str(e)}")
+                # 如果上传失败，记录错误但继续处理
+                minio_frame_object_name = ""
+            
+            # 处理检测结果格式
+            formatted_results = self._format_detection_results(alert_data)
+            
+            # 解析电子围栏配置
+            electronic_fence = self._parse_fence_config(task)
+            fence_points = electronic_fence.get("points", []) if electronic_fence else []
+            
+            # 构建完整的预警信息
+            complete_alert = {
+                # 移除alert_id，由alert_service.create_alert生成
+                "alert_time": datetime.now().isoformat(),
+                "alert_level": level,
+                "alert_name": alert_info["name"],
+                "alert_type": alert_info["type"],
+                "alert_description": alert_info["description"],
+                "location": location,
+                "camera_id": str(task.camera_id),
+                "camera_name": camera_name,
+                "electronic_fence": fence_points,
+                "minio_frame_object_name": minio_frame_object_name,  # 传递object_name而不是URL
+                "minio_video_object_name": minio_video_object_name,  # 传递object_name而不是URL
+                "result": formatted_results
+            }
+            
+            # 记录预警信息到数据库（暂时注释，等开发人员完善）
+            # alert_id = alert_service.create_alert(complete_alert, db)
+            # complete_alert["alert_id"] = alert_id
+            
+            logger.info(f"已生成完整预警信息: task_id={task.id}, camera_id={task.camera_id}, level={level}")
+            logger.info(f"预警详情: {alert_info['name']} - {alert_info['description']}")
+            logger.info(f"MinIO截图对象名: {minio_frame_object_name}")
+            
+            return complete_alert
             
         except Exception as e:
             logger.error(f"生成报警时出错: {str(e)}")
+            return None
+    
+    def _draw_detections_on_frame(self, frame: np.ndarray, alert_data: Dict) -> np.ndarray:
+        """在帧上绘制检测框和标签（通用方法）
+        
+        Args:
+            frame: 输入图像帧
+            alert_data: 包含检测结果的报警数据
+            
+        Returns:
+            绘制了检测框的图像帧
+        """
+        try:
+            # 获取检测结果
+            detections = alert_data.get("detections", [])
+            
+            # 定义通用颜色列表（BGR格式）
+            colors = [
+                (0, 255, 0),    # 绿色
+                (255, 0, 0),    # 蓝色
+                (0, 255, 255),  # 黄色
+                (255, 0, 255),  # 品红色
+                (255, 255, 0),  # 青色
+                (128, 0, 128),  # 紫色
+                (255, 165, 0),  # 橙色
+                (0, 128, 255),  # 天蓝色
+                (128, 128, 128),# 灰色
+                (0, 0, 255),    # 红色
+            ]
+            
+            # 为每个不同的类别分配颜色
+            class_color_map = {}
+            color_index = 0
+            
+            # 遍历所有检测结果
+            for detection in detections:
+                bbox = detection.get("bbox", [])
+                confidence = detection.get("confidence", 0.0)
+                class_name = detection.get("class_name", "unknown")
+                
+                if len(bbox) >= 4:
+                    x1, y1, x2, y2 = bbox
+                    
+                    # 为新的类别分配颜色
+                    if class_name not in class_color_map:
+                        class_color_map[class_name] = colors[color_index % len(colors)]
+                        color_index += 1
+                    
+                    color = class_color_map[class_name]
+                    
+                    # 绘制检测框
+                    cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+                    
+                    # 准备标签文本
+                    label = f"{class_name}: {confidence:.2f}"
+                    
+                    # 计算文本大小
+                    (text_width, text_height), baseline = cv2.getTextSize(
+                        label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2
+                    )
+                    
+                    # 绘制标签背景
+                    cv2.rectangle(
+                        frame,
+                        (int(x1), int(y1) - text_height - baseline - 5),
+                        (int(x1) + text_width, int(y1)),
+                        color,
+                        -1
+                    )
+                    
+                    # 绘制标签文字
+                    cv2.putText(
+                        frame,
+                        label,
+                        (int(x1), int(y1) - baseline - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.5,
+                        (255, 255, 255),  # 白色文字
+                        2
+                    )
+            
+            return frame
+            
+        except Exception as e:
+            logger.error(f"绘制检测框时出错: {str(e)}")
+            # 如果绘制失败，返回原始帧
+            return frame
+    
+    def _format_detection_results(self, alert_data: Dict) -> List[Dict]:
+        """格式化检测结果为指定格式"""
+        try:
+            detections = alert_data.get("detections", [])
+            formatted_results = []
+            
+            for detection in detections:
+                bbox = detection.get("bbox", [])
+                if len(bbox) >= 4:
+                    # bbox格式: [x1, y1, x2, y2]
+                    x1, y1, x2, y2 = bbox
+                    
+                    formatted_result = {
+                        "score": detection.get("confidence", 0.0),
+                        "name": detection.get("class_name", "未知"),
+                        "location": {
+                            "left": int(x1),
+                            "top": int(y1),
+                            "width": int(x2 - x1),
+                            "height": int(y2 - y1)
+                        }
+                    }
+                    formatted_results.append(formatted_result)
+            
+            return formatted_results
+            
+        except Exception as e:
+            logger.error(f"格式化检测结果失败: {str(e)}")
+            return []
 
 # 创建全局任务执行器实例
 task_executor = AITaskExecutor() 
