@@ -3,7 +3,7 @@
 """
 import cv2
 import numpy as np
-from typing import Dict, List, Any, Tuple, Union
+from typing import Dict, List, Any, Tuple, Union, Optional
 import os
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
@@ -73,19 +73,19 @@ class BeltDetectorSkill(BaseSkill):
         # 使用配置中指定的模型列表
         return self.required_models
     
-    def process(self, input_data: Union[np.ndarray, str, Dict[str, Any]]) -> SkillResult:
+    def process(self, input_data: Union[np.ndarray, str, Dict[str, Any], Any], fence_config: Dict = None) -> SkillResult:
         """
         处理输入数据，检测图像中的安全带
         
         Args:
             input_data: 输入数据，支持numpy数组、图像路径或包含参数的字典
+            fence_config: 电子围栏配置（可选）
             
         Returns:
             检测结果，带有安全带检测的特定分析
         """
         # 1. 解析输入
         image = None
-        custom_params = {}
         
         try:
             # 支持多种类型的输入
@@ -108,6 +108,10 @@ class BeltDetectorSkill(BaseSkill):
                             return SkillResult.error_result(f"无法从路径加载图像: {img_data}")
                 else:
                     return SkillResult.error_result("输入字典中缺少'image'字段")
+                
+                # 提取电子围栏配置（如果字典中包含）
+                if "fence_config" in input_data:
+                    fence_config = input_data["fence_config"]
             else:
                 return SkillResult.error_result("不支持的输入数据类型")
                 
@@ -131,18 +135,21 @@ class BeltDetectorSkill(BaseSkill):
                 return SkillResult.error_result("推理失败")
             
             # 后处理结果
-            detections = outputs["output0"]
-            results = self.postprocess(detections, image)
+            results = self.postprocess(outputs, image)
             
-            # 添加安全分析
-            self._add_safety_analysis(results)
+            # 应用电子围栏过滤（如果提供了围栏配置）
+            if fence_config:
+                results = self.filter_detections_by_fence(results, fence_config)
             
-            # 返回结果
-            return SkillResult.success_result({
+            # 构建结果数据
+            result_data = {
                 "detections": results,
                 "count": len(results),
                 "safety_metrics": self.analyze_safety(results)
-            })
+            }
+            
+            # 返回结果
+            return SkillResult.success_result(result_data)
             
         except Exception as e:
             logger.exception(f"处理失败: {str(e)}")
@@ -224,70 +231,129 @@ class BeltDetectorSkill(BaseSkill):
             })
         return results
             
-    def _parse_results(self, detections: List[Dict], image_shape: Tuple[int, int, int]) -> Dict[str, Any]:
-        """
-        将检测结果转换为标准格式
+
+    def analyze_safety(self, detections):
+        """分析安全状况，检查是否有人员佩戴安全带
         
         Args:
-            detections: 检测结果列表
-            image_shape: 图像形状 (H, W, C)
+            detections: 检测结果
             
         Returns:
-            解析后的结果字典
+            Dict: 分析结果，包含预警信息
         """
-        height, width = image_shape[:2]
-        
-        # 直接使用已经处理好的检测结果
-        return {
-            "boxes": detections,
-            "image_size": [width, height],
-            "count": len(detections)
-        }
-        
-    def _add_safety_analysis(self, detection_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        添加安全分析到检测结果
-        
-        Args:
-            detection_data: 检测结果数据
-            
-        Returns:
-            带有安全分析的检测结果
-        """
-        boxes = detection_data.get("boxes", [])
-            
         # 统计各类别数量
-        person_count = 0
-        safebelt_count = 0
-        no_safebelt_count = 0
+        badge_count = 0      # 地面监工肩章数量
+        offground_count = 0  # 高空作业人员数量
+        ground_count = 0     # 地面作业人员数量
+        safebelt_count = 0   # 安全带数量
         
-        for box in boxes:
-            class_name = box.get("class_name", "")
-            if class_name == "person":
-                person_count += 1
-            elif class_name == "safebelt":
+        # 分类检测结果
+        for det in detections:
+            class_name = det.get('class_name', '')
+            if class_name == 'badge':      # 地面监工肩章
+                badge_count += 1
+            elif class_name == 'offground':  # 高空作业人员
+                offground_count += 1
+            elif class_name == 'ground':     # 地面作业人员
+                ground_count += 1
+            elif class_name == 'safebelt':   # 安全带
                 safebelt_count += 1
-            elif class_name == "no_safebelt":
-                no_safebelt_count += 1
         
-        # 计算安全率 = 佩戴安全带人数 / 总人数(佩戴+未佩戴) * 100%
-        total_worker_count = safebelt_count + no_safebelt_count
-        safety_rate = (safebelt_count / total_worker_count * 100) if total_worker_count > 0 else 100
+        # 计算总人员数
+        # 监工(badge) + 高空作业人员(offground) + 地面作业人员(ground)
+        total_persons = badge_count + offground_count + ground_count
         
-        # 判断是否存在安全隐患
-        has_risk = no_safebelt_count > 0
+        # 高空作业人员需要佩戴安全带
+        high_risk_persons = offground_count
         
-        # 添加分析结果
-        detection_data["analysis"] = {
-            "person_count": person_count,
-            "safebelt_count": safebelt_count,  # 佩戴安全带的人数
-            "no_safebelt_count": no_safebelt_count,  # 未佩戴安全带的人数
-            "total_worker_count": total_worker_count,
-            "safety_rate": safety_rate,
-            "has_risk": has_risk
+        # 计算安全率：高空作业人员的安全带佩戴率
+        if high_risk_persons > 0:
+            safety_ratio = min(safebelt_count / high_risk_persons, 1.0)  # 最大为1.0
+            is_safe = safebelt_count >= high_risk_persons
+        else:
+            safety_ratio = 1.0  # 没有高空作业人员时认为安全
+            is_safe = True
+        
+        # 计算可能未佩戴安全带的高空作业人员数
+        unsafe_count = max(0, high_risk_persons - safebelt_count)
+        
+        # 确定预警等级和预警信息
+        alert_triggered = False
+        alert_level = 0
+        alert_name = ""
+        alert_type = ""
+        alert_description = ""
+        
+        if unsafe_count > 0:
+            alert_triggered = True
+            # 根据未佩戴安全带的高空作业人员数量确定预警等级（1级最高，4级最低）
+            if unsafe_count >= 3:
+                alert_level = 1  # 最高预警：3人及以上未佩戴安全带
+            elif unsafe_count >= 2:
+                alert_level = 2  # 高级预警：2人未佩戴安全带
+            else:
+                alert_level = 3  # 中级预警：1人未佩戴安全带
+            
+            # 生成预警信息
+            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
+            severity = level_names.get(alert_level, "严重")
+            
+            alert_name = "未佩戴安全带"
+            alert_type = "安全生产预警"
+            alert_description = f"检测到{unsafe_count}名高空作业人员未佩戴安全带（共检测到{high_risk_persons}名高空作业人员），属于{severity}违规行为。建议立即通知现场安全员进行处理。"
+        
+        result = {
+            "total_persons": total_persons,           # 检测到的总人员数
+            "supervisor_count": badge_count,          # 地面监工数量（肩章）
+            "high_risk_persons": high_risk_persons,   # 高空作业人员数（需要安全带）
+            "ground_persons": ground_count,           # 地面作业人员数
+            "safebelt_count": safebelt_count,         # 检测到的安全带数量
+            "safe_count": min(safebelt_count, high_risk_persons),  # 安全的高空作业人员数
+            "unsafe_count": unsafe_count,             # 可能未佩戴安全带的高空作业人员数
+            "safety_ratio": safety_ratio,
+            "is_safe": is_safe,
+            "alert_info": {
+                "alert_triggered": alert_triggered,       # 是否触发预警
+                "alert_level": alert_level,               # 预警等级（0-3）
+                "alert_name": alert_name,                # 预警名称
+                "alert_type": alert_type,                # 预警类型
+                "alert_description": alert_description   # 预警描述
+            }
         }
         
-        return detection_data
+        self.log("info", f"安全分析: 检测到 {badge_count} 个监工，{high_risk_persons} 个高空作业人员，{ground_count} 个地面作业人员，{safebelt_count} 个安全带，可能有 {unsafe_count} 人未佩戴安全带，预警等级: {alert_level}")
+        return result
+
+    def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
+        """
+        获取检测对象的关键点（用于围栏判断）
+        对于安全带检测，根据类别使用不同的关键点：
+        - 人员类别（badge, offground, ground）：使用检测框底部中心点（脚部位置）
+        - 安全带类别（safebelt）：使用检测框中心点
+        
+        Args:
+            detection: 检测结果
+            
+        Returns:
+            检测点坐标 (x, y)，如果无法获取则返回None
+        """
+        bbox = detection.get("bbox", [])
+        class_name = detection.get("class_name", "")
+        
+        if len(bbox) >= 4:
+            # bbox格式: [x1, y1, x2, y2]
+            center_x = (bbox[0] + bbox[2]) / 2
+            
+            # 根据类别确定关键点
+            if class_name in ["badge", "offground", "ground"]:
+                # 人员类别：使用底部中心点（人员脚部位置）
+                key_y = bbox[3]  # 使用底边作为关键点
+            else:
+                # 安全带等其他类别：使用中心点
+                key_y = (bbox[1] + bbox[3]) / 2
+            
+            return (center_x, key_y)
+        return None
 
 # 测试代码
 if __name__ == "__main__":

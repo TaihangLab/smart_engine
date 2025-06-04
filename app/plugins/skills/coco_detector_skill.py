@@ -3,7 +3,7 @@ COCO检测技能 - 基于Triton推理服务器
 """
 import cv2
 import numpy as np
-from typing import Dict, List, Any, Tuple, Union
+from typing import Dict, List, Any, Tuple, Union, Optional
 import os
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
@@ -78,63 +78,83 @@ class CocoDetectorSkill(BaseSkill):
         """获取技能所需的模型列表"""
         return self.required_models
     
-    def process(self, input_data, **kwargs) -> SkillResult:
+    def process(self, input_data: Union[np.ndarray, str, Dict[str, Any], Any], fence_config: Dict = None) -> SkillResult:
         """
         处理输入数据，执行COCO对象检测
         
-        参数:
-            input_data: 输入数据，可以是:
-                - numpy图像数组(HWC, BGR格式)
-                - 图像文件路径
-                - 包含图像数据的字典
-            **kwargs: 其他参数
+        Args:
+            input_data: 输入数据，支持numpy数组、图像路径或包含参数的字典
+            fence_config: 电子围栏配置（可选）
                 
-        返回:
+        Returns:
             SkillResult: 包含检测结果的技能结果对象
         """
-        # 获取或加载图像
-        if isinstance(input_data, np.ndarray):
-            image = input_data
-        elif isinstance(input_data, str) and os.path.isfile(input_data):
-            # 从文件加载图像
-            image = cv2.imread(input_data)
-            if image is None:
-                return SkillResult(self.name, False, {"error": f"无法加载图像: {input_data}"})
-        elif isinstance(input_data, dict) and "image" in input_data:
-            # 从字典中获取图像
-            image = input_data["image"]
-            if isinstance(image, str) and os.path.isfile(image):
-                image = cv2.imread(image)
+        # 1. 解析输入
+        image = None
+        
+        try:
+            # 支持多种类型的输入
+            if isinstance(input_data, np.ndarray):
+                image = input_data
+            elif isinstance(input_data, str) and os.path.isfile(input_data):
+                # 从文件加载图像
+                image = cv2.imread(input_data)
                 if image is None:
-                    return SkillResult(self.name, False, {"error": f"无法加载图像: {image}"})
-        else:
-            return SkillResult(self.name, False, {"error": "不支持的输入数据类型"})
+                    return SkillResult.error_result(f"无法加载图像: {input_data}")
+            elif isinstance(input_data, dict) and "image" in input_data:
+                # 从字典中获取图像
+                image = input_data["image"]
+                if isinstance(image, str) and os.path.isfile(image):
+                    image = cv2.imread(image)
+                    if image is None:
+                        return SkillResult.error_result(f"无法加载图像: {image}")
+                
+                # 提取电子围栏配置（如果字典中包含）
+                if "fence_config" in input_data:
+                    fence_config = input_data["fence_config"]
+            else:
+                return SkillResult.error_result("不支持的输入数据类型")
+                
+            # 检查图像是否有效
+            if image is None or image.size == 0:
+                return SkillResult.error_result("无效的图像数据")
+                
+            # 2. 执行检测
+            # 预处理图像
+            input_tensor = self.preprocess(image)
             
-        # 注意：不再需要重复检查Triton服务器和模型就绪性，因为在SkillManager中已经处理
-        
-        # 预处理图像
-        input_tensor = self.preprocess(image)
-        
-        # 设置Triton输入
-        inputs = {
-            "images": input_tensor
-        }
-        
-        # 执行推理
-        outputs = triton_client.infer(self.model_name, inputs)
-        if outputs is None:
-            return SkillResult(self.name, False, {"error": "推理失败"})
-        
-        # 后处理结果
-        detections = outputs["output0"]
-        results = self.postprocess(detections, image)
-        
-        # 将字典转换为结果对象
-        return SkillResult(self.name, True, {
-            "detections": results,
-            "count": len(results),
-            "classes": self._count_classes(results)
-        })
+            # 设置Triton输入
+            inputs = {
+                "images": input_tensor
+            }
+            
+            # 执行推理
+            outputs = triton_client.infer(self.model_name, inputs)
+            if outputs is None:
+                return SkillResult.error_result("推理失败")
+            
+            # 后处理结果
+            detections = outputs["output0"]
+            results = self.postprocess(detections, image)
+            
+            # 3. 应用电子围栏过滤（如果提供了围栏配置）
+            if fence_config:
+                results = self.filter_detections_by_fence(results, fence_config)
+            
+            # 4. 构建结果数据
+            result_data = {
+                "detections": results,
+                "count": len(results),
+                "classes": self._count_classes(results),
+                "safety_metrics": self.analyze_safety(results)
+            }
+            
+            # 5. 返回结果
+            return SkillResult.success_result(result_data)
+            
+        except Exception as e:
+            logger.exception(f"处理失败: {str(e)}")
+            return SkillResult.error_result(f"处理失败: {str(e)}")
     
     def preprocess(self, img):
         """预处理图像
@@ -237,4 +257,59 @@ class CocoDetectorSkill(BaseSkill):
                 class_counts[class_name] += 1
             else:
                 class_counts[class_name] = 1
-        return class_counts 
+        return class_counts
+
+    def analyze_safety(self, detections):
+        """分析安全状况（通用COCO检测的基本安全分析）
+        
+        Args:
+            detections: 检测结果
+            
+        Returns:
+            Dict: 分析结果，包含预警信息
+        """
+        # 统计人员数量
+        person_count = 0
+        
+        # 分类检测结果
+        for det in detections:
+            class_name = det.get('class_name', '')
+            if class_name == 'person':
+                person_count += 1
+        
+        # COCO检测器默认不触发预警，只提供检测计数
+        # 如果需要特定的安全逻辑，应该创建专门的技能类
+        result = {
+            "total_detections": len(detections),
+            "person_count": person_count,
+            "is_safe": True,             # COCO检测器默认安全
+            "alert_info": {
+                "alert_triggered": False,    # 不触发预警
+                "alert_level": 0,           # 预警等级为0
+                "alert_name": "",           # 预警名称
+                "alert_type": "",           # 预警类型
+                "alert_description": ""     # 预警描述
+            }
+        }
+        
+        self.log("info", f"COCO检测分析: 检测到 {len(detections)} 个对象，其中 {person_count} 个人员")
+        return result 
+
+    def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
+        """
+        获取检测对象的关键点（用于围栏判断）
+        对于COCO检测，使用检测框的中心点作为关键点
+        
+        Args:
+            detection: 检测结果
+            
+        Returns:
+            检测点坐标 (x, y)，如果无法获取则返回None
+        """
+        bbox = detection.get("bbox", [])
+        if len(bbox) >= 4:
+            # bbox格式: [x1, y1, x2, y2]
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            return (center_x, center_y)
+        return None 

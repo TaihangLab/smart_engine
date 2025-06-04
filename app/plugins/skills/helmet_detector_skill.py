@@ -3,7 +3,7 @@
 """
 import cv2
 import numpy as np
-from typing import Dict, List, Any, Tuple, Union
+from typing import Dict, List, Any, Tuple, Union, Optional
 import os
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
@@ -73,19 +73,19 @@ class HelmetDetectorSkill(BaseSkill):
         # 使用配置中指定的模型列表
         return self.required_models
     
-    def process(self, input_data: Union[np.ndarray, str, Dict[str, Any]]) -> SkillResult:
+    def process(self, input_data: Union[np.ndarray, str, Dict[str, Any], Any], fence_config: Dict = None) -> SkillResult:
         """
         处理输入数据，检测图像中的安全帽
         
         Args:
             input_data: 输入数据，支持numpy数组、图像路径或包含参数的字典
+            fence_config: 电子围栏配置（可选）
             
         Returns:
             检测结果，带有安全帽检测的特定分析
         """
         # 1. 解析输入
         image = None
-        custom_params = {}
         
         try:
             # 支持多种类型的输入
@@ -98,7 +98,7 @@ class HelmetDetectorSkill(BaseSkill):
                 if image is None:
                     return SkillResult.error_result(f"无法加载图像: {input_data}")
             elif isinstance(input_data, dict):
-                # 如果是字典，提取图像和参数
+                # 如果是字典，提取图像
                 if "image" in input_data:
                     image_data = input_data["image"]
                     if isinstance(image_data, np.ndarray):
@@ -112,9 +112,9 @@ class HelmetDetectorSkill(BaseSkill):
                 else:
                     return SkillResult.error_result("输入字典中缺少'image'字段")
                 
-                # 提取其他参数
-                if "params" in input_data:
-                    custom_params = input_data["params"]
+                # 提取电子围栏配置（如果字典中包含）
+                if "fence_config" in input_data:
+                    fence_config = input_data["fence_config"]
             else:
                 return SkillResult.error_result("不支持的输入数据类型")
                 
@@ -123,8 +123,6 @@ class HelmetDetectorSkill(BaseSkill):
                 return SkillResult.error_result("无效的图像数据")
                 
             # 2. 执行检测
-            # 注意：不再需要重复检查Triton服务器和模型就绪性，因为在SkillManager中已经处理
-            
             # 预处理图像
             input_tensor = self.preprocess(image)
             
@@ -139,18 +137,21 @@ class HelmetDetectorSkill(BaseSkill):
                 return SkillResult.error_result("推理失败")
             
             # 后处理结果
-            detections = outputs["output0"]
-            results = self.postprocess(detections, image)
+            results = self.postprocess(outputs, image)
             
-            # 3. 添加安全分析
-            self._add_safety_analysis(results)
+            # 3. 应用电子围栏过滤（如果提供了围栏配置）
+            if fence_config:
+                results = self.filter_detections_by_fence(results, fence_config)
             
-            # 4. 返回结果
-            return SkillResult.success_result({
+            # 4. 构建结果数据
+            result_data = {
                 "detections": results,
                 "count": len(results),
                 "safety_metrics": self.analyze_safety(results)
-            })
+            }
+            
+            # 5. 返回结果
+            return SkillResult.success_result(result_data)
             
         except Exception as e:
             logger.exception(f"处理失败: {str(e)}")
@@ -185,6 +186,7 @@ class HelmetDetectorSkill(BaseSkill):
         
         # 获取output0数据
         detections = outputs["output0"]
+
         
         # 转置并压缩输出 (1,84,8400) -> (8400,84)
         detections = np.squeeze(detections, axis=0)
@@ -232,67 +234,7 @@ class HelmetDetectorSkill(BaseSkill):
             })
         return results
             
-    def _parse_results(self, detections: List[Dict], image_shape: Tuple[int, int, int]) -> Dict[str, Any]:
-        """
-        将检测结果转换为标准格式
-        
-        Args:
-            detections: 检测结果列表
-            image_shape: 图像形状 (H, W, C)
-            
-        Returns:
-            解析后的结果字典
-        """
-        height, width = image_shape[:2]
-        
-        # 直接使用已经处理好的检测结果
-        return {
-            "boxes": detections,
-            "image_size": [width, height],
-            "count": len(detections)
-        }
-        
-    def _add_safety_analysis(self, detection_data: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        添加安全分析到检测结果
-        
-        Args:
-            detection_data: 检测结果数据
-            
-        Returns:
-            带有安全分析的检测结果
-        """
-        boxes = detection_data.get("boxes", [])
-            
-        # 统计各类别数量
-        head_count = 0
-        helmet_count = 0
-        
-        for box in boxes:
-            class_name = box.get("class_name", "")
-            if class_name == "head":
-                head_count += 1
-            elif class_name == "helmet":
-                helmet_count += 1
-        
-        # 计算安全率 = 安全帽数量 / (头部数量 + 安全帽数量) * 100%
-        total_head_count = head_count + helmet_count
-        safety_rate = (helmet_count / total_head_count * 100) if total_head_count > 0 else 100
-        
-        # 判断是否存在安全隐患
-        has_risk = head_count > 0
-        
-        # 添加分析结果
-        detection_data["analysis"] = {
-            "head_count": head_count,  # 未佩戴安全帽的头部
-            "helmet_count": helmet_count,  # 佩戴安全帽的头部
-            "total_head_count": total_head_count,
-            "safety_rate": safety_rate,
-            "has_risk": has_risk
-        }
-        
-        return detection_data
-        
+
     def analyze_safety(self, detections):
         """分析安全状况，检查是否有人头未戴安全帽
         
@@ -300,7 +242,7 @@ class HelmetDetectorSkill(BaseSkill):
             detections: 检测结果
             
         Returns:
-            Dict: 分析结果
+            Dict: 分析结果，包含预警信息
         """
         # 统计各类人头数量
         helmet_count = 0    # 戴安全帽的人头
@@ -308,30 +250,85 @@ class HelmetDetectorSkill(BaseSkill):
         
         # 分类检测结果
         for det in detections:
-            if det['class_id'] == 0:  # 戴安全帽的人头
+            class_name = det.get('class_name', '')
+            if class_name == 'hat':  # 戴安全帽的人头
                 helmet_count += 1
-            elif det['class_id'] == 1:  # 未戴安全帽的人头
+            elif class_name == 'person':  # 未戴安全帽的人头
                 head_count += 1
         
         # 计算总人头数
         total_heads = helmet_count + head_count
         
-        # 计算安全率 (安全帽数量/总人头数)，当总人头数为0时返回1.0
+        # 计算安全率 (戴安全帽的人头数/总人头数)，当总人头数为0时返回1.0
         safety_ratio = helmet_count / total_heads if total_heads > 0 else 1.0
         
         # 判断是否安全 (没有未戴安全帽的人头)
         is_safe = head_count == 0
+        
+        # 确定预警等级和预警信息
+        alert_triggered = False
+        alert_level = 0
+        alert_name = ""
+        alert_type = ""
+        alert_description = ""
+        
+        if head_count > 0:
+            alert_triggered = True
+            # 根据未戴安全帽人员数量确定预警等级（1级最高，4级最低）
+            if head_count >= 3:
+                alert_level = 1  # 最高预警：3人及以上未戴安全帽
+            elif head_count >= 2:
+                alert_level = 2  # 高级预警：2人未戴安全帽
+            else:
+                alert_level = 3  # 中级预警：1人未戴安全帽
+            
+            # 生成预警信息
+            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
+            severity = level_names.get(alert_level, "严重")
+            
+            alert_name = "未戴安全帽"
+            alert_type = "安全生产预警"
+            alert_description = f"检测到{head_count}名工人未佩戴安全帽（共检测到{total_heads}名工人），属于{severity}违规行为。建议立即通知现场安全员进行处理。"
         
         result = {
             "total_heads": total_heads,
             "safe_count": helmet_count,      # 戴安全帽的人头数
             "unsafe_count": head_count,       # 未戴安全帽的人头数
             "safety_ratio": safety_ratio,
-            "is_safe": is_safe
+            "is_safe": is_safe,
+            "alert_info": {
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_level": alert_level,          # 预警等级（0-3）
+                "alert_name": alert_name,           # 预警名称
+                "alert_type": alert_type,           # 预警类型
+                "alert_description": alert_description  # 预警描述
+            }
         }
         
-        self.log("info", f"安全分析: 共检测到 {total_heads} 个人头，其中 {helmet_count} 个戴安全帽，{head_count} 个未戴安全帽")
+        self.log("info", f"安全分析: 共检测到 {total_heads} 个人头，其中 {helmet_count} 个戴安全帽，{head_count} 个未戴安全帽，预警等级: {alert_level}")
         return result
+
+    def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
+        """
+        获取检测对象的关键点（用于围栏判断）
+        对于安全帽检测，使用检测框的上半部分中心点作为关键点
+        这样可以更好地判断人员的位置
+        
+        Args:
+            detection: 检测结果
+            
+        Returns:
+            检测点坐标 (x, y)，如果无法获取则返回None
+        """
+        bbox = detection.get("bbox", [])
+        if len(bbox) >= 4:
+            # bbox格式: [x1, y1, x2, y2]
+            # 使用检测框上半部分的中心点
+            center_x = (bbox[0] + bbox[2]) / 2
+            # 使用上1/3位置作为人头的关键点
+            key_y = bbox[1] + (bbox[3] - bbox[1]) * 0.33
+            return (center_x, key_y)
+        return None
 
 # 测试代码
 if __name__ == "__main__":
@@ -351,7 +348,7 @@ if __name__ == "__main__":
         exit(1)
         
     # 获取检测结果
-    detections = result.data["boxes"]
+    detections = result.data["detections"]
     
     # 输出结果
     print(f"检测到 {len(detections)} 个对象:")
