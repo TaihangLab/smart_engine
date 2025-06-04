@@ -26,7 +26,7 @@ def mock_alerts():
     now = datetime.now()
     return [
         Alert(
-            alert_id="test_alert_1",
+            id=1,
             timestamp=now,
             alert_type="no_helmet",
             alert_level=1,
@@ -35,7 +35,6 @@ def mock_alerts():
             location="工厂A区",
             camera_id="camera_01",
             camera_name="大门入口摄像头",
-            tags=["entrance", "outdoor"],
             coordinates=[100, 200, 150, 250],
             electronic_fence=[[100,100], [300,100], [300,300], [100,300]],
             result=[
@@ -51,11 +50,11 @@ def mock_alerts():
                 }
             ],
             confidence=0.95,
-            minio_frame_url="https://minio.example.com/alerts/test_alert_1/frame.jpg",
+            image_object_name="alerts/test_alert_1/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_1/video.mp4"
         ),
         Alert(
-            alert_id="test_alert_2",
+            id=2,
             timestamp=now - timedelta(hours=1),
             alert_type="intrusion",
             alert_level=2,
@@ -64,7 +63,6 @@ def mock_alerts():
             location="工厂B区",
             camera_id="camera_01",
             camera_name="大门入口摄像头",
-            tags=["perimeter", "outdoor"],
             coordinates=[300, 400, 350, 450],
             electronic_fence=[[250,250], [450,250], [450,450], [250,450]],
             result=[
@@ -80,11 +78,11 @@ def mock_alerts():
                 }
             ],
             confidence=0.88,
-            minio_frame_url="https://minio.example.com/alerts/test_alert_2/frame.jpg",
+            image_object_name="alerts/test_alert_2/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_2/video.mp4"
         ),
         Alert(
-            alert_id="test_alert_3",
+            id=3,
             timestamp=now - timedelta(hours=2),
             alert_type="unusual_activity",
             alert_level=3,
@@ -93,7 +91,6 @@ def mock_alerts():
             location="工厂C区",
             camera_id="camera_02",
             camera_name="大厅摄像头",
-            tags=["indoor", "lobby"],
             coordinates=[500, 600, 550, 650],
             electronic_fence=[[450,450], [650,450], [650,650], [450,650]],
             result=[
@@ -109,7 +106,7 @@ def mock_alerts():
                 }
             ],
             confidence=0.75,
-            minio_frame_url="https://minio.example.com/alerts/test_alert_3/frame.jpg",
+            image_object_name="alerts/test_alert_3/frame.jpg",
             minio_video_url="https://minio.example.com/alerts/test_alert_3/video.mp4"
         )
     ]
@@ -166,7 +163,7 @@ def test_get_alert(override_get_db, mock_alerts):
     mock_db = override_get_db
 
     # 执行请求
-    response = client.get("/api/v1/alerts/test_alert_1")
+    response = client.get("/api/v1/alerts/1")
     
     # 打印响应状态码和内容
     print("\n===== 获取单个报警记录测试 =====")
@@ -177,7 +174,7 @@ def test_get_alert(override_get_db, mock_alerts):
     # 验证响应
     assert response.status_code == 200
     data = response.json()
-    assert data["alert_id"] == "test_alert_1"
+    assert data["id"] == 1
     assert data["alert_type"] == "no_helmet"
     assert data["alert_level"] == 1
     assert data["alert_name"] == "未戴安全帽"
@@ -185,8 +182,6 @@ def test_get_alert(override_get_db, mock_alerts):
     assert data["location"] == "工厂A区"
     assert data["camera_id"] == "camera_01"
     assert data["camera_name"] == "大门入口摄像头"
-    assert "entrance" in data["tags"]
-    assert "outdoor" in data["tags"]
     assert isinstance(data["electronic_fence"], list)
     assert len(data["electronic_fence"]) == 4
     assert data["electronic_fence"][0] == [100, 100]
@@ -208,7 +203,7 @@ def test_get_alert_not_found(override_get_db):
     query_mock.filter.return_value.first.return_value = None
 
     # 执行请求
-    response = client.get("/api/v1/alerts/non_existent_alert")
+    response = client.get("/api/v1/alerts/999")
     
     # 打印响应状态码和内容
     print("\n===== 获取不存在的报警记录测试 =====")
@@ -275,7 +270,7 @@ def test_get_realtime_alerts_with_filters(override_get_db, mock_alerts):
     assert len(data["alerts"]) == 1
     assert data["total"] == 1
     assert data["pages"] == 1
-    assert data["alerts"][0]["alert_id"] == "test_alert_1"
+    assert data["alerts"][0]["id"] == 1
     assert data["alerts"][0]["alert_type"] == "no_helmet"
     assert data["alerts"][0]["alert_level"] == 1
     assert data["alerts"][0]["alert_name"] == "未戴安全帽"

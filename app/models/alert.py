@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, JSON, Integer
+from sqlalchemy import Column, String, DateTime, Float, JSON, BigInteger, Integer
 from pydantic import BaseModel
 
 from app.db.base_class import Base
@@ -10,7 +10,7 @@ class Alert(Base):
     """报警数据模型"""
     __tablename__ = "alerts"
 
-    alert_id = Column(String(36), primary_key=True, index=True)
+    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     timestamp = Column(DateTime, index=True)
     alert_type = Column(String(50), index=True)
     alert_level = Column(Integer, default=1)
@@ -19,18 +19,16 @@ class Alert(Base):
     location = Column(String(100))
     camera_id = Column(String(50), index=True)
     camera_name = Column(String(100))
-    tags = Column(JSON)
     coordinates = Column(JSON)
     electronic_fence = Column(JSON)
     result = Column(JSON)
     confidence = Column(Float)
-    minio_frame_url = Column(String(255))
+    image_object_name = Column(String(255))
     minio_video_url = Column(String(255))
 
 
 class AlertCreate(BaseModel):
     """创建报警的模型"""
-    alert_id: str
     timestamp: datetime
     alert_type: str
     alert_level: int = 1
@@ -39,18 +37,16 @@ class AlertCreate(BaseModel):
     location: str
     camera_id: str
     camera_name: str
-    tags: List[str]
     coordinates: List[float]
     electronic_fence: Optional[List[List[int]]] = None
     result: Optional[List[Dict[str, Any]]] = None
     confidence: float
-    minio_frame_url: str
+    image_object_name: str
     minio_video_url: str
 
     class Config:
         json_schema_extra = {
             "example": {
-                "alert_id": "5678",
                 "timestamp": "2025-04-06T12:30:00",
                 "alert_type": "no_helmet",
                 "alert_level": 1,
@@ -59,7 +55,6 @@ class AlertCreate(BaseModel):
                 "location": "工厂01",
                 "camera_id": "camera_01",
                 "camera_name": "摄像头01",
-                "tags": ["entrance", "outdoor"],
                 "coordinates": [100, 200, 150, 250],
                 "electronic_fence": [[100,100],[300,100],[300,300],[100,300]],
                 "result": [
@@ -75,7 +70,7 @@ class AlertCreate(BaseModel):
                     }
                 ],
                 "confidence": 0.95,
-                "minio_frame_url": "https://minio.example.com/alerts/5678/frame.jpg",
+                "image_object_name": "5678/frame.jpg",
                 "minio_video_url": "https://minio.example.com/alerts/5678/video.mp4"
             }
         }
@@ -83,7 +78,7 @@ class AlertCreate(BaseModel):
 
 class AlertResponse(BaseModel):
     """报警响应模型"""
-    alert_id: str
+    id: int
     timestamp: datetime
     alert_type: str
     alert_level: int
@@ -92,7 +87,6 @@ class AlertResponse(BaseModel):
     location: str
     camera_id: str
     camera_name: str
-    tags: List[str]
     coordinates: List[float]
     electronic_fence: Optional[List[List[int]]] = None
     result: Optional[List[Dict[str, Any]]] = None
@@ -100,6 +94,35 @@ class AlertResponse(BaseModel):
     minio_frame_url: str
     minio_video_url: str
     
+    @classmethod
+    def from_orm(cls, obj):
+        """从ORM对象创建AlertResponse，将image_object_name转换为minio_frame_url"""
+        # 获取所有字段的值
+        data = {}
+        for field_name in cls.__fields__.keys():
+            if field_name == 'minio_frame_url':
+                # 调用现有minio_client实例的get_presigned_url方法
+                if hasattr(obj, 'image_object_name') and obj.image_object_name:
+                    try:
+                        from app.services.minio_client import minio_client
+                        from app.core.config import settings
+                        
+                        # 调用现有minio_client实例的get_presigned_url方法
+                        url = minio_client.get_presigned_url(
+                            settings.MINIO_BUCKET,
+                            settings.MINIO_ALERT_IMAGE_PREFIX,
+                            obj.image_object_name
+                        )
+                        data[field_name] = url
+                    except Exception as e:
+                        # 如果生成预签名URL失败，使用空字符串
+                        data[field_name] = ""
+                else:
+                    data[field_name] = ""
+            elif hasattr(obj, field_name):
+                data[field_name] = getattr(obj, field_name)
+        
+        return cls(**data)
+    
     class Config:
-        from_attributes = True
-        orm_mode = True  # 保留向后兼容 
+        from_attributes = True 
