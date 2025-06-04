@@ -119,6 +119,19 @@ class BaseSkill(ABC):
             self.status = self.config.get("status", True)
             self.skill_id = f"{self.name}_{id(self)}"
         
+        # 初始化跟踪器（用于围栏进入/离开检测）
+        try:
+            from app.services.tracker_service import TrackerService
+            self.tracker = TrackerService(
+                max_age=30, 
+                min_hits=3, 
+                iou_threshold=0.3,
+                custom_point_func=self._get_detection_point  # 传递自定义检测点获取方法
+            )
+        except ImportError:
+            self.log("warning", "无法导入跟踪器服务，将使用传统围栏过滤方式")
+            self.tracker = None
+        
         # 初始化技能
         self._initialize()
         
@@ -192,6 +205,140 @@ class BaseSkill(ABC):
         """
         log_method = getattr(logger, level.lower(), logger.info)
         log_method(f"{message}")
+    
+    def filter_detections_by_fence(self, detections: List[Dict], fence_config: Dict) -> List[Dict]:
+        """
+        根据电子围栏配置过滤检测结果（使用跟踪的围栏进入/离开检测）
+        子类可以覆盖此方法实现自定义的围栏过滤逻辑
+        
+        Args:
+            detections: 检测结果列表
+            fence_config: 电子围栏配置
+            
+        Returns:
+            过滤后的检测结果列表（带track_id）
+        """
+        try:
+            # 如果未启用电子围栏，返回所有检测结果
+            if not fence_config or not fence_config.get("enabled", False):
+                return detections
+            
+            # 如果没有跟踪器，使用传统方式
+            if not self.tracker:
+                return self._filter_detections_traditional(detections, fence_config)
+            
+            # 使用跟踪器进行围栏检测
+            filtered_detections, fence_events = self.tracker.update(detections, fence_config)
+            
+            # 记录围栏事件
+            if fence_events:
+                for event in fence_events:
+                    event_type = event.get("event_type", "unknown")
+                    track_id = event.get("track_id", "unknown")
+                    self.log("info", f"围栏事件: track_id={track_id}, 事件={event_type}")
+            
+            return filtered_detections
+            
+        except Exception as e:
+            self.log("error", f"电子围栏过滤检测结果时出错: {str(e)}")
+            return detections  # 出错时返回所有检测结果
+    
+    def _filter_detections_traditional(self, detections: List[Dict], fence_config: Dict) -> List[Dict]:
+        """
+        传统的围栏过滤方式（不使用跟踪）
+        """
+        try:
+            # 现有系统使用points字段，它本身就是多边形数组格式
+            polygons = fence_config.get("points", [])
+            if not polygons or len(polygons) == 0:
+                return detections  # 没有多边形定义，返回所有检测结果
+            
+            # 获取触发模式
+            trigger_mode = fence_config.get("trigger_mode", "inside")
+            
+            # 传统模式下，inside表示围栏内，outside表示围栏外
+            filtered_detections = []
+            
+            for detection in detections:
+                # 获取检测点（默认使用检测框中心点）
+                detection_point = self._get_detection_point(detection)
+                if not detection_point:
+                    continue
+                    
+                # 判断点是否在任一多边形内
+                is_inside_any = False
+                for polygon in polygons:
+                    if len(polygon) < 3:
+                        continue  # 跳过点数不足的多边形
+                    
+                    # 转换多边形点格式
+                    poly_points = [(p["x"], p["y"]) for p in polygon]
+                    
+                    # 判断点是否在多边形内
+                    if self._point_in_polygon(detection_point, poly_points):
+                        is_inside_any = True
+                        break
+                
+                # 根据触发模式决定是否包含此检测结果
+                if trigger_mode == "inside" and is_inside_any:
+                    filtered_detections.append(detection)
+                elif trigger_mode == "outside" and not is_inside_any:
+                    filtered_detections.append(detection)
+            
+            return filtered_detections
+            
+        except Exception as e:
+            self.log("error", f"传统围栏过滤时出错: {str(e)}")
+            return detections
+    
+    def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
+        """
+        获取检测对象的关键点（用于围栏判断）
+        子类可以覆盖此方法来自定义关键点的获取逻辑
+        
+        Args:
+            detection: 检测结果
+            
+        Returns:
+            检测点坐标 (x, y)，如果无法获取则返回None
+        """
+        # 默认实现：使用检测框的中心点
+        bbox = detection.get("bbox", [])
+        if len(bbox) >= 4:
+            # bbox格式: [x1, y1, x2, y2]
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            return (center_x, center_y)
+        return None
+    
+    def _point_in_polygon(self, point: Tuple[float, float], polygon: List[Tuple[float, float]]) -> bool:
+        """
+        使用射线法判断点是否在多边形内
+        
+        Args:
+            point: 待判断的点 (x, y)
+            polygon: 多边形顶点列表 [(x1, y1), (x2, y2), ...]
+            
+        Returns:
+            点是否在多边形内
+        """
+        x, y = point
+        n = len(polygon)
+        inside = False
+        
+        p1x, p1y = polygon[0]
+        for i in range(1, n + 1):
+            p2x, p2y = polygon[i % n]
+            if y > min(p1y, p2y):
+                if y <= max(p1y, p2y):
+                    if x <= max(p1x, p2x):
+                        if p1y != p2y:
+                            xinters = (y - p1y) * (p2x - p1x) / (p2y - p1y) + p1x
+                        if p1x == p2x or x <= xinters:
+                            inside = not inside
+            p1x, p1y = p2x, p2y
+        
+        return inside
         
     def get_metadata(self) -> Dict[str, Any]:
         """
@@ -266,4 +413,23 @@ class BaseSkill(ABC):
         """
         # 复制默认配置
         return self.DEFAULT_CONFIG.copy()
+
+    def analyze_safety(self, detections: List[Dict]) -> Dict[str, Any]:
+        """
+        分析安全状况（基类默认实现）
+        子类应该覆盖此方法实现具体的安全分析逻辑
+        
+        Args:
+            detections: 检测结果列表
+            
+        Returns:
+            安全分析结果字典，包含预警信息
+        """
+        return {
+            "total_detections": len(detections),
+            "is_safe": True,             # 默认安全
+            "alert_triggered": False,    # 默认不触发预警
+            "alert_level": 0,           # 默认预警等级为0
+            "message": "基类默认安全分析，建议子类覆盖此方法"
+        }
 
