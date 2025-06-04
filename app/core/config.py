@@ -21,7 +21,7 @@ class Settings(BaseSettings):
     LOG_LEVEL: str = os.getenv("LOG_LEVEL", "DEBUG")
     
     # Triton服务器配置
-    TRITON_URL: str = os.getenv("TRITON_URL", "192.168.1.118:8001")
+    TRITON_URL: str = os.getenv("TRITON_URL", "172.18.1.1:8201")
     TRITON_MODEL_REPOSITORY: str = os.getenv("TRITON_MODEL_REPOSITORY", "/models")
     TRITON_TIMEOUT: int = int(os.getenv("TRITON_TIMEOUT", "30"))
     
@@ -56,9 +56,11 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = False
     MINIO_BUCKET: str = "visionai"
     MINIO_SKILL_IMAGE_PREFIX: str = "skill-images/"
+    MINIO_ALERT_IMAGE_PREFIX: str = "alert-images/"
+    MINIO_ALERT_VIDEO_PREFIX: str = "alert-videos/"
     
     # RabbitMQ配置
-    RABBITMQ_HOST: str = os.getenv("RABBITMQ_HOST", "127.0.0.1")
+    RABBITMQ_HOST: str = os.getenv("RABBITMQ_HOST", "192.168.1.107")
     RABBITMQ_PORT: int = int(os.getenv("RABBITMQ_PORT", "5672"))
     RABBITMQ_USER: str = os.getenv("RABBITMQ_USER", "guest")
     RABBITMQ_PASSWORD: str = os.getenv("RABBITMQ_PASSWORD", "guest")
