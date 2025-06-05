@@ -86,7 +86,7 @@ async def alert_stream(request: Request):
 @router.get("/real-time", response_model=Dict[str, Any])
 def get_realtime_alerts(
     tag: Optional[str] = Query(None, description="按标签过滤"),
-    camera_id: Optional[str] = Query(None, description="按摄像头ID过滤"),
+    camera_id: Optional[int] = Query(None, description="按摄像头ID过滤"),
     camera_name: Optional[str] = Query(None, description="按摄像头名称过滤"),
     alert_type: Optional[str] = Query(None, description="按报警类型过滤"),
     alert_level: Optional[int] = Query(None, description="按预警等级过滤"),

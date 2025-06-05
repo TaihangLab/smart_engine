@@ -17,7 +17,7 @@ class Alert(Base):
     alert_name = Column(String(100))
     alert_category = Column(String(100))  # 预警档案类别标签
     location = Column(String(100))
-    camera_id = Column(String(50), index=True)
+    camera_id = Column(Integer, index=True)
     camera_name = Column(String(100))
     coordinates = Column(JSON)
     electronic_fence = Column(JSON)
@@ -85,7 +85,7 @@ class AlertResponse(BaseModel):
     alert_name: str
     alert_category: Optional[str] = None  # 预警档案类别标签
     location: str
-    camera_id: str
+    camera_id: int
     camera_name: str
     coordinates: List[float]
     electronic_fence: Optional[List[List[int]]] = None

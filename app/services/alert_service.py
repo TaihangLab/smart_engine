@@ -217,7 +217,7 @@ class AlertService:
     def get_alerts(
         self, 
         db: Session, 
-        camera_id: Optional[str] = None,
+        camera_id: Optional[int] = None,
         camera_name: Optional[str] = None,
         alert_type: Optional[str] = None,
         alert_level: Optional[int] = None,
@@ -296,7 +296,7 @@ class AlertService:
     def get_alerts_count(
         self, 
         db: Session, 
-        camera_id: Optional[str] = None,
+        camera_id: Optional[int] = None,
         camera_name: Optional[str] = None,
         alert_type: Optional[str] = None,
         alert_level: Optional[int] = None,
@@ -424,7 +424,7 @@ def publish_test_alert() -> bool:
         "alert_name": "测试报警",
         "alert_category": "测试类别",
         "location": "测试区域",
-        "camera_id": "test_camera",
+        "camera_id": 123,
         "camera_name": "测试摄像头",
         "coordinates": [100, 100, 200, 200],
         "electronic_fence": [[50,50], [250,50], [250,250], [50,250]],
