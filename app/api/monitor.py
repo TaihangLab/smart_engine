@@ -18,7 +18,7 @@ router = APIRouter()
 class PreviousAlert(BaseModel):
     alert_id: str
     alert_type: str
-    timestamp: datetime
+    alert_time: datetime
 
 class PreAlertInfo(BaseModel):
     previous_alerts: List[PreviousAlert]
