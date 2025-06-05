@@ -51,10 +51,14 @@ class AlertService:
                 logger.debug(f"无法序列化原始报警数据: {str(e)}")
             
             # 将时间字符串转换为datetime对象
-            if isinstance(alert_data["timestamp"], str):
-                logger.debug(f"转换时间戳字符串: {alert_data['timestamp']}")
-                alert_data["timestamp"] = datetime.fromisoformat(alert_data["timestamp"].replace('Z', '+00:00'))
-                logger.debug(f"转换后的时间戳: {alert_data['timestamp']}")
+            if "alert_time" in alert_data and isinstance(alert_data["alert_time"], str):
+                logger.debug(f"转换时间戳字符串: {alert_data['alert_time']}")
+                alert_data["alert_time"] = datetime.fromisoformat(alert_data["alert_time"].replace('Z', '+00:00'))
+                logger.debug(f"转换后的时间戳: {alert_data['alert_time']}")
+                
+            # 确保必需字段存在
+            if "task_id" not in alert_data:
+                alert_data["task_id"] = 1  # 默认任务ID
             
             # 保存到数据库
             logger.info(f"将报警数据保存到数据库")
@@ -353,8 +357,8 @@ class AlertService:
         # 获取同一摄像头在当前报警之前的报警记录(最多3条)
         previous_alerts = (db.query(Alert)
                           .filter(Alert.camera_id == alert.camera_id)
-                          .filter(Alert.timestamp < alert.timestamp)
-                          .order_by(Alert.timestamp.desc())
+                          .filter(Alert.alert_time < alert.alert_time)
+                          .order_by(Alert.alert_time.desc())
                           .limit(3)
                           .all())
         
@@ -363,7 +367,7 @@ class AlertService:
             {
                 "id": prev.id,
                 "alert_type": prev.alert_type,
-                "timestamp": prev.timestamp
+                "alert_time": prev.alert_time
             }
             for prev in previous_alerts
         ]
@@ -416,16 +420,15 @@ def publish_test_alert() -> bool:
     """发布测试报警消息到RabbitMQ（仅用于测试）"""
     logger.info("🧪 创建测试报警消息")
     test_alert = {
-        # alert_id 现在是可选的，可以不提供
-        "timestamp": datetime.now().isoformat(),
+        "alert_time": datetime.now().isoformat(),
         "alert_type": "test_alert",
         "alert_level": 1,
         "alert_name": "测试报警",
-        "alert_category": "测试类别",
+        "alert_description": "测试类别",
         "location": "测试区域",
         "camera_id": 123,
         "camera_name": "测试摄像头",
-        "coordinates": [100, 100, 200, 200],
+        "task_id": 1,
         "electronic_fence": [[50,50], [250,50], [250,250], [50,250]],
         "result": [
             {
@@ -439,9 +442,8 @@ def publish_test_alert() -> bool:
                 }
             }
         ],
-        "confidence": 0.99,
-        "image_object_name": "test_frame.jpg",
-        "minio_video_url": "https://example.com/test_video.mp4"
+        "minio_frame_object_name": "test_frame.jpg",
+        "minio_video_object_name": "test_video.mp4"
     }
     
     success = rabbitmq_client.publish_alert(test_alert)
