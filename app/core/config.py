@@ -9,12 +9,13 @@ load_dotenv()
 
 class Settings(BaseSettings):
     # API配置
-    API_V1_STR: str = "/api/v1"
-    PROJECT_NAME: str = "Smart Engine"
-    PROJECT_DESCRIPTION: str = "智能视频分析引擎后端API"
-    PROJECT_VERSION: str = "1.0.0"
-    
-    # REST API配置
+    VERSION: str = "v1"
+    API_VERSION: str = Field(default=VERSION, description="API版本")
+    API_V1_STR: str = Field(default="/api/" + VERSION, description="API路由前缀")
+    PROJECT_NAME: str = Field(default="Smart Engine", description="项目名称")
+    PROJECT_DESCRIPTION: str = Field(default="智能视频分析引擎后端API", description="项目描述")
+    PROJECT_VERSION: str = Field(default="1.0.0", description="项目版本")
+    # 系统版本信息
     REST_PORT: int = Field(default=8000, description="REST API端口")
     
     # 服务配置
@@ -61,7 +62,7 @@ class Settings(BaseSettings):
     MINIO_ALERT_VIDEO_PREFIX: str = Field(default="alert-videos/", description="报警视频前缀")
 
     # RabbitMQ配置
-    RABBITMQ_HOST: str = Field(default="127.0.0.1", description="RabbitMQ服务器地址")
+    RABBITMQ_HOST: str = Field(default="192.168.1.107", description="RabbitMQ服务器地址")
     RABBITMQ_PORT: int = Field(default=5672, description="RabbitMQ端口")
     RABBITMQ_USER: str = Field(default="guest", description="RabbitMQ用户名")
     RABBITMQ_PASSWORD: str = Field(default="guest", description="RabbitMQ密码")
