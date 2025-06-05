@@ -79,7 +79,7 @@ class Settings(BaseSettings):
     # 报警补偿服务配置
     ALERT_COMPENSATION_INTERVAL: int = Field(default=30, description="补偿检查间隔（秒）")
     ALERT_MAX_RETRY_HOURS: int = Field(default=24, description="最大重试小时数")
-    ALERT_NEW_CLIENT_BACKFILL_HOURS: int = Field(default=1, description="新客户端回填小时数")
+
     ALERT_MAX_COMPENSATION_COUNT: int = Field(default=20, description="单次最大补偿数量")
 
     # 死信队列重新处理配置
