@@ -83,6 +83,11 @@ class AITaskExecutor:
         # 先清除已有的调度
         self._clear_task_jobs(task_id)
         
+        # 如果任务当前正在运行，先停止任务线程以应用新配置
+        if task_id in self.running_tasks and self.running_tasks[task_id].is_alive():
+            logger.info(f"任务 {task_id} 正在运行，先停止以应用新配置")
+            self._stop_task_thread(task_id)
+        
         # 解析运行时段
         running_period = task_data.get("running_period", {})
         
@@ -141,7 +146,7 @@ class AITaskExecutor:
                 next_run_time=datetime.now() + timedelta(seconds=3)  # 3秒后启动
             )
             job_ids.append(start_now_job_id)
-            logger.info(f"当前时间在任务 {task_id} 的运行时段内，将立即启动")
+            logger.info(f"当前时间在任务 {task_id} 的运行时段内，将立即重新启动以应用新配置")
     
     def _clear_task_jobs(self, task_id: int):
         """清除任务的所有调度作业"""
