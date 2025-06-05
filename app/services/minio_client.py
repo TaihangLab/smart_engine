@@ -238,14 +238,14 @@ class MinioClient:
     
     def list_files(self, prefix: str = "", recursive: bool = True) -> List[Dict[str, Any]]:
         """
-        列出MinIO中的文件
+        列出存储桶中的文件
         
         Args:
-            prefix: 对象前缀
-            recursive: 是否递归查询子目录
+            prefix: 对象前缀，用于筛选
+            recursive: 是否递归列出
             
         Returns:
-            List[Dict[str, Any]]: 文件列表
+            List[Dict]: 文件信息列表
         """
         try:
             objects = self.client.list_objects(
@@ -254,19 +254,19 @@ class MinioClient:
                 recursive=recursive
             )
             
-            result = []
+            files = []
             for obj in objects:
-                item = {
+                files.append({
                     "name": obj.object_name,
                     "size": obj.size,
-                    "last_modified": obj.last_modified
-                }
-                result.append(item)
+                    "last_modified": obj.last_modified,
+                    "etag": obj.etag
+                })
             
-            return result
+            return files
         except S3Error as err:
             logger.error(f"列出文件失败: {err}")
             raise HTTPException(status_code=500, detail=f"列出文件失败: {str(err)}")
-
+        
 # 创建单例MinIO客户端
 minio_client = MinioClient() 
