@@ -28,6 +28,10 @@ from app.services.ai_task_executor import task_executor
 import app.services.rabbitmq_client
 import app.services.alert_service
 from app.services.sse_connection_manager import sse_manager
+
+# 导入中间件和系统级路由
+from app.core.middleware import RequestLoggingMiddleware
+
 # 🔥 优化后架构不再需要sse_publisher后台任务
 # from app.services.alert_service import sse_publisher
 
@@ -180,7 +184,8 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# 配置CORS
+# 配置中间件
+app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 允许所有来源，生产环境应该限制
@@ -189,52 +194,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# 添加特殊路由，确保/api/ai/monitor/alerts/{alert_id}路径可访问
-from app.api.endpoints.monitor import router as monitor_router
-app.include_router(monitor_router, prefix="/api/ai/monitor")
 
 # 配置静态文件
 try:
     app.mount("/static", StaticFiles(directory="static"), name="static")
 except Exception as e:
     logger.warning(f"未能挂载静态文件目录: {str(e)}")
-
-# 请求日志中间件
-@app.middleware("http")
-async def log_requests(request: Request, call_next):
-    start_time = time.time()
-    
-    # 处理请求
-    response = await call_next(request)
-    
-    # 记录处理时间
-    process_time = time.time() - start_time
-    logger.info(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.4f}s")
-    
-    return response
-
-@app.get("/")
-async def root():
-    """根路径，返回API信息"""
-    return {
-        "message": "智能分析引擎API",
-        "version": "1.0.0",
-        "status": "running"
-    }
-
-@app.get("/health")
-async def health_check():
-    """健康检查接口"""
-    # 检查triton服务器是否在线
-    triton_status = triton_client.is_server_ready()
-    
-    return {
-        "status": "healthy" if triton_status else "unhealthy",
-        "triton_server": triton_status
-    }
 
 async def run_startup_recovery_task():
     """在后台运行启动恢复任务"""
