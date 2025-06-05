@@ -27,7 +27,7 @@ class HelmetDetectorSkill(BaseSkill):
         "status": True,  # 技能状态（是否启用）
         "required_models": ["yolo11_helmet"],  # 所需模型
         "params": {
-            "classes": ["hat", "person"],
+            "classes": ["helmet", "no_helmet"],
             "conf_thres": 0.5,
             "iou_thres": 0.45,
             "max_det": 300,
@@ -251,9 +251,9 @@ class HelmetDetectorSkill(BaseSkill):
         # 分类检测结果
         for det in detections:
             class_name = det.get('class_name', '')
-            if class_name == 'hat':  # 戴安全帽的人头
+            if class_name == 'helmet':  # 戴安全帽的人头
                 helmet_count += 1
-            elif class_name == 'person':  # 未戴安全帽的人头
+            elif class_name == 'no_helmet':  # 未戴安全帽的人头
                 head_count += 1
         
         # 计算总人头数
