@@ -332,9 +332,8 @@ class HelmetDetectorSkill(BaseSkill):
 
 # 测试代码
 if __name__ == "__main__":
-    # 创建检测器
-    detector = HelmetDetectorSkill()
-    detector._initialize()
+    # 创建检测器 - 传入配置参数会自动调用_initialize()
+    detector = HelmetDetectorSkill(HelmetDetectorSkill.DEFAULT_CONFIG)
     
     # 测试图像检测
     test_image = np.zeros((640, 640, 3), dtype=np.uint8)
@@ -356,6 +355,8 @@ if __name__ == "__main__":
         print(f"对象 {i+1}: 类别={det['class_name']}({det['class_id']}), 置信度={det['confidence']:.4f}, 边界框={det['bbox']}")
     
     # 分析安全状况
-    if "analysis" in result.data:
-        safety = result.data["analysis"]
-        print(f"安全分析: {safety}") 
+    if "safety_metrics" in result.data:
+        safety = result.data["safety_metrics"]
+        print(f"安全分析: {safety}")
+    
+    print("测试完成！") 
