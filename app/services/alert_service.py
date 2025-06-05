@@ -401,12 +401,7 @@ async def register_sse_client(client_ip: str = "unknown", user_agent: str = "unk
     """注册一个新的SSE客户端连接"""
     client_queue = await sse_manager.register_client(client_ip, user_agent)
     
-    # 🔄 为新客户端补偿最近的报警
-    try:
-        from app.services.alert_compensation_service import compensate_new_client
-        await compensate_new_client(client_queue)
-    except Exception as e:
-        logger.warning(f"⚠️ 新客户端补偿失败: {str(e)}")
+
     
     return client_queue
 
