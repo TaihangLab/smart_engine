@@ -646,11 +646,12 @@ class AITaskExecutor:
                 "alert_type": alert_info["type"],
                 "alert_description": alert_info["description"],
                 "location": location,
-                "camera_id": str(task.camera_id),
+                "camera_id": task.camera_id,
                 "camera_name": camera_name,
+                "task_id": task.id,
                 "electronic_fence": fence_points,
                 "minio_frame_object_name": minio_frame_object_name,  # 传递object_name而不是URL
-                "minio_video_object_name": minio_video_object_name,  # 传递object_name而不是URL
+                "minio_video_object_name": minio_video_object_name,  # TODO: 实现视频录制和上传 传递object_name而不是URL
                 "result": formatted_results
             }
             

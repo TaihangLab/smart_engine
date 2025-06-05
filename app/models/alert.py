@@ -35,7 +35,7 @@ class AlertCreate(BaseModel):
     alert_name: str
     alert_category: Optional[str] = None  # 预警档案类别标签
     location: str
-    camera_id: str
+    camera_id: int
     camera_name: str
     coordinates: List[float]
     electronic_fence: Optional[List[List[int]]] = None
@@ -53,7 +53,7 @@ class AlertCreate(BaseModel):
                 "alert_name": "未戴安全帽",
                 "alert_category": "安全防护类",
                 "location": "工厂01",
-                "camera_id": "camera_01",
+                "camera_id": 1,
                 "camera_name": "摄像头01",
                 "coordinates": [100, 200, 150, 250],
                 "electronic_fence": [[100,100],[300,100],[300,300],[100,300]],
@@ -106,11 +106,14 @@ class AlertResponse(BaseModel):
                     try:
                         from app.services.minio_client import minio_client
                         from app.core.config import settings
+
+                        # 构建MinIO路径
+                        minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{obj.task_id}/{obj.camera_id}"
                         
                         # 调用现有minio_client实例的get_presigned_url方法
                         url = minio_client.get_presigned_url(
                             settings.MINIO_BUCKET,
-                            settings.MINIO_ALERT_IMAGE_PREFIX,
+                            minio_prefix,
                             obj.image_object_name
                         )
                         data[field_name] = url
