@@ -1,13 +1,13 @@
 # Smart Vision Engine
 
-基于WVP的视觉AI平台后端服务，提供摄像头管理、技能管理和AI任务执行等功能。
+基于WVP的智能视觉AI平台后端服务，提供摄像头管理、AI技能管理、任务调度和实时预警等功能。
 
-## 功能特点
+## 功能特性
 
 - **摄像头管理**：支持从WVP同步设备，配置摄像头属性（位置、标签、预警等级等）
-- **技能管理**：支持创建和管理视觉AI技能，一个技能可以包含多个模型
+- **技能管理**：支持创建和管理视觉AI技能，插件式架构，支持热加载
 - **AI任务管理**：支持创建AI分析任务，直接使用技能类+自定义配置的灵活模式
-- **智能任务调度**：基于Cron表达式的精确时段调度，支持多时段配置和自动恢复
+- **智能任务调度**：基于APScheduler的精确时段调度，支持多时段配置和自动恢复
 - **实时预警系统**：支持4级预警体系（1级最高，4级最低），实时生成预警信息和截图
 - **电子围栏**：支持多边形区域定义，智能过滤围栏内外的检测结果
 - **模型管理**：支持管理Triton推理服务器上的模型，自动同步模型到数据库
@@ -15,40 +15,64 @@
 - **技能热加载**：支持动态加载技能插件，无需重启系统
 - **异步预警处理**：预警生成采用异步机制，不阻塞视频处理主流程
 - **MinIO存储**：预警图片自动上传至MinIO，支持按任务和摄像头ID分类存储
-- **RESTful API**：提供完整的HTTP接口，支持所有功能操作
-- **健康监控**：提供健康检查接口，监控系统和依赖服务状态
+- **RabbitMQ消息队列**：支持预警消息队列处理和恢复机制
+- **SSE实时通信**：支持Server-Sent Events实时推送预警信息
+- **系统监控**：提供健康检查接口，监控系统和依赖服务状态
+- **自动恢复机制**：支持启动时自动恢复未处理的预警消息
 
 ## 技术架构
 
 - **Web框架**：FastAPI
 - **数据库ORM**：SQLAlchemy
 - **推理服务**：Triton Inference Server
-- **数据库**：MySQL
+- **数据库**：MySQL（支持其他SQLAlchemy兼容数据库）
 - **任务调度**：APScheduler（支持Cron表达式）
 - **对象存储**：MinIO
+- **消息队列**：RabbitMQ
+- **实时通信**：Server-Sent Events (SSE)
 - **技能系统**：插件式架构，支持动态加载
 
 ## 系统结构
 
 ```
 app/
-├── api/            # API路由和端点
-├── core/           # 核心配置和工具
-├── db/             # 数据库相关代码
-├── models/         # 数据模型定义
-├── plugins/        # 插件目录
-│   └── skills/     # 技能插件
-├── services/       # 业务服务层
-│   ├── ai_task_executor.py      # AI任务执行器（核心调度引擎）
-│   ├── ai_task_service.py       # AI任务服务
-│   ├── alert_service.py         # 预警服务
-│   ├── camera_service.py        # 摄像头服务
-│   ├── minio_client.py          # MinIO客户端
-│   └── triton_client.py         # Triton推理客户端
-└── skills/         # 技能系统核心
-    ├── skill_base.py             # 技能基类
-    ├── skill_factory.py          # 技能工厂，负责创建技能对象
-    └── skill_manager.py          # 技能管理器，负责管理技能生命周期
+├── api/                    # API路由和端点
+│   ├── ai_tasks.py         # AI任务管理接口
+│   ├── alerts.py           # 预警管理接口
+│   ├── cameras.py          # 摄像头管理接口
+│   ├── models.py           # 模型管理接口
+│   ├── skill_classes.py    # 技能类管理接口
+│   ├── system.py           # 系统状态接口
+│   ├── monitor.py          # 监控接口
+│   └── task_management.py  # 任务管理接口
+├── core/                   # 核心配置和工具
+├── db/                     # 数据库相关代码
+├── models/                 # 数据模型定义
+├── plugins/                # 插件目录
+│   └── skills/             # 技能插件
+│       ├── belt_detector_skill.py      # 安全带检测技能
+│       ├── helmet_detector_skill.py    # 安全帽检测技能
+│       ├── coco_detector_skill.py      # COCO对象检测技能
+│       └── example_skill.py            # 示例技能
+├── services/               # 业务服务层
+│   ├── ai_task_executor.py             # AI任务执行器（核心调度引擎）
+│   ├── ai_task_service.py              # AI任务服务
+│   ├── alert_service.py                # 预警服务
+│   ├── alert_compensation_service.py   # 预警补偿服务
+│   ├── camera_service.py               # 摄像头服务
+│   ├── minio_client.py                 # MinIO客户端
+│   ├── rabbitmq_client.py              # RabbitMQ客户端
+│   ├── sse_connection_manager.py       # SSE连接管理器
+│   ├── triton_client.py                # Triton推理客户端
+│   ├── tracker_service.py              # 跟踪服务
+│   ├── wvp_client.py                   # WVP客户端
+│   ├── startup_recovery_service.py     # 启动恢复服务
+│   └── message_recovery_service.py     # 消息恢复服务
+├── skills/                 # 技能系统核心
+│   ├── skill_base.py       # 技能基类
+│   ├── skill_factory.py    # 技能工厂，负责创建技能对象
+│   └── skill_manager.py    # 技能管理器，负责管理技能生命周期
+└── main.py                 # 应用入口点
 ```
 
 ## 核心功能详解
@@ -64,7 +88,7 @@ app/
 
 #### 2. 实时任务管理
 - 新创建的任务自动加入调度计划
-- 任务配置更新时自动重新调度
+- 任务配置更新时自动重新调度（立即重启任务以应用新配置）
 - 删除任务时自动清理调度作业
 - 应用重启后自动恢复所有调度
 
@@ -85,7 +109,7 @@ app/
 }
 ```
 
-### 预警系统
+### 实时预警系统
 
 #### 1. 四级预警体系
 - **1级预警**：严重（最高级别，如3人以上违规）
@@ -100,14 +124,16 @@ app/
 
 #### 3. 预警图片处理
 - 自动在预警图片上绘制检测框和标签
-- 不同检测类别使用不同颜色标识
+- 不同检测类别使用不同颜色标识（动态分配颜色）
 - 显示置信度和类别名称
 - 图片按 `任务ID/摄像头ID` 结构存储到MinIO
 
-#### 4. 异步预警生成
+#### 4. 异步预警处理架构
 - 预警生成采用线程池异步处理
-- 不阻塞视频处理主流程
-- 确保实时性能不受影响
+- RabbitMQ消息队列确保预警可靠传递
+- SSE实时推送预警信息到前端
+- 预警补偿机制处理失败的预警消息
+- 启动时自动恢复未处理的预警
 
 ### 电子围栏系统
 
@@ -159,98 +185,116 @@ app/
 - 支持技能级别的预警逻辑自定义
 - 预警信息格式标准化
 
+#### 3. 现有技能
+- **安全帽检测技能**：检测工人是否佩戴安全帽
+- **安全带检测技能**：检测高空作业人员是否佩戴安全带
+- **COCO对象检测技能**：检测80种常见对象
+- **示例技能**：展示技能开发流程的简单计数技能
+
 ## 核心依赖
 
-项目主要依赖以下包：
-
 ```
-fastapi             # Web框架
-SQLAlchemy          # ORM数据库
-uvicorn             # ASGI服务器
-python-jose         # JWT认证
-python-dotenv       # 环境变量管理
-opencv-python       # 图像处理
-numpy               # 数学计算
-grpcio              # gRPC支持
-tritonclient        # Triton推理服务客户端
-apscheduler         # 任务调度
-minio               # 对象存储客户端
+APScheduler==3.11.0      # 任务调度
+fastapi==0.115.12        # Web框架
+grpcio==1.71.0          # gRPC支持
+minio==7.2.15           # 对象存储客户端
+numpy==2.2.6            # 数学计算
+opencv_python==4.9.0.80 # 图像处理
+pika==1.3.2             # RabbitMQ客户端
+pydantic==2.11.4        # 数据验证
+python-dotenv==1.1.0    # 环境变量管理
+python_jose==3.3.0      # JWT认证
+SQLAlchemy==2.0.25      # ORM数据库
+tritonclient[all]==2.41.0 # Triton推理服务客户端
+uvicorn==0.34.2         # ASGI服务器
 ```
 
 完整依赖列表请查看`requirements.txt`文件。
 
-## 安装
+## 安装与配置
 
-1. 克隆项目
+### 1. 环境准备
+
 ```bash
+# 克隆项目
 git clone <repository-url>
 cd smart_engine
-```
 
-2. 创建虚拟环境
-```bash
-# 使用conda（推荐）
+# 创建虚拟环境（推荐使用conda）
 conda create -n smart_engine python=3.9
 conda activate smart_engine
 
-# 或使用venv
-python -m venv venv
-# Windows
-venv\Scripts\activate
-# Linux/Mac
-source venv/bin/activate
-```
-
-3. 安装依赖
-```bash
+# 安装依赖
 pip install -r requirements.txt
 ```
 
-4. 配置环境变量
+### 2. 环境变量配置
 
-复制`.env.example`文件为`.env`并根据需要修改配置：
+创建`.env`文件并配置以下变量：
+
 ```bash
-cp .env.example .env
-```
+# 基础配置
+PROJECT_NAME=Smart Engine
+PROJECT_DESCRIPTION=智能视频分析引擎后端API
+PROJECT_VERSION=1.0.0
+DEBUG=true
+LOG_LEVEL=DEBUG
 
-主要配置项：
-```
-DATABASE_URL=mysql+mysqlclient://user:password@localhost/smart_engine
-TRITON_SERVER_URL=localhost:8001
-JWT_SECRET_KEY=your-secret-key
+# 数据库配置
+MYSQL_SERVER=192.168.1.107
+MYSQL_USER=root
+MYSQL_PASSWORD=root
+MYSQL_DB=smart_vision
+MYSQL_PORT=3306
+
+# Triton推理服务器配置
+TRITON_URL=172.18.1.1:8201
 
 # MinIO对象存储配置
-MINIO_ENDPOINT=localhost:9000
-MINIO_ACCESS_KEY=your-access-key
-MINIO_SECRET_KEY=your-secret-key
-MINIO_BUCKET_NAME=visionai
+MINIO_ENDPOINT=192.168.1.107
+MINIO_PORT=9000
+MINIO_ACCESS_KEY=minioadmin
+MINIO_SECRET_KEY=minioadmin
+MINIO_BUCKET=visionai
 MINIO_SECURE=false
-
-# 预警图片存储前缀
 MINIO_ALERT_IMAGE_PREFIX=alert-images/
 
+# RabbitMQ消息队列配置
+RABBITMQ_HOST=192.168.1.107
+RABBITMQ_PORT=5672
+RABBITMQ_USER=guest
+RABBITMQ_PASSWORD=guest
+
 # WVP平台配置
-WVP_HOST=localhost
-WVP_PORT=18080
+WVP_API_URL=http://192.168.1.107:18080
 WVP_USERNAME=admin
 WVP_PASSWORD=admin
+
+# 启动恢复配置
+STARTUP_RECOVERY_ENABLED=true
+STARTUP_RECOVERY_DELAY_SECONDS=30
 ```
 
-## 数据库初始化
+### 3. 数据库初始化
 
-初始化数据库结构：
 ```bash
-python -m scripts.init_db
+python -c "
+from app.db.session import engine
+from app.db.base_class import Base
+Base.metadata.create_all(bind=engine)
+print('数据库表创建完成')
+"
 ```
 
 ## 运行
 
-启动API服务：
+### 开发模式
 ```bash
-# 开发模式
 python -m app.main
+```
 
-# 生产模式
+### 生产模式
+```bash
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 ```
 
@@ -260,24 +304,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
 
 ### 技能架构概述
 
-本系统采用**技能类+任务配置**的直接模式，简化了原有的多层架构：
+本系统采用**技能类+任务配置**的直接模式：
 
 - **技能类(Skill Class)**：定义AI分析算法的Python类，包含默认配置和处理逻辑
 - **AI任务(AI Task)**：使用特定技能类执行分析的任务，可以自定义配置覆盖默认设置
-- **动态配置合并**：任务级别的配置会与技能类的默认配置深度合并，提供最大灵活性
-
-### 技能描述
-
-技能（Skill）是系统中用于执行特定AI分析任务的模块，每个技能都包含以下部分：
-
-- **配置信息**：技能的名称、类型、描述等
-- **所需模型**：技能执行所需的Triton模型
-- **处理逻辑**：实现特定分析功能的代码
-- **默认配置**：技能的标准参数设置
+- **动态配置合并**：任务级别的配置会与技能类的默认配置深度合并
 
 ### 创建AI任务
-
-现在创建AI任务变得更加直接和灵活：
 
 ```json
 {
@@ -287,138 +320,81 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
   "skill_config": {
     "params": {
       "conf_thres": 0.7,
-      "classes": ["helmet", "person"],
+      "classes": ["hat", "person"],
       "max_det": 500
     }
   }
 }
 ```
 
-系统会自动：
-1. 获取技能类的默认配置
-2. 与任务的`skill_config`进行深度合并
-3. 使用合并后的配置直接创建技能对象执行任务
-
 ### 创建自定义技能
 
-有两种方式可以添加新技能：
-
-#### 方式一：开发插件并直接放置
-
-1. 创建一个新的Python文件，例如`my_custom_skill.py`，继承`BaseSkill`并实现必要的方法
-2. 将文件放在`app/plugins/skills/`目录下
-3. 通过API接口触发技能热加载：`POST /api/v1/skill-classes/reload`
-4. 系统会自动扫描并注册新技能，无需重启
+1. 在`app/plugins/skills/`目录下创建Python文件
+2. 继承`BaseSkill`类并实现必要方法
+3. 通过API触发热加载：`POST /api/v1/skill-classes/reload`
 
 ```python
-from app.skills.skill_base import BaseSkill
+from app.skills.skill_base import BaseSkill, SkillResult
 
 class MyCustomSkill(BaseSkill):
-    # 技能配置
     DEFAULT_CONFIG = {
-        "name": "my_custom_skill",       # 技能名称
-        "name_zh": "我的自定义技能",      # 中文名称
-        "type": "detection",             # 技能类型
-        "description": "这是一个自定义技能", # 描述
-        "required_models": ["model_name"], # 所需模型
+        "name": "my_custom_skill",
+        "name_zh": "我的自定义技能",
+        "type": "detection",
+        "description": "自定义技能描述",
+        "required_models": ["model_name"],
         "params": {
             "conf_thres": 0.5,
-            "iou_thres": 0.45,
-            "max_det": 300
+            "iou_thres": 0.45
         }
     }
     
-    def process(self, frame, **kwargs):
-        # 实现技能处理逻辑
-        # 返回处理结果
-        pass
+    def process(self, input_data, fence_config=None):
+        # 实现处理逻辑
+        return SkillResult.success_result(result_data)
 ```
-
-#### 方式二：通过API上传
-
-1. 创建技能插件Python文件
-2. 通过API上传文件：`POST /api/v1/skill-classes/upload`（文件会自动放入插件目录并触发热加载）
-
-### 技能热加载
-
-系统支持技能热加载，可以在不重启应用的情况下动态添加新技能：
-
-```
-POST /api/v1/skill-classes/reload
-```
-
-响应示例：
-```json
-{
-  "success": true,
-  "message": "技能热加载成功",
-  "skill_classes": {
-    "total_found": 5,
-    "registered": 5,
-    "db_created": 1,
-    "db_updated": 0,
-    "failed": 0
-  },
-  "elapsed_time": "0.53秒"
-}
-```
-
-### 技能文件上传
-
-系统提供API接口上传技能文件：
-
-```
-POST /api/v1/skill-classes/upload
-Content-Type: multipart/form-data
-
-file=@your_skill.py
-```
-
-### 技能管理
-
-系统会在启动时自动扫描`app/plugins/skills/`目录，发现并注册所有技能。技能信息会同步到数据库，可以通过API接口进行管理。
-
-完整的技能开发指南请参考`app/plugins/skills/README.md`。
 
 ## API接口
 
-系统提供以下主要REST API接口：
+### 主要REST API接口
 
-### 摄像头接口
+#### 摄像头管理
 - `GET /api/v1/cameras` - 获取摄像头列表
-- `GET /api/v1/cameras/{id}` - 获取特定摄像头信息
-- `POST /api/v1/cameras` - 创建新摄像头
-- `PUT /api/v1/cameras/{id}` - 更新摄像头信息
+- `POST /api/v1/cameras` - 创建摄像头
+- `PUT /api/v1/cameras/{id}` - 更新摄像头
 - `DELETE /api/v1/cameras/{id}` - 删除摄像头
-- `GET /api/v1/cameras/sync` - 从WVP同步摄像头设备
+- `GET /api/v1/cameras/sync` - 从WVP同步摄像头
 
-### 技能类接口
+#### 技能类管理
 - `GET /api/v1/skill-classes` - 获取技能类列表
-- `GET /api/v1/skill-classes/{id}` - 获取特定技能类信息
+- `GET /api/v1/skill-classes/{id}` - 获取技能类详情
 - `POST /api/v1/skill-classes/reload` - 热加载技能
 - `POST /api/v1/skill-classes/upload` - 上传技能文件
 
-### AI任务接口
-- `GET /api/v1/ai-tasks` - 获取AI任务列表
-- `GET /api/v1/ai-tasks/{id}` - 获取特定AI任务信息
-- `POST /api/v1/ai-tasks` - 创建新AI任务（自动加入调度）
-- `PUT /api/v1/ai-tasks/{id}` - 更新AI任务（自动重新调度）
-- `DELETE /api/v1/ai-tasks/{id}` - 删除AI任务（自动清理调度）
-- `GET /api/v1/ai-tasks/camera/id/{camera_id}` - 获取指定摄像头的任务
-- `GET /api/v1/ai-tasks/skill-classes` - 获取可用于创建任务的技能类
+#### AI任务管理
+- `GET /api/v1/ai-tasks` - 获取任务列表
+- `POST /api/v1/ai-tasks` - 创建任务
+- `PUT /api/v1/ai-tasks/{id}` - 更新任务
+- `DELETE /api/v1/ai-tasks/{id}` - 删除任务
+- `GET /api/v1/ai-tasks/skill-classes` - 获取可用技能类
 
-### 模型接口
+#### 预警管理
+- `GET /api/v1/alerts` - 获取预警列表
+- `GET /api/v1/alerts/{id}` - 获取预警详情
+- `POST /api/v1/alerts/{id}/handle` - 处理预警
+- `GET /api/v1/alerts/stream` - SSE预警流
+
+#### 模型管理
 - `GET /api/v1/models` - 获取模型列表
-- `GET /api/v1/models/{id}` - 获取特定模型信息
 - `GET /api/v1/models/sync` - 从Triton同步模型
 
-### 预警接口
-- `GET /api/v1/alerts` - 获取预警列表
-- `GET /api/v1/alerts/{id}` - 获取特定预警信息
+#### 系统监控
+- `GET /health` - 系统健康检查
+- `GET /api/v1/system/status` - 系统状态
 
 ## 创建AI任务示例
 
-### 基础任务配置
+### 基础安全帽检测任务
 ```json
 {
   "name": "办公区安全帽检测",
@@ -427,7 +403,7 @@ file=@your_skill.py
   "skill_class_id": 2,
   "status": true,
   "alert_level": 2,
-  "frame_rate": 5,
+  "frame_rate": 5.0,
   "running_period": {
     "enabled": true,
     "periods": [
@@ -438,7 +414,7 @@ file=@your_skill.py
 }
 ```
 
-### 带电子围栏的任务配置
+### 带电子围栏的安全带检测任务
 ```json
 {
   "name": "施工区域安全带检测",
@@ -446,7 +422,7 @@ file=@your_skill.py
   "skill_class_id": 3,
   "status": true,
   "alert_level": 1,
-  "frame_rate": 3,
+  "frame_rate": 3.0,
   "electronic_fence": {
     "enabled": true,
     "type": "include",
@@ -467,31 +443,10 @@ file=@your_skill.py
 }
 ```
 
-### 自定义技能配置的任务
-```json
-{
-  "name": "高精度安全帽检测",
-  "camera_id": 2,
-  "skill_class_id": 2,
-  "skill_config": {
-    "params": {
-      "conf_thres": 0.8,
-      "iou_thres": 0.3,
-      "max_det": 200,
-      "classes": ["hat", "person"]
-    }
-  },
-  "status": true,
-  "alert_level": 3
-}
-```
-
 ## 系统健康检查
 
-可以通过访问健康检查接口来监控系统状态：
-
-```
-GET /health
+```bash
+curl http://localhost:8000/health
 ```
 
 返回示例：
@@ -502,6 +457,7 @@ GET /health
   "database": true,
   "minio": true,
   "wvp_server": true,
+  "rabbitmq": true,
   "running_tasks": 5,
   "scheduled_jobs": 10
 }
@@ -509,26 +465,15 @@ GET /health
 
 ## 部署指南
 
-### Docker部署（推荐）
-
-1. 构建镜像
-```bash
-docker build -t smart-vision-engine .
-```
-
-2. 启动服务
-```bash
-docker-compose up -d
-```
-
 ### 生产环境部署
 
 1. 使用Gunicorn启动
 ```bash
+pip install gunicorn
 gunicorn app.main:app -w 4 -k uvicorn.workers.UvicornWorker --bind 0.0.0.0:8000
 ```
 
-2. 配置反向代理（Nginx示例）
+2. Nginx反向代理配置
 ```nginx
 server {
     listen 80;
@@ -540,118 +485,74 @@ server {
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     }
+    
+    location /api/v1/alerts/stream {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header Cache-Control no-cache;
+        proxy_set_header Connection '';
+        proxy_http_version 1.1;
+        chunked_transfer_encoding off;
+        proxy_buffering off;
+    }
 }
 ```
 
 ## 监控和日志
 
 ### 日志配置
-系统使用Python标准logging模块，支持：
-- 按模块分级日志记录
+- 支持按模块分级日志记录
 - 文件和控制台双输出
-- 自动日志轮转
 - 结构化日志格式
 
-### 性能监控指标
+### 关键监控指标
 - 任务执行状态和耗时
 - 预警生成数量和延迟
 - Triton推理服务调用统计
 - 数据库连接池状态
 - MinIO上传成功率
-
-## 开发指南
-
-### 项目结构最佳实践
-
-- 业务逻辑应放在`services`层
-- 数据访问操作应通过`DAO`类实现
-- API接口应保持简洁，将复杂逻辑委托给服务层
-- 新技能开发应遵循`BaseSkill`接口规范
-
-### 技能开发规范
-
-1. **继承BaseSkill基类**
-2. **定义DEFAULT_CONFIG**：包含技能名称、类型、所需模型等
-3. **实现process方法**：核心处理逻辑
-4. **支持电子围栏**：重写`filter_detections_by_fence`方法
-5. **标准化预警**：返回符合格式的安全分析结果
-
-### 调试技巧
-
-启用调试模式运行应用：
-```bash
-DEBUG=1 python -m app.main
-```
-
-查看任务调度状态：
-```bash
-# 查看当前运行的任务
-curl http://localhost:8000/api/v1/ai-tasks/status
-
-# 查看调度作业
-curl http://localhost:8000/api/v1/ai-tasks/jobs
-```
-
-### 性能优化建议
-
-- **推理优化**：使用批处理模式提高Triton推理性能
-- **数据库优化**：使用连接池，合理设置连接数
-- **内存管理**：技能对象按需创建，及时释放资源
-- **异步处理**：预警生成使用异步机制，避免阻塞
-- **缓存策略**：合理缓存技能配置和摄像头信息
-- **监控清理**：定期清理过期的预警记录和日志文件
+- RabbitMQ消息队列状态
 
 ## 故障排除
 
 ### 常见问题
 
 1. **任务不执行**
-   - 检查运行时段配置是否正确
+   - 检查运行时段配置
    - 确认任务状态为激活
    - 检查摄像头通道是否存在
 
 2. **预警不生成**
    - 检查任务预警等级设置
    - 确认技能是否返回预警信息
-   - 检查MinIO连接状态
+   - 检查MinIO和RabbitMQ连接状态
 
-3. **Triton连接失败**
-   - 检查Triton服务器状态
-   - 确认模型已加载
-   - 验证网络连接
+3. **技能热加载失败**
+   - 检查技能文件语法错误
+   - 确认技能类继承BaseSkill
+   - 检查DEFAULT_CONFIG配置
 
-4. **数据库连接问题**
-   - 检查数据库服务状态
-   - 验证连接字符串
-   - 确认用户权限
+4. **SSE连接问题**
+   - 检查防火墙和代理设置
+   - 确认客户端正确处理SSE协议
+   - 检查RabbitMQ消息队列状态
 
 ## 更新日志
 
-### v2.0.0 (最新)
-- ✨ 新增智能任务调度系统
-- ✨ 新增四级预警体系
-- ✨ 新增电子围栏功能
-- ✨ 新增异步预警处理
-- ✨ 新增MinIO存储集成
-- 🐛 修复预警等级判断逻辑
-- 🐛 修复通道不存在时的处理
-- ⚡ 优化任务执行性能
-- 📝 完善API文档和示例
-
-### v1.0.0
-- 🎉 初始版本发布
-- ✨ 基础摄像头管理
-- ✨ 技能系统架构
-- ✨ AI任务管理
-- ✨ Triton集成
+### v1.0.0 (当前版本)
+- ✨ 智能任务调度系统
+- ✨ 四级预警体系
+- ✨ 电子围栏功能
+- ✨ RabbitMQ消息队列
+- ✨ SSE实时通信
+- ✨ 预警补偿机制
+- ✨ 启动自动恢复
+- ✨ MinIO存储集成
+- ✨ 技能热加载系统
+- ✨ 异步预警处理
+- ✨ 完整的API文档
 
 ## 许可证
 
 MIT License
-
-## 技术支持
-
-如有问题或建议，请通过以下方式联系：
-- GitHub Issues
-- 技术文档：查看`docs/`目录
-- 开发指南：查看`app/plugins/skills/README.md`
