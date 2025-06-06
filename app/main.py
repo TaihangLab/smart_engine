@@ -67,10 +67,14 @@ async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
     logger.info("数据库表创建成功")
     
-    # 同步Triton模型到数据库
+    # 同步Triton模型到数据库（如果Triton可用）
     logger.info("正在同步Triton模型到数据库...")
-    result = sync_models_from_triton()
-    logger.info(f"模型同步结果: {result['message']}")
+    try:
+        result = sync_models_from_triton()
+        logger.info(f"模型同步结果: {result['message']}")
+    except Exception as e:
+        logger.warning(f"模型同步失败（Triton可能未启动）: {str(e)}")
+        logger.info("Triton客户端已配置自动重连，首次调用时会自动连接")
     
     # 初始化数据库连接并设置SkillManager
     db = SessionLocal()
