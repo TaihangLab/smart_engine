@@ -195,7 +195,7 @@ function createAlertElement(alert) {
   alertDiv.classList.add(`alert-type-${alert.alert_type}`);
   
   // 格式化时间
-  const alertTime = new Date(alert.timestamp);
+  const alertTime = new Date(alert.alert_time);
   const formattedTime = alertTime.toLocaleString();
   
   // 获取报警类型显示文本
@@ -211,11 +211,11 @@ function createAlertElement(alert) {
       <div class="alert-info">
         <p><strong>ID:</strong> ${alert.id}</p>
         <p><strong>报警名称:</strong> ${alert.alert_name || '未知'}</p>
-        <p><strong>报警类别:</strong> ${alert.alert_category || '未分类'}</p>
+        <p><strong>报警描述:</strong> ${alert.alert_description || '无描述'}</p>
         <p><strong>摄像头:</strong> ${alert.camera_name || alert.camera_id}</p>
         <p><strong>位置:</strong> ${alert.location || '未知'}</p>
         <p><strong>报警等级:</strong> ${alert.alert_level || 1}</p>
-        <p><strong>置信度:</strong> ${alert.confidence ? (alert.confidence * 100).toFixed(2) + '%' : '未知'}</p>
+        <p><strong>任务ID:</strong> ${alert.task_id || '未知'}</p>
       </div>
       <div class="alert-image">
         <img src="${alert.minio_frame_url || '/static/img/no-image.png'}" alt="报警截图" onerror="this.src='/static/img/no-image.png'">

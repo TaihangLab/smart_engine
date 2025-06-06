@@ -25,7 +25,7 @@ class AlertCompensationService:
         self.compensation_interval = settings.ALERT_COMPENSATION_INTERVAL  # 补偿检查间隔
         self.max_retry_hours = settings.ALERT_MAX_RETRY_HOURS  # 最大重试小时数
         self.max_compensation_count = settings.ALERT_MAX_COMPENSATION_COUNT  # 单次最大补偿数量
-        self.new_client_backfill_hours = settings.ALERT_NEW_CLIENT_BACKFILL_HOURS  # 新客户端回填小时数
+
         self.is_running = False
         
     async def start_compensation_service(self):
@@ -77,8 +77,8 @@ class AlertCompensationService:
                 # 获取最近1小时的报警
                 cutoff_time = datetime.now() - timedelta(hours=1)
                 alerts = (db.query(Alert)
-                         .filter(Alert.timestamp >= cutoff_time)
-                         .order_by(Alert.timestamp.desc())
+                         .filter(Alert.alert_time >= cutoff_time)
+                         .order_by(Alert.alert_time.desc())
                          .limit(50)  # 限制数量避免过载
                          .all())
                 
@@ -254,57 +254,7 @@ class AlertCompensationService:
             logger.error(f"❌ 判断死信消息重试条件失败: {str(e)}")
             return False  # 异常情况下不重试，避免无限循环
     
-    async def compensate_for_new_client(self, client_queue: asyncio.Queue, 
-                                       hours_back: Optional[int] = None) -> bool:
-        """为新连接的客户端补偿最近的报警"""
-        try:
-            # 如果未指定回填小时数，使用配置文件中的默认值
-            if hours_back is None:
-                hours_back = self.new_client_backfill_hours
-                
-            logger.info(f"🔄 为新客户端补偿最近 {hours_back} 小时的报警")
-            
-            with next(get_db()) as db:
-                cutoff_time = datetime.now() - timedelta(hours=hours_back)
-                recent_alerts = (db.query(Alert)
-                               .filter(Alert.timestamp >= cutoff_time)
-                               .order_by(Alert.timestamp.desc())
-                               .limit(20)  # 限制数量
-                               .all())
-            
-            if not recent_alerts:
-                logger.info("📭 没有最近的报警需要补偿")
-                return True
-            
-            success_count = 0
-            for alert in reversed(recent_alerts):  # 按时间顺序发送
-                try:
-                    alert_dict = AlertResponse.from_orm(alert).dict()
-                    alert_dict['is_compensation'] = True
-                    alert_dict['compensation_reason'] = 'new_client_backfill'
-                    
-                    message = json.dumps(alert_dict, cls=DateTimeEncoder)
-                    sse_message = f"data: {message}\n\n"
-                    
-                    await asyncio.wait_for(
-                        client_queue.put(sse_message), 
-                        timeout=2.0
-                    )
-                    success_count += 1
-                    
-                    # 短暂延迟避免过快推送
-                    await asyncio.sleep(0.1)
-                    
-                except Exception as e:
-                    logger.warning(f"⚠️ 向新客户端推送报警 [ID={alert.id}] 失败: {str(e)}")
-                    break  # 如果发送失败，停止继续发送
-            
-            logger.info(f"✅ 为新客户端成功补偿 {success_count}/{len(recent_alerts)} 个报警")
-            return success_count > 0
-            
-        except Exception as e:
-            logger.error(f"❌ 新客户端补偿失败: {str(e)}")
-            return False
+
     
     def get_compensation_stats(self) -> Dict[str, Any]:
         """获取补偿服务统计信息"""
@@ -362,9 +312,7 @@ def stop_compensation_service():
     """停止补偿服务的外部接口"""
     compensation_service.stop_compensation_service()
 
-async def compensate_new_client(client_queue: asyncio.Queue) -> bool:
-    """为新客户端补偿的外部接口"""
-    return await compensation_service.compensate_for_new_client(client_queue)
+
 
 def get_compensation_stats() -> Dict[str, Any]:
     """获取补偿统计的外部接口"""

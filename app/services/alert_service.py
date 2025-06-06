@@ -51,10 +51,14 @@ class AlertService:
                 logger.debug(f"无法序列化原始报警数据: {str(e)}")
             
             # 将时间字符串转换为datetime对象
-            if isinstance(alert_data["timestamp"], str):
-                logger.debug(f"转换时间戳字符串: {alert_data['timestamp']}")
-                alert_data["timestamp"] = datetime.fromisoformat(alert_data["timestamp"].replace('Z', '+00:00'))
-                logger.debug(f"转换后的时间戳: {alert_data['timestamp']}")
+            if "alert_time" in alert_data and isinstance(alert_data["alert_time"], str):
+                logger.debug(f"转换时间戳字符串: {alert_data['alert_time']}")
+                alert_data["alert_time"] = datetime.fromisoformat(alert_data["alert_time"].replace('Z', '+00:00'))
+                logger.debug(f"转换后的时间戳: {alert_data['alert_time']}")
+                
+            # 确保必需字段存在
+            if "task_id" not in alert_data:
+                alert_data["task_id"] = 1  # 默认任务ID
             
             # 保存到数据库
             logger.info(f"将报警数据保存到数据库")
@@ -145,23 +149,22 @@ class AlertService:
     def create_alert(self, db: Session, alert: AlertCreate) -> Alert:
         """创建新的报警记录"""
         try:
-            logger.debug(f"创建报警记录: 类型={alert.alert_type}, 名称={alert.alert_name}, 类别={alert.alert_category}")
+            logger.debug(f"创建报警记录: 类型={alert.alert_type}, 名称={alert.alert_name}, 描述={alert.alert_description}")
             
             db_alert = Alert(
-                timestamp=alert.timestamp,
+                alert_time=alert.alert_time,
                 alert_type=alert.alert_type,
                 alert_level=alert.alert_level,
                 alert_name=alert.alert_name,
-                alert_category=alert.alert_category,
+                alert_description=alert.alert_description,
                 location=alert.location,
                 camera_id=alert.camera_id,
                 camera_name=alert.camera_name,
-                coordinates=alert.coordinates,
+                task_id=alert.task_id,
                 electronic_fence=alert.electronic_fence,
                 result=alert.result,
-                confidence=alert.confidence,
-                image_object_name=alert.image_object_name,
-                minio_video_url=alert.minio_video_url
+                minio_frame_object_name=alert.minio_frame_object_name,
+                minio_video_object_name=alert.minio_video_object_name
             )
             
             db.add(db_alert)
@@ -171,7 +174,7 @@ class AlertService:
             logger.debug(f"数据库事务已提交")
             
             db.refresh(db_alert)
-            logger.info(f"已创建报警记录: ID={db_alert.id}, 时间={alert.timestamp}, 名称={alert.alert_name}, 类别={alert.alert_category}")
+            logger.info(f"已创建报警记录: ID={db_alert.id}, 时间={alert.alert_time}, 名称={alert.alert_name}, 描述={alert.alert_description}")
             
             return db_alert
             
@@ -222,7 +225,7 @@ class AlertService:
         alert_type: Optional[str] = None,
         alert_level: Optional[int] = None,
         alert_name: Optional[str] = None,
-        alert_category: Optional[str] = None,
+        task_id: Optional[int] = None,
         location: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None,
@@ -232,7 +235,7 @@ class AlertService:
         """获取报警记录列表，支持多种过滤条件"""
         logger.info(f"查询报警记录列表: camera_id={camera_id}, camera_name={camera_name}, "
                    f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, "
-                   f"alert_category={alert_category}, location={location}, start_time={start_time}, end_time={end_time}, "
+                   f"task_id={task_id}, location={location}, start_time={start_time}, end_time={end_time}, "
                    f"skip={skip}, limit={limit}")
         
         query = db.query(Alert)
@@ -253,20 +256,20 @@ class AlertService:
         if alert_name:
             query = query.filter(Alert.alert_name == alert_name)
         
-        if alert_category:
-            query = query.filter(Alert.alert_category == alert_category)
+        if task_id:
+            query = query.filter(Alert.task_id == task_id)
             
         if location:
             query = query.filter(Alert.location == location)
         
         if start_time:
-            query = query.filter(Alert.timestamp >= start_time)
+            query = query.filter(Alert.alert_time >= start_time)
         
         if end_time:
-            query = query.filter(Alert.timestamp <= end_time)
+            query = query.filter(Alert.alert_time <= end_time)
         
         # 按时间倒序排序，获取最新的报警
-        query = query.order_by(Alert.timestamp.desc())
+        query = query.order_by(Alert.alert_time.desc())
         
         # 应用分页
         results = query.offset(skip).limit(limit).all()
@@ -301,7 +304,7 @@ class AlertService:
         alert_type: Optional[str] = None,
         alert_level: Optional[int] = None,
         alert_name: Optional[str] = None,
-        alert_category: Optional[str] = None,
+        task_id: Optional[int] = None,
         location: Optional[str] = None,
         start_time: Optional[datetime] = None,
         end_time: Optional[datetime] = None
@@ -309,7 +312,7 @@ class AlertService:
         """获取符合条件的报警记录数量"""
         logger.info(f"查询报警记录数量: camera_id={camera_id}, camera_name={camera_name}, "
                    f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, "
-                   f"alert_category={alert_category}, location={location}, start_time={start_time}, end_time={end_time}")
+                   f"task_id={task_id}, location={location}, start_time={start_time}, end_time={end_time}")
         
         query = db.query(Alert)
         
@@ -329,17 +332,17 @@ class AlertService:
         if alert_name:
             query = query.filter(Alert.alert_name == alert_name)
         
-        if alert_category:
-            query = query.filter(Alert.alert_category == alert_category)
+        if task_id:
+            query = query.filter(Alert.task_id == task_id)
             
         if location:
             query = query.filter(Alert.location == location)
         
         if start_time:
-            query = query.filter(Alert.timestamp >= start_time)
+            query = query.filter(Alert.alert_time >= start_time)
         
         if end_time:
-            query = query.filter(Alert.timestamp <= end_time)
+            query = query.filter(Alert.alert_time <= end_time)
         
         # 使用count()获取记录数
         count = query.count()
@@ -354,8 +357,8 @@ class AlertService:
         # 获取同一摄像头在当前报警之前的报警记录(最多3条)
         previous_alerts = (db.query(Alert)
                           .filter(Alert.camera_id == alert.camera_id)
-                          .filter(Alert.timestamp < alert.timestamp)
-                          .order_by(Alert.timestamp.desc())
+                          .filter(Alert.alert_time < alert.alert_time)
+                          .order_by(Alert.alert_time.desc())
                           .limit(3)
                           .all())
         
@@ -364,7 +367,7 @@ class AlertService:
             {
                 "id": prev.id,
                 "alert_type": prev.alert_type,
-                "timestamp": prev.timestamp
+                "alert_time": prev.alert_time
             }
             for prev in previous_alerts
         ]
@@ -398,12 +401,7 @@ async def register_sse_client(client_ip: str = "unknown", user_agent: str = "unk
     """注册一个新的SSE客户端连接"""
     client_queue = await sse_manager.register_client(client_ip, user_agent)
     
-    # 🔄 为新客户端补偿最近的报警
-    try:
-        from app.services.alert_compensation_service import compensate_new_client
-        await compensate_new_client(client_queue)
-    except Exception as e:
-        logger.warning(f"⚠️ 新客户端补偿失败: {str(e)}")
+
     
     return client_queue
 
@@ -417,16 +415,15 @@ def publish_test_alert() -> bool:
     """发布测试报警消息到RabbitMQ（仅用于测试）"""
     logger.info("🧪 创建测试报警消息")
     test_alert = {
-        # alert_id 现在是可选的，可以不提供
-        "timestamp": datetime.now().isoformat(),
+        "alert_time": datetime.now().isoformat(),
         "alert_type": "test_alert",
         "alert_level": 1,
         "alert_name": "测试报警",
-        "alert_category": "测试类别",
+        "alert_description": "测试类别",
         "location": "测试区域",
         "camera_id": 123,
         "camera_name": "测试摄像头",
-        "coordinates": [100, 100, 200, 200],
+        "task_id": 1,
         "electronic_fence": [[50,50], [250,50], [250,250], [50,250]],
         "result": [
             {
@@ -440,9 +437,8 @@ def publish_test_alert() -> bool:
                 }
             }
         ],
-        "confidence": 0.99,
-        "image_object_name": "test_frame.jpg",
-        "minio_video_url": "https://example.com/test_video.mp4"
+        "minio_frame_object_name": "test_frame.jpg",
+        "minio_video_object_name": "test_video.mp4"
     }
     
     success = rabbitmq_client.publish_alert(test_alert)

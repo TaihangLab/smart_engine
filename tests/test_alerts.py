@@ -27,15 +27,15 @@ def mock_alerts():
     return [
         Alert(
             id=1,
-            timestamp=now,
+            alert_time=now,
             alert_type="no_helmet",
             alert_level=1,
             alert_name="未戴安全帽",
-            alert_category="安全防护类",
+            alert_description="安全防护类",
             location="工厂A区",
             camera_id="camera_01",
             camera_name="大门入口摄像头",
-            coordinates=[100, 200, 150, 250],
+            task_id=1,
             electronic_fence=[[100,100], [300,100], [300,300], [100,300]],
             result=[
                 {
@@ -49,21 +49,20 @@ def mock_alerts():
                     }
                 }
             ],
-            confidence=0.95,
-            image_object_name="alerts/test_alert_1/frame.jpg",
-            minio_video_url="https://minio.example.com/alerts/test_alert_1/video.mp4"
+            minio_frame_object_name="alerts/test_alert_1/frame.jpg",
+            minio_video_object_name="test_alert_1_video.mp4"
         ),
         Alert(
             id=2,
-            timestamp=now - timedelta(hours=1),
+            alert_time=now - timedelta(hours=1),
             alert_type="intrusion",
             alert_level=2,
             alert_name="区域入侵",
-            alert_category="安全防范类",
+            alert_description="安全防范类",
             location="工厂B区",
             camera_id="camera_01",
             camera_name="大门入口摄像头",
-            coordinates=[300, 400, 350, 450],
+            task_id=1,
             electronic_fence=[[250,250], [450,250], [450,450], [250,450]],
             result=[
                 {
@@ -77,21 +76,20 @@ def mock_alerts():
                     }
                 }
             ],
-            confidence=0.88,
-            image_object_name="alerts/test_alert_2/frame.jpg",
-            minio_video_url="https://minio.example.com/alerts/test_alert_2/video.mp4"
+            minio_frame_object_name="alerts/test_alert_2/frame.jpg",
+            minio_video_object_name="test_alert_2_video.mp4"
         ),
         Alert(
             id=3,
-            timestamp=now - timedelta(hours=2),
+            alert_time=now - timedelta(hours=2),
             alert_type="unusual_activity",
             alert_level=3,
             alert_name="异常活动",
-            alert_category="异常行为类",
+            alert_description="异常行为类",
             location="工厂C区",
             camera_id="camera_02",
             camera_name="大厅摄像头",
-            coordinates=[500, 600, 550, 650],
+            task_id=2,
             electronic_fence=[[450,450], [650,450], [650,650], [450,650]],
             result=[
                 {
@@ -105,9 +103,8 @@ def mock_alerts():
                     }
                 }
             ],
-            confidence=0.75,
-            image_object_name="alerts/test_alert_3/frame.jpg",
-            minio_video_url="https://minio.example.com/alerts/test_alert_3/video.mp4"
+            minio_frame_object_name="alerts/test_alert_3/frame.jpg",
+            minio_video_object_name="test_alert_3_video.mp4"
         )
     ]
 
@@ -178,7 +175,7 @@ def test_get_alert(override_get_db, mock_alerts):
     assert data["alert_type"] == "no_helmet"
     assert data["alert_level"] == 1
     assert data["alert_name"] == "未戴安全帽"
-    assert data["alert_category"] == "安全防护类"
+    assert data["alert_description"] == "安全防护类"
     assert data["location"] == "工厂A区"
     assert data["camera_id"] == "camera_01"
     assert data["camera_name"] == "大门入口摄像头"

@@ -116,10 +116,10 @@ class MessageRecoveryService:
                 # 查询指定时间范围内的报警消息
                 alerts = (db.query(Alert)
                          .filter(and_(
-                             Alert.timestamp >= start_time,
-                             Alert.timestamp <= end_time
+                             Alert.alert_time >= start_time,
+                             Alert.alert_time <= end_time
                          ))
-                         .order_by(Alert.timestamp.asc())
+                         .order_by(Alert.alert_time.asc())
                          .limit(settings.DB_RECOVERY_MAX_MESSAGES)
                          .all())
                 
@@ -220,11 +220,11 @@ class MessageRecoveryService:
             try:
                 high_priority_alerts = (db.query(Alert)
                                       .filter(and_(
-                                          Alert.timestamp >= start_time,
-                                          Alert.timestamp <= end_time,
+                                          Alert.alert_time >= start_time,
+                                          Alert.alert_time <= end_time,
                                           Alert.alert_level >= 3  # 高级别报警
                                       ))
-                                      .order_by(Alert.timestamp.asc())
+                                      .order_by(Alert.alert_time.asc())
                                       .limit(settings.DB_RECOVERY_MAX_MESSAGES)
                                       .all())
                 
@@ -260,7 +260,7 @@ class MessageRecoveryService:
                 alert_dict['is_recovery'] = True
                 alert_dict['recovery_source'] = recovery_source
                 alert_dict['recovery_time'] = datetime.now().isoformat()
-                alert_dict['original_timestamp'] = alert.timestamp.isoformat()
+                alert_dict['original_timestamp'] = alert.alert_time.isoformat()
                 
                 # 构造SSE消息
                 message = json.dumps(alert_dict, cls=DateTimeEncoder)
@@ -353,7 +353,7 @@ class MessageRecoveryService:
                 # 检查是否已存在相同的报警记录
                 existing_alert = (db.query(Alert)
                                 .filter(and_(
-                                    Alert.timestamp == alert_create.timestamp,
+                                    Alert.alert_time == alert_create.alert_time,
                                     Alert.camera_id == alert_create.camera_id,
                                     Alert.alert_type == alert_create.alert_type
                                 ))
@@ -414,8 +414,8 @@ class MessageRecoveryService:
             try:
                 db_count = (db.query(Alert)
                            .filter(and_(
-                               Alert.timestamp >= start_time,
-                               Alert.timestamp <= end_time
+                               Alert.alert_time >= start_time,
+                               Alert.alert_time <= end_time
                            ))
                            .count())
                 consistency_report["database_messages"] = db_count
