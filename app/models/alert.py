@@ -2,8 +2,32 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, Float, JSON, BigInteger, Integer
 from pydantic import BaseModel
+from enum import IntEnum
 
 from app.db.base_class import Base
+
+
+class AlertStatus(IntEnum):
+    """报警状态枚举 - 使用TINYINT UNSIGNED类型（1字节存储，范围0-255）"""
+    PENDING = 1      # 待处理
+    PROCESSING = 2   # 处理中
+    RESOLVED = 3     # 已处理
+    IGNORED = 4      # 已忽略
+    EXPIRED = 5      # 已过期
+
+    @classmethod
+    def get_display_name(cls, value: int) -> str:
+        """获取状态的中文显示名称"""
+        status_names = {
+            cls.PENDING: "待处理",
+            cls.PROCESSING: "处理中", 
+            cls.RESOLVED: "已处理",
+            cls.IGNORED: "已忽略",
+            cls.EXPIRED: "已过期"
+        }
+        return status_names.get(value, "未知状态")
+
+
 
 
 class Alert(Base):
@@ -24,6 +48,14 @@ class Alert(Base):
     result = Column(JSON)
     minio_frame_object_name = Column(String(255))
     minio_video_object_name = Column(String(255))
+    
+    # 状态相关字段 - 使用TINYINT类型（SQLAlchemy用Integer映射，数据库层面指定为TINYINT UNSIGNED）
+    status = Column(Integer, default=AlertStatus.PENDING, index=True, comment="报警状态：1=待处理，2=处理中，3=已处理，4=已忽略，5=已过期")
+    processed_at = Column(DateTime, nullable=True, comment="处理完成时间")
+    processed_by = Column(String(100), nullable=True, comment="处理人员")
+    processing_notes = Column(String(1000), nullable=True, comment="处理备注")
+    created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
 
 
 class AlertCreate(BaseModel):
@@ -41,6 +73,9 @@ class AlertCreate(BaseModel):
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_object_name: str
     minio_video_object_name: str
+    # 🆕 新增状态字段，创建时默认为待处理 - 使用整数类型
+    status: int = AlertStatus.PENDING
+    processing_notes: Optional[str] = None
 
     class Config:
         json_schema_extra = {
@@ -68,9 +103,18 @@ class AlertCreate(BaseModel):
                     }
                 ],
                 "minio_frame_object_name": "5678/frame.jpg",
-                "minio_video_object_name": "5678/video.mp4"
+                "minio_video_object_name": "5678/video.mp4",
+                "status": 1,
+                "processing_notes": "系统自动检测到的安全隐患"
             }
         }
+
+
+class AlertUpdate(BaseModel):
+    """更新报警状态的模型"""
+    status: AlertStatus
+    processed_by: Optional[str] = None
+    processing_notes: Optional[str] = None
 
 
 class AlertResponse(BaseModel):
@@ -89,6 +133,14 @@ class AlertResponse(BaseModel):
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_url: str
     minio_video_url: str
+    # 🆕 新增状态相关字段 - 使用整数类型，但响应时包含显示名称
+    status: int = AlertStatus.PENDING  # 数据库中的整数值
+    status_display: str = AlertStatus.get_display_name(AlertStatus.PENDING)  # 中文显示名称
+    processed_at: Optional[datetime] = None
+    processed_by: Optional[str] = None
+    processing_notes: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     
     @classmethod
     def from_orm(cls, obj):
@@ -140,8 +192,24 @@ class AlertResponse(BaseModel):
                         data[field_name] = ""
                 else:
                     data[field_name] = ""
+            elif field_name == 'status':
+                # 处理status字段 - 直接使用整数类型
+                status_value = getattr(obj, field_name, None)
+                data[field_name] = status_value if status_value is not None else AlertStatus.PENDING
+            elif field_name == 'status_display':
+                # 生成状态的中文显示名称
+                status_value = getattr(obj, 'status', None)
+                if status_value is not None:
+                    data[field_name] = AlertStatus.get_display_name(int(status_value))
+                else:
+                    data[field_name] = AlertStatus.get_display_name(AlertStatus.PENDING)
             elif hasattr(obj, field_name):
                 data[field_name] = getattr(obj, field_name)
+            else:
+                # 如果对象没有该字段，使用模型的默认值
+                field_info = cls.__fields__.get(field_name)
+                if field_info and field_info.default is not None:
+                    data[field_name] = field_info.default
         
         return cls(**data)
     
