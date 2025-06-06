@@ -72,4 +72,64 @@ async def get_version():
             "docs": "/docs",
             "openapi": "/openapi.json"
         }
-    } 
+    }
+
+@router.get("/triton/status")
+async def get_triton_status():
+    """获取Triton服务器状态"""
+    try:
+        # 获取连接状态
+        is_connected = triton_client.is_connected()
+        
+        # 尝试获取服务器信息
+        server_info = {}
+        if is_connected:
+            try:
+                server_info = {
+                    "server_live": triton_client.is_server_live(),
+                    "server_ready": triton_client.is_server_ready(),
+                    "server_metadata": triton_client.get_server_metadata(),
+                    "model_repository": triton_client.get_model_repository_index()
+                }
+            except Exception as e:
+                server_info = {"error": str(e)}
+        
+        return {
+            "connection_status": "connected" if is_connected else "disconnected",
+            "server_url": triton_client.url,
+            "server_info": server_info,
+            "auto_reconnect": True  # 标明支持自动重连
+        }
+        
+    except Exception as e:
+        return {
+            "connection_status": "error",
+            "error": str(e),
+            "server_url": triton_client.url,
+            "auto_reconnect": True
+        }
+
+@router.post("/triton/reconnect")
+async def reconnect_triton():
+    """强制重新连接Triton服务器"""
+    try:
+        success = triton_client.reconnect()
+        if success:
+            return {"success": True, "message": "Triton重连成功"}
+        else:
+            return {"success": False, "message": "Triton重连失败"}
+    except Exception as e:
+        return {"success": False, "message": f"重连失败: {str(e)}"}
+
+@router.post("/triton/check")
+async def check_triton():
+    """检查Triton连接状态"""
+    try:
+        is_connected = triton_client.is_connected()
+        return {
+            "success": True, 
+            "connected": is_connected,
+            "message": "连接正常" if is_connected else "连接断开"
+        }
+    except Exception as e:
+        return {"success": False, "message": f"检查失败: {str(e)}"} 
