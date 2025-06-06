@@ -8,7 +8,6 @@ import os
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
-import tritonclient.grpc as grpcclient
 
 logger = logging.getLogger(__name__)
 
