@@ -62,7 +62,7 @@ async def get_version():
             "version": settings.PROJECT_VERSION
         },
         "api": {
-            "version": settings.API_VERSION,
+            "version": settings.SYSTEM_VERSION,
             "prefix": settings.API_V1_STR
         },
         "debug_mode": settings.DEBUG,

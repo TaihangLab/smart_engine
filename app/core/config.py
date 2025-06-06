@@ -9,9 +9,8 @@ load_dotenv()
 
 class Settings(BaseSettings):
     # API配置
-    VERSION: str = "v1"
-    API_VERSION: str = Field(default=VERSION, description="API版本")
-    API_V1_STR: str = Field(default="/api/" + VERSION, description="API路由前缀")
+    SYSTEM_VERSION: str = Field(default="v1", description="系统版本")
+    API_V1_STR: str = Field(default="/api/v1", description="API路由前缀")
     PROJECT_NAME: str = Field(default="Smart Engine", description="项目名称")
     PROJECT_DESCRIPTION: str = Field(default="智能视频分析引擎后端API", description="项目描述")
     PROJECT_VERSION: str = Field(default="1.0.0", description="项目版本")
