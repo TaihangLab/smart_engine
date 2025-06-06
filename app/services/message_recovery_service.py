@@ -21,9 +21,18 @@ class MessageRecoveryService:
     """消息恢复服务 - 利用MySQL和RabbitMQ恢复丢失的消息"""
     
     def __init__(self):
-        self.recovery_window_hours = 24  # 默认恢复24小时内的消息
-        self.batch_size = 100  # 批量处理大小
+        # 从配置文件读取参数，实现完全配置化
+        self.recovery_window_hours = settings.MESSAGE_RECOVERY_WINDOW_HOURS
+        self.batch_size = settings.MESSAGE_RECOVERY_BATCH_SIZE
+        self.batch_sleep_seconds = settings.RECOVERY_BATCH_SLEEP_MS / 1000.0
+        self.max_messages = settings.DB_RECOVERY_MAX_MESSAGES
+        self.max_retry_count = settings.MESSAGE_RECOVERY_MAX_RETRY
+        self.timeout_seconds = settings.MESSAGE_RECOVERY_TIMEOUT_SECONDS
+        self.send_timeout = settings.RECOVERY_SEND_TIMEOUT_SECONDS
         self.is_recovering = False
+        self.last_recovery_time = None
+        self.total_recovered = 0
+        self.total_failed = 0
         
     async def recover_missing_messages(self, 
                                      start_time: Optional[datetime] = None,
@@ -89,6 +98,12 @@ class MessageRecoveryService:
             recovery_stats["success_rate"] = (total_recovered / total_attempts * 100) if total_attempts > 0 else 0
             recovery_stats["end_time"] = datetime.now().isoformat()
             
+            # 更新实例统计信息
+            self.last_recovery_time = datetime.now()
+            self.total_recovered += total_recovered
+            self.total_failed += (recovery_stats["database_recovery"]["failed"] + 
+                                recovery_stats["deadletter_recovery"]["failed"])
+            
             logger.info(f"✅ 消息恢复完成: 恢复 {total_recovered} 条消息，成功率 {recovery_stats['success_rate']:.1f}%")
             
         except Exception as e:
@@ -120,7 +135,7 @@ class MessageRecoveryService:
                              Alert.alert_time <= end_time
                          ))
                          .order_by(Alert.alert_time.asc())
-                         .limit(settings.DB_RECOVERY_MAX_MESSAGES)
+                         .limit(self.max_messages)
                          .all())
                 
                 logger.info(f"📊 数据库中找到 {len(alerts)} 条报警记录")
@@ -134,8 +149,8 @@ class MessageRecoveryService:
                     stats["failed"] += batch_stats["failed"]
                     stats["skipped"] += batch_stats["skipped"]
                     
-                    # 短暂延迟避免系统过载
-                    await asyncio.sleep(0.1)
+                    # 使用配置的延迟时间避免系统过载
+                    await asyncio.sleep(self.batch_sleep_seconds)
                     
                     logger.debug(f"📦 处理批次 {i//self.batch_size + 1}: "
                                f"恢复={batch_stats['recovered']}, "
@@ -222,10 +237,10 @@ class MessageRecoveryService:
                                       .filter(and_(
                                           Alert.alert_time >= start_time,
                                           Alert.alert_time <= end_time,
-                                          Alert.alert_level >= 3  # 高级别报警
+                                          Alert.alert_level >= settings.DEAD_LETTER_HIGH_PRIORITY_LEVEL
                                       ))
                                       .order_by(Alert.alert_time.asc())
-                                      .limit(settings.DB_RECOVERY_MAX_MESSAGES)
+                                      .limit(self.max_messages)
                                       .all())
                 
                 logger.info(f"🔥 找到 {len(high_priority_alerts)} 条高级别报警需要恢复")
@@ -304,7 +319,7 @@ class MessageRecoveryService:
     async def _safe_send_to_client(self, client_queue: asyncio.Queue, message: str) -> bool:
         """安全发送消息到客户端"""
         try:
-            await asyncio.wait_for(client_queue.put(message), timeout=1.0)
+            await asyncio.wait_for(client_queue.put(message), timeout=self.send_timeout)
             return True
         except (asyncio.TimeoutError, Exception):
             return False
@@ -318,18 +333,18 @@ class MessageRecoveryService:
             death_count = dead_info.get('death_count', 0)
             
             # 1. 跳过重试次数过多的消息
-            if retry_count > 10:
+            if retry_count > settings.DEADLETTER_RECOVERY_MAX_RETRY_COUNT:
                 return False
             
             # 2. 跳过死信次数过多的消息
-            if death_count > 5:
+            if death_count > settings.DEADLETTER_RECOVERY_MAX_DEATH_COUNT:
                 return False
             
             # 3. 根据死信原因判断
             if dead_reason in ['rejected', 'expired']:
                 # 对于被拒绝或过期的消息，根据重要性判断
                 alert_level = message_data.get('alert_level', 1)
-                return alert_level >= 2  # 只恢复中等级别以上的报警
+                return alert_level >= settings.RECOVERY_MIN_ALERT_LEVEL
             
             # 4. 其他情况默认恢复
             return True
@@ -449,10 +464,26 @@ class MessageRecoveryService:
         """获取恢复服务状态"""
         return {
             "is_recovering": self.is_recovering,
+            "last_recovery_time": self.last_recovery_time.isoformat() if self.last_recovery_time else None,
+            "total_recovered": self.total_recovered,
+            "total_failed": self.total_failed,
             "recovery_window_hours": self.recovery_window_hours,
             "batch_size": self.batch_size,
+            "max_messages": self.max_messages,
+            "batch_sleep_seconds": self.batch_sleep_seconds,
+            "send_timeout": self.send_timeout,
+            "max_retry_count": self.max_retry_count,
+            "timeout_seconds": self.timeout_seconds,
             "connected_clients": len(connected_clients),
-            "deadletter_queue_stats": rabbitmq_client.get_dead_letter_queue_stats()
+            "status": "running" if self.is_recovering else "idle",
+            "config_source": "settings_file",
+            "performance_stats": {
+                "success_rate": (self.total_recovered / (self.total_recovered + self.total_failed) * 100) 
+                               if (self.total_recovered + self.total_failed) > 0 else 0,
+                "avg_batch_size": self.batch_size,
+                "max_concurrent_messages": self.max_messages
+            },
+            "deadletter_queue_stats": rabbitmq_client.get_dead_letter_queue_stats() if rabbitmq_client else {}
         }
 
 # 创建全局消息恢复服务实例
