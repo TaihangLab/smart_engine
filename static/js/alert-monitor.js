@@ -277,12 +277,13 @@ function filterAlerts() {
 // 加载历史报警数据
 async function loadHistoricalAlerts() {
   try {
-    const response = await fetch('/api/v1/alerts?limit=20');
+    const response = await fetch('/api/v1/alerts/real-time?limit=20');
     if (!response.ok) {
       throw new Error('获取历史报警失败');
     }
     
-    const alerts = await response.json();
+    const data = await response.json();
+    const alerts = data.alerts || [];
     
     // 清空容器
     if (alertContainer) {

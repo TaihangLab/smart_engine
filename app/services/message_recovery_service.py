@@ -44,7 +44,7 @@ class MessageRecoveryService:
         Args:
             start_time: 恢复起始时间，默认为24小时前
             end_time: 恢复结束时间，默认为当前时间
-            recovery_mode: 恢复模式 auto/manual/database/deadletter
+            recovery_mode: 恢复模式 auto/database/deadletter
             
         Returns:
             恢复结果统计
@@ -82,10 +82,7 @@ class MessageRecoveryService:
                 dl_stats = await self._recover_from_deadletter_queue()
                 recovery_stats["deadletter_recovery"] = dl_stats
             
-            if recovery_mode == "manual":
-                # 手动恢复模式，需要用户指定具体的消息ID或条件
-                manual_stats = await self._manual_recovery(start_time, end_time)
-                recovery_stats["manual_recovery"] = manual_stats
+
             
             # 计算总体统计
             total_recovered = (recovery_stats["database_recovery"]["recovered"] + 
@@ -218,44 +215,7 @@ class MessageRecoveryService:
             
         return stats
     
-    async def _manual_recovery(self, start_time: datetime, end_time: datetime) -> Dict[str, int]:
-        """手动恢复模式 - 用户指定特定条件恢复"""
-        stats = {"recovered": 0, "failed": 0, "skipped": 0}
-        
-        try:
-            logger.info("🔧 执行手动恢复模式")
-            
-            # 这里可以根据用户指定的条件进行恢复
-            # 例如：特定的alert_type、camera_id、alert_level等
-            
-            # 示例：恢复高级别报警
-            db_generator = get_db()
-            db = next(db_generator)
-            
-            try:
-                high_priority_alerts = (db.query(Alert)
-                                      .filter(and_(
-                                          Alert.alert_time >= start_time,
-                                          Alert.alert_time <= end_time,
-                                          Alert.alert_level >= settings.DEAD_LETTER_HIGH_PRIORITY_LEVEL
-                                      ))
-                                      .order_by(Alert.alert_time.asc())
-                                      .limit(self.max_messages)
-                                      .all())
-                
-                logger.info(f"🔥 找到 {len(high_priority_alerts)} 条高级别报警需要恢复")
-                
-                batch_stats = await self._process_alert_batch(high_priority_alerts, "manual_recovery")
-                stats.update(batch_stats)
-                
-            finally:
-                db.close()
-                
-        except Exception as e:
-            logger.error(f"❌ 手动恢复失败: {str(e)}")
-            stats["failed"] += 1
-            
-        return stats
+
     
     async def _process_alert_batch(self, alerts: List[Alert], recovery_source: str) -> Dict[str, int]:
         """批量处理报警消息"""

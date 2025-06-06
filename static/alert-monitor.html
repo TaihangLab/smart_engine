@@ -65,12 +65,61 @@
             display: flex;
             gap: 15px;
             align-items: center;
+            flex-wrap: wrap;
+            background-color: #f8f9fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin-bottom: 20px;
         }
         
-        .filters select {
-            padding: 5px;
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .filter-group label {
+            font-size: 0.9rem;
+            font-weight: bold;
+            color: #555;
+        }
+        
+        .filter-input {
+            padding: 8px 12px;
+            border: 1px solid #ddd;
             border-radius: 4px;
-            border: 1px solid #d9d9d9;
+            font-size: 0.9rem;
+            min-width: 150px;
+        }
+        
+        .filter-input:focus {
+            outline: none;
+            border-color: #1890ff;
+            box-shadow: 0 0 0 2px rgba(24, 144, 255, 0.2);
+        }
+        
+        .filter-button {
+            background-color: #1890ff;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 8px 15px;
+            cursor: pointer;
+            font-size: 0.9rem;
+            transition: background-color 0.3s;
+        }
+        
+        .filter-button:hover {
+            background-color: #096dd9;
+        }
+        
+        .clear-filter {
+            background-color: #f5f5f5;
+            color: #666;
+        }
+        
+        .clear-filter:hover {
+            background-color: #e8e8e8;
         }
         
         .content {
@@ -215,6 +264,8 @@
             justify-content: space-between;
             align-items: center;
             margin-bottom: 15px;
+            flex-wrap: wrap;
+            gap: 10px;
         }
         
         .test-button {
@@ -281,6 +332,83 @@
                 justify-content: space-between;
             }
         }
+        
+        /* 🆕 状态标签样式 */
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 12px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            text-align: center;
+            min-width: 60px;
+        }
+        
+        .status-pending {
+            background-color: #fff2e8;
+            color: #d46b08;
+            border: 1px solid #ffbb96;
+        }
+        
+        .status-processing {
+            background-color: #e6f7ff;
+            color: #096dd9;
+            border: 1px solid #91d5ff;
+        }
+        
+        .status-resolved {
+            background-color: #f6ffed;
+            color: #389e0d;
+            border: 1px solid #b7eb8f;
+        }
+        
+        .status-ignored {
+            background-color: #f5f5f5;
+            color: #8c8c8c;
+            border: 1px solid #d9d9d9;
+        }
+        
+        .status-expired {
+            background-color: #fff2f0;
+            color: #cf1322;
+            border: 1px solid #ffccc7;
+        }
+        
+        /* 🆕 状态操作按钮 */
+        .status-actions {
+            display: flex;
+            gap: 5px;
+            margin-top: 10px;
+        }
+        
+        .status-btn {
+            padding: 4px 8px;
+            border: none;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        
+        .status-btn-process {
+            background-color: #1890ff;
+            color: white;
+        }
+        
+        .status-btn-resolve {
+            background-color: #52c41a;
+            color: white;
+        }
+        
+        .status-btn-ignore {
+            background-color: #8c8c8c;
+            color: white;
+        }
+        
+        .status-btn:hover {
+            opacity: 0.8;
+            transform: translateY(-1px);
+        }
     </style>
 </head>
 <body>
@@ -331,6 +459,58 @@
     
     <!-- 主内容区域 -->
     <div class="content">
+        <!-- 🆕 过滤器区域 -->
+        <div class="filters">
+            <div class="filter-group">
+                <label for="status-filter">报警状态</label>
+                            <select id="status-filter" class="filter-input">
+                <option value="">全部状态</option>
+                <option value="1">待处理</option>
+                <option value="2">处理中</option>
+                <option value="3">已处理</option>
+                <option value="4">已忽略</option>
+                <option value="5">已过期</option>
+            </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="alert-type-filter">报警类型</label>
+                <select id="alert-type-filter" class="filter-input">
+                    <option value="">全部类型</option>
+                    <option value="no_helmet">未佩戴安全帽</option>
+                    <option value="intrusion">入侵警告</option>
+                    <option value="fire">火灾警告</option>
+                    <option value="smoke">烟雾警告</option>
+                    <option value="loitering">徘徊行为</option>
+                    <option value="abnormal_behavior">异常行为</option>
+                    <option value="test_alert">测试报警</option>
+                </select>
+            </div>
+            
+            <div class="filter-group">
+                <label for="camera-filter">摄像头</label>
+                <input type="text" id="camera-filter" class="filter-input" placeholder="摄像头名称或ID">
+            </div>
+            
+            <div class="filter-group">
+                <label for="start-date">开始日期</label>
+                <input type="date" id="start-date" class="filter-input">
+            </div>
+            
+            <div class="filter-group">
+                <label for="end-date">结束日期</label>
+                <input type="date" id="end-date" class="filter-input">
+            </div>
+            
+            <div class="filter-group">
+                <label>&nbsp;</label>
+                <div style="display: flex; gap: 10px;">
+                    <button class="filter-button" onclick="applyFilters()">🔍 筛选</button>
+                    <button class="filter-button clear-filter" onclick="clearFilters()">🔄 清空</button>
+                </div>
+            </div>
+        </div>
+        
         <div class="actions">
             <div>
                 <button id="send-test-alert" class="test-button">🚀 发送测试报警</button>
@@ -339,6 +519,7 @@
             <div>
                 <button id="refresh-alerts" class="test-button" style="background-color: #52c41a;">🔄 刷新报警</button>
                 <button id="check-sse-status" class="test-button" style="background-color: #1890ff;">📊 连接状态</button>
+                <button id="show-statistics" class="test-button" style="background-color: #722ed1;">📈 统计信息</button>
             </div>
         </div>
         
@@ -360,6 +541,20 @@
           'abnormal_behavior': '异常行为',
           'test_alert': '测试报警'
         };
+
+        // 状态映射和样式 - 只支持整数类型
+        const ALERT_STATUSES = {
+          1: { class: 'status-pending', icon: '⏳', display: '待处理' },
+          2: { class: 'status-processing', icon: '🔄', display: '处理中' },
+          3: { class: 'status-resolved', icon: '✅', display: '已处理' },
+          4: { class: 'status-ignored', icon: '🚫', display: '已忽略' },
+          5: { class: 'status-expired', icon: '⏰', display: '已过期' }
+        };
+
+        // 获取状态信息的辅助函数
+        function getStatusInfo(status) {
+          return ALERT_STATUSES[status] || ALERT_STATUSES[1];
+        }
 
         // 全局变量
         let eventSource = null;
@@ -386,6 +581,11 @@
         let cameraFilter;
         let alertTypeFilter;
         let statusMessage;
+        // 🆕 新增过滤器元素
+        let statusFilter;
+        let startDateFilter;
+        let endDateFilter;
+        let cameraNameFilter;
 
         // 生成唯一连接ID
         function generateConnectionId() {
@@ -671,6 +871,7 @@
           alertDiv.dataset.alertId = alert.id;
           alertDiv.dataset.cameraId = alert.camera_id;
           alertDiv.dataset.alertType = alert.alert_type;
+          alertDiv.dataset.alertStatus = alert.status || '待处理';
           
           // 设置报警类型样式
           alertDiv.classList.add(`alert-type-${alert.alert_type}`);
@@ -682,11 +883,71 @@
           // 获取报警类型显示文本
           const alertTypeText = ALERT_TYPES[alert.alert_type] || alert.alert_type;
           
+          // 获取状态信息
+          const status = alert.status || 1;
+          const statusDisplay = alert.status_display || getStatusInfo(alert.status).display;
+          const statusInfo = getStatusInfo(alert.status);
+          
+          // 🆕 格式化处理时间
+          let processedTimeHtml = '';
+          if (alert.processed_at) {
+            const processedTime = new Date(alert.processed_at);
+            processedTimeHtml = `<p><strong>处理时间:</strong> ${processedTime.toLocaleString('zh-CN')}</p>`;
+          }
+          
+          // 🆕 处理人员信息
+          let processedByHtml = '';
+          if (alert.processed_by) {
+            processedByHtml = `<p><strong>处理人员:</strong> ${alert.processed_by}</p>`;
+          }
+          
+          // 🆕 处理备注
+          let processingNotesHtml = '';
+          if (alert.processing_notes) {
+            processingNotesHtml = `<p><strong>处理备注:</strong> ${alert.processing_notes}</p>`;
+          }
+          
+          // 状态操作按钮
+          let statusActionsHtml = '';
+          const statusValue = alert.status;
+          
+          if (statusValue === 1) {
+            statusActionsHtml = `
+              <div class="status-actions">
+                <button class="status-btn status-btn-process" onclick="updateAlertStatus(${alert.id}, 2)">
+                  🔄 开始处理
+                </button>
+                <button class="status-btn status-btn-resolve" onclick="updateAlertStatus(${alert.id}, 3)">
+                  ✅ 标记已处理
+                </button>
+                <button class="status-btn status-btn-ignore" onclick="updateAlertStatus(${alert.id}, 4)">
+                  🚫 忽略
+                </button>
+              </div>
+            `;
+          } else if (statusValue === 2) {
+            statusActionsHtml = `
+              <div class="status-actions">
+                <button class="status-btn status-btn-resolve" onclick="updateAlertStatus(${alert.id}, 3)">
+                  ✅ 完成处理
+                </button>
+                <button class="status-btn status-btn-ignore" onclick="updateAlertStatus(${alert.id}, 4)">
+                  🚫 忽略
+                </button>
+              </div>
+            `;
+          }
+          
           // 构建HTML内容
           alertDiv.innerHTML = `
             <div class="alert-header">
               <span class="alert-type">${alertTypeText}</span>
-              <span class="alert-time">${formattedTime}</span>
+              <div style="display: flex; align-items: center; gap: 10px;">
+                <span class="status-badge ${statusInfo.class}">
+                  ${statusInfo.icon} ${statusDisplay}
+                </span>
+                <span class="alert-time">${formattedTime}</span>
+              </div>
             </div>
             <div class="alert-body">
               <div class="alert-info">
@@ -697,6 +958,9 @@
                 <p><strong>位置:</strong> ${alert.location || '未知'}</p>
                 <p><strong>报警等级:</strong> ${alert.alert_level || 1}</p>
                 <p><strong>任务ID:</strong> ${alert.task_id || '未知'}</p>
+                ${processedTimeHtml}
+                ${processedByHtml}
+                ${processingNotesHtml}
               </div>
               <div class="alert-image">
                 <img src="${alert.minio_frame_url || '/static/img/no-image.png'}" alt="报警截图" onerror="this.src='/static/img/no-image.png'">
@@ -704,7 +968,8 @@
             </div>
             <div class="alert-footer">
               <a href="${alert.minio_video_url || '#'}" target="_blank" class="alert-video-link">查看视频</a>
-              <button class="alert-dismiss" onclick="dismissAlert(this.parentNode.parentNode)">忽略</button>
+              ${statusActionsHtml}
+              <button class="alert-dismiss" onclick="dismissAlert(this.parentNode.parentNode)">忽略显示</button>
             </div>
           `;
           
@@ -947,16 +1212,256 @@
           }
         }
 
+        // 应用过滤器
+        async function applyFilters() {
+          try {
+            showStatusMessage('正在应用过滤器...', 'info');
+            
+            // 获取过滤条件
+            const status = document.getElementById('status-filter').value;
+            const alertType = document.getElementById('alert-type-filter').value;
+            const cameraName = document.getElementById('camera-filter').value;
+            const startDate = document.getElementById('start-date').value;
+            const endDate = document.getElementById('end-date').value;
+            
+            // 构建查询参数
+            const params = new URLSearchParams();
+            if (status) params.append('status', status);
+            if (alertType) params.append('alert_type', alertType);
+            if (cameraName) params.append('camera_name', cameraName);
+            if (startDate) params.append('start_date', startDate);
+            if (endDate) params.append('end_date', endDate);
+            params.append('limit', '50'); // 限制返回数量
+            
+            console.log('🔍 应用过滤器:', Object.fromEntries(params));
+            
+            const response = await fetch(`/api/v1/alerts/real-time?${params}`);
+            if (!response.ok) {
+              throw new Error('获取过滤结果失败');
+            }
+            
+            const data = await response.json();
+            const alerts = data.alerts || [];
+            
+            // 清空容器并显示结果
+            if (alertContainer) {
+              alertContainer.innerHTML = '';
+            }
+            
+            if (alerts.length === 0) {
+              alertContainer.innerHTML = '<div class="no-alerts"><p>没有符合条件的报警数据</p></div>';
+              alertCount = 0;
+            } else {
+              alerts.forEach(alert => {
+                const alertElement = createAlertElement(alert);
+                alertContainer.appendChild(alertElement);
+              });
+              alertCount = alerts.length;
+            }
+            
+            if (alertCountElement) {
+              alertCountElement.textContent = alertCount;
+            }
+            
+            const summary = data.summary || {};
+            showStatusMessage(`过滤完成: 显示 ${alerts.length} 条记录，共 ${summary.total_count || 0} 条符合条件`, 'success');
+            
+          } catch (error) {
+            console.error('应用过滤器失败:', error);
+            showStatusMessage('过滤失败: ' + error.message, 'error');
+          }
+        }
+        
+        // 🆕 清空过滤器
+        function clearFilters() {
+          document.getElementById('status-filter').value = '';
+          document.getElementById('alert-type-filter').value = '';
+          document.getElementById('camera-filter').value = '';
+          document.getElementById('start-date').value = '';
+          document.getElementById('end-date').value = '';
+          
+          // 重新加载历史数据
+          loadHistoricalAlerts();
+          showStatusMessage('过滤器已清空', 'info');
+        }
+        
+        // 更新报警状态
+        async function updateAlertStatus(alertId, newStatus) {
+          try {
+            // 将整数状态转换为显示名称用于提示
+            const statusDisplayMap = {
+              1: '待处理', 2: '处理中', 3: '已处理', 4: '已忽略', 5: '已过期'
+            };
+            const statusDisplay = statusDisplayMap[newStatus];
+            
+            showStatusMessage(`正在更新报警 ${alertId} 状态为 ${statusDisplay}...`, 'info');
+            
+            const response = await fetch(`/api/v1/alerts/${alertId}/status`, {
+              method: 'PUT',
+              headers: {
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
+                status: newStatus,
+                processed_by: '前端用户', // 可以从用户信息获取
+                processing_notes: `通过前端界面更新状态为: ${statusDisplay}`
+              })
+            });
+            
+            if (!response.ok) {
+              throw new Error('更新状态失败');
+            }
+            
+            const updatedAlert = await response.json();
+            console.log('✅ 状态更新成功:', updatedAlert);
+            
+            // 更新页面上的报警元素
+            const alertElement = document.querySelector(`[data-alert-id="${alertId}"]`);
+            if (alertElement) {
+              // 重新创建元素以反映新状态
+              const newAlertElement = createAlertElement(updatedAlert);
+              alertElement.parentNode.replaceChild(newAlertElement, alertElement);
+            }
+            
+            showStatusMessage(`报警 ${alertId} 状态已更新为 ${statusDisplay}`, 'success');
+            
+          } catch (error) {
+            console.error('更新状态失败:', error);
+            showStatusMessage('更新状态失败: ' + error.message, 'error');
+          }
+        }
+        
+        // 🆕 显示统计信息
+        async function showStatistics() {
+          try {
+            showStatusMessage('正在获取统计信息...', 'info');
+            
+            const response = await fetch('/api/v1/alerts/statistics');
+            if (!response.ok) {
+              throw new Error('获取统计信息失败');
+            }
+            
+            const stats = await response.json();
+            console.log('📊 统计信息:', stats);
+            
+            // 构建统计信息显示
+            const statusDist = stats.status_distribution || {};
+            const typeDist = stats.type_distribution || {};
+            const levelDist = stats.level_distribution || {};
+            
+            const statsHtml = `
+              <div style="padding: 20px; background: white; border-radius: 6px; margin: 10px 0; border: 1px solid #d9d9d9;">
+                <h3>📊 报警统计信息</h3>
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-top: 15px;">
+                  <div>
+                    <h4>📈 状态分布</h4>
+                    <ul style="list-style: none; padding: 0;">
+                      <li>⏳ 待处理: ${statusDist['待处理'] || 0} 条</li>
+                      <li>🔄 处理中: ${statusDist['处理中'] || 0} 条</li>
+                      <li>✅ 已处理: ${statusDist['已处理'] || 0} 条</li>
+                      <li>🚫 已忽略: ${statusDist['已忽略'] || 0} 条</li>
+                      <li>⏰ 已过期: ${statusDist['已过期'] || 0} 条</li>
+                    </ul>
+                  </div>
+                  <div>
+                    <h4>🏷️ 类型分布</h4>
+                    <ul style="list-style: none; padding: 0;">
+                      ${Object.entries(typeDist).map(([type, count]) => 
+                        `<li>${ALERT_TYPES[type] || type}: ${count} 条</li>`
+                      ).join('')}
+                    </ul>
+                  </div>
+                  <div>
+                    <h4>⚡ 等级分布</h4>
+                    <ul style="list-style: none; padding: 0;">
+                      ${Object.entries(levelDist).map(([level, count]) => 
+                        `<li>等级 ${level}: ${count} 条</li>`
+                      ).join('')}
+                    </ul>
+                  </div>
+                </div>
+                <div style="margin-top: 15px; padding-top: 15px; border-top: 1px solid #f0f0f0;">
+                  <strong>📊 总计: ${stats.total_alerts || 0} 条报警</strong>
+                </div>
+                <button onclick="this.parentElement.remove()" style="margin-top: 10px; padding: 5px 10px; background: #f5f5f5; border: 1px solid #d9d9d9; border-radius: 3px; cursor: pointer;">关闭</button>
+              </div>
+            `;
+            
+            // 在报警容器前插入统计信息
+            const statsDiv = document.createElement('div');
+            statsDiv.innerHTML = statsHtml;
+            alertContainer.parentNode.insertBefore(statsDiv, alertContainer);
+            
+            showStatusMessage('统计信息已显示', 'success');
+            
+          } catch (error) {
+            console.error('获取统计信息失败:', error);
+            showStatusMessage('获取统计信息失败: ' + error.message, 'error');
+          }
+        }
+
         // 页面加载完成后初始化
         document.addEventListener('DOMContentLoaded', function() {
-          // 确保只初始化一次
-          if (window.alertMonitorInitialized) {
-            console.log('报警监控已经初始化，跳过重复初始化');
-            return;
+          console.log('🚀 报警监控页面初始化开始');
+          
+          // 获取DOM元素
+          alertContainer = document.getElementById('alert-container');
+          connectionStatus = document.getElementById('connection-status');
+          alertCountElement = document.getElementById('alert-count');
+          connectionIdElement = document.getElementById('connection-id');
+          cameraFilter = document.getElementById('camera-filter');
+          alertTypeFilter = document.getElementById('alert-type-filter');
+          statusMessage = document.getElementById('status-message');
+          
+          // 🆕 获取新的过滤器元素
+          statusFilter = document.getElementById('status-filter');
+          startDateFilter = document.getElementById('start-date');
+          endDateFilter = document.getElementById('end-date');
+          cameraNameFilter = document.getElementById('camera-filter');
+          
+          // 初始化过滤器事件
+          if (cameraFilter) {
+            cameraFilter.addEventListener('change', filterAlerts);
           }
           
-          window.alertMonitorInitialized = true;
-          initAlertMonitor();
+          if (alertTypeFilter) {
+            alertTypeFilter.addEventListener('change', filterAlerts);
+          }
+          
+          // 连接到SSE
+          connectSSE();
+          
+          // 加载历史报警数据
+          loadHistoricalAlerts();
+          
+          // 添加事件监听器
+          const testButton = document.getElementById('send-test-alert');
+          if (testButton) {
+            testButton.addEventListener('click', sendTestAlert);
+          }
+          
+          const refreshButton = document.getElementById('refresh-alerts');
+          if (refreshButton) {
+            refreshButton.addEventListener('click', function() {
+              console.log('🔄 手动刷新报警数据');
+              loadHistoricalAlerts();
+            });
+          }
+          
+          const statusButton = document.getElementById('check-sse-status');
+          if (statusButton) {
+            statusButton.addEventListener('click', function() {
+              checkConnectionStatus();
+            });
+          }
+          
+          // 🆕 添加统计信息按钮事件监听器
+          const statisticsButton = document.getElementById('show-statistics');
+          if (statisticsButton) {
+            statisticsButton.addEventListener('click', showStatistics);
+          }
+          
+          console.log('✅ 报警监控页面初始化完成');
         });
     </script>
 </body>
