@@ -155,49 +155,49 @@ class CocoDetectorSkill(BaseSkill):
         except Exception as e:
             logger.exception(f"处理失败: {str(e)}")
             return SkillResult.error_result(f"处理失败: {str(e)}")
-    
+
     def preprocess(self, img):
         """预处理图像
-        
+
         将原始图像调整大小并进行归一化处理
-        
+
         参数:
             img: 输入图像，BGR格式
-            
+
         返回:
             预处理后的图像张量
         """
         # 获取原始图像尺寸用于后处理
         self.original_shape = img.shape
-        
+
         # 转换到RGB并调整大小
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (self.input_width, self.input_height))
-        
+
         # 归一化到[0,1]
         img = img.astype(np.float32) / 255.0
-        
+
         # 调整为NCHW格式 (1, 3, height, width)
         return np.expand_dims(img.transpose(2, 0, 1), axis=0)
-        
+
     def postprocess(self, detections, original_img):
         """
         后处理YOLO检测结果
-        
+
         参数:
             detections: 模型输出
             original_img: 原始输入图像
-            
+
         返回:
             处理后的检测结果列表
         """
         # 获取原始图像尺寸
         height, width = original_img.shape[:2]
-        
+
         # 处理模型输出 (1, 84, 8400) -> (8400, 84)
         detections = np.squeeze(detections, axis=0)
         detections = np.transpose(detections, (1, 0))
-        
+
         boxes, scores, class_ids = [], [], []
         x_factor = width / self.input_width
         y_factor = height / self.input_height
@@ -205,39 +205,49 @@ class CocoDetectorSkill(BaseSkill):
         for i in range(detections.shape[0]):
             classes_scores = detections[i][4:]
             max_score = np.amax(classes_scores)
-            
+
             if max_score >= self.conf_thres:
                 class_id = np.argmax(classes_scores)
                 x, y, w, h = detections[i][0], detections[i][1], detections[i][2], detections[i][3]
-                
+
                 # 坐标转换
                 left = int((x - w / 2) * x_factor)
                 top = int((y - h / 2) * y_factor)
                 width_box = int(w * x_factor)
                 height_box = int(h * y_factor)
-                
+
                 # 边界检查
                 left = max(0, left)
                 top = max(0, top)
                 width_box = min(width_box, width - left)
                 height_box = min(height_box, height - top)
-                
+
                 boxes.append([left, top, width_box, height_box])
                 scores.append(max_score)
                 class_ids.append(class_id)
 
-        # 应用NMS
-        indices = cv2.dnn.NMSBoxes(boxes, scores, self.conf_thres, self.iou_thres) if len(boxes) > 0 else []
-        
+        # ✅ 修改 NMS 逻辑：按类别执行 NMS
         results = []
-        for i in indices:
-            box = boxes[i]
-            results.append({
-                "bbox": [box[0], box[1], box[0]+box[2], box[1]+box[3]],
-                "confidence": float(scores[i]),
-                "class_id": int(class_ids[i]),
-                "class_name": self.class_names.get(int(class_ids[i]), "unknown")
-            })
+        unique_class_ids = set(class_ids)
+        for class_id in unique_class_ids:
+            cls_indices = [i for i, cid in enumerate(class_ids) if cid == class_id]
+            cls_boxes = [boxes[i] for i in cls_indices]
+            cls_scores = [scores[i] for i in cls_indices]
+
+            nms_indices = cv2.dnn.NMSBoxes(cls_boxes, cls_scores, self.conf_thres, self.iou_thres)
+            if isinstance(nms_indices, (list, tuple, np.ndarray)):
+                nms_indices = np.array(nms_indices).flatten()
+
+            for idx_in_cls in nms_indices:
+                idx = cls_indices[idx_in_cls]
+                box = boxes[idx]
+                results.append({
+                    "bbox": [box[0], box[1], box[0] + box[2], box[1] + box[3]],
+                    "confidence": float(cls_scores[idx_in_cls]),
+                    "class_id": int(class_id),
+                    "class_name": self.class_names.get(int(class_id), "unknown")
+                })
+
         return results
 
     def _count_classes(self, results):
@@ -312,4 +322,38 @@ class CocoDetectorSkill(BaseSkill):
             center_x = (bbox[0] + bbox[2]) / 2
             center_y = (bbox[1] + bbox[3]) / 2
             return (center_x, center_y)
-        return None 
+        return None
+
+    # 测试代码
+
+
+if __name__ == "__main__":
+    # 创建检测器 - 传入配置参数会自动调用_initialize()
+    detector = CocoDetectorSkill(CocoDetectorSkill.DEFAULT_CONFIG)
+
+    # 测试图像检测
+    test_image = np.zeros((640, 640, 3), dtype=np.uint8)
+    cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
+
+    # 执行检测
+    result = detector.process(test_image)
+
+    if not result.success:
+        print(f"检测失败: {result.error_message}")
+        exit(1)
+
+    # 获取检测结果
+    detections = result.data["detections"]
+
+    # 输出结果
+    print(f"检测到 {len(detections)} 个对象:")
+    for i, det in enumerate(detections):
+        print(
+            f"对象 {i + 1}: 类别={det['class_name']}({det['class_id']}), 置信度={det['confidence']:.4f}, 边界框={det['bbox']}")
+
+    # 分析安全状况
+    if "safety_metrics" in result.data:
+        safety = result.data["safety_metrics"]
+        print(f"安全分析: {safety}")
+
+    print("测试完成！")
