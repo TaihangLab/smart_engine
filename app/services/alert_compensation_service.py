@@ -3,15 +3,10 @@
 
 import logging
 import asyncio
-import json
-from datetime import datetime, timedelta
-from typing import List, Dict, Any, Optional
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_
+from datetime import datetime
+from typing import Dict, Any
 
-from app.db.session import get_db
-from app.models.alert import Alert, AlertResponse
-from app.services.alert_service import connected_clients, DateTimeEncoder
+from app.services.alert_service import connected_clients
 from app.services.rabbitmq_client import rabbitmq_client
 from app.core.config import settings
 
@@ -52,92 +47,8 @@ class AlertCompensationService:
     
     async def _check_and_compensate(self):
         """检查并执行补偿逻辑"""
-        if not connected_clients:
-            logger.debug("📡 没有SSE客户端连接，跳过补偿检查")
-            return
-        
-        # 1. 检查最近的未广播报警
-        recent_alerts = self._get_recent_alerts()
-        if not recent_alerts:
-            logger.debug("✅ 没有需要补偿的报警")
-            return
-        
-        logger.info(f"🔍 发现 {len(recent_alerts)} 个可能需要补偿的报警")
-        
-        # 2. 对新连接的客户端推送最近报警
-        await self._compensate_recent_alerts(recent_alerts)
-        
-        # 3. 检查RabbitMQ死信队列（如果配置了）
+        # 检查RabbitMQ死信队列中的失败消息
         await self._check_dead_letter_queue()
-    
-    def _get_recent_alerts(self) -> List[Alert]:
-        """获取最近的报警记录"""
-        try:
-            with next(get_db()) as db:
-                # 获取最近1小时的报警
-                cutoff_time = datetime.now() - timedelta(hours=1)
-                alerts = (db.query(Alert)
-                         .filter(Alert.alert_time >= cutoff_time)
-                         .order_by(Alert.alert_time.desc())
-                         .limit(50)  # 限制数量避免过载
-                         .all())
-                
-                logger.debug(f"📊 查询到最近1小时内 {len(alerts)} 个报警")
-                return alerts
-                
-        except Exception as e:
-            logger.error(f"❌ 查询最近报警失败: {str(e)}")
-            return []
-    
-    async def _compensate_recent_alerts(self, alerts: List[Alert]):
-        """向SSE客户端补偿推送最近的报警"""
-        if not alerts:
-            return
-        
-        # 只向"新"客户端推送（这里简化处理，实际可以记录客户端连接时间）
-        client_count = len(connected_clients)
-        logger.info(f"🔄 开始向 {client_count} 个客户端补偿推送最近的 {len(alerts)} 个报警")
-        
-        success_count = 0
-        for alert in alerts[-10:]:  # 只推送最近10个，避免过载
-            try:
-                # 将Alert转换为字典
-                alert_dict = AlertResponse.from_orm(alert).dict()
-                
-                # 添加补偿标识
-                alert_dict['is_compensation'] = True
-                alert_dict['compensation_time'] = datetime.now().isoformat()
-                
-                # 构造SSE消息
-                message = json.dumps(alert_dict, cls=DateTimeEncoder)
-                sse_message = f"data: {message}\n\n"
-                
-                # 发送给所有客户端
-                tasks = []
-                for client_queue in connected_clients.copy():
-                    tasks.append(self._safe_send_to_client(client_queue, sse_message))
-                
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                client_success = sum(1 for result in results if result is True)
-                
-                if client_success > 0:
-                    success_count += 1
-                    logger.debug(f"📤 补偿推送报警 [ID={alert.id}] 到 {client_success}/{client_count} 个客户端")
-                
-            except Exception as e:
-                logger.warning(f"⚠️ 补偿推送报警 [ID={alert.id}] 失败: {str(e)}")
-        
-        if success_count > 0:
-            logger.info(f"✅ 成功补偿推送 {success_count}/{len(alerts[-10:])} 个报警")
-    
-    async def _safe_send_to_client(self, client_queue: asyncio.Queue, message: str) -> bool:
-        """安全发送消息到客户端"""
-        try:
-            # 使用短超时避免阻塞
-            await asyncio.wait_for(client_queue.put(message), timeout=1.0)
-            return True
-        except (asyncio.TimeoutError, Exception):
-            return False
     
     async def _check_dead_letter_queue(self):
         """检查RabbitMQ死信队列中的失败消息"""
@@ -253,8 +164,6 @@ class AlertCompensationService:
         except Exception as e:
             logger.error(f"❌ 判断死信消息重试条件失败: {str(e)}")
             return False  # 异常情况下不重试，避免无限循环
-    
-
     
     def get_compensation_stats(self) -> Dict[str, Any]:
         """获取补偿服务统计信息"""

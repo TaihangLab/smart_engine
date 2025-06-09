@@ -2,6 +2,7 @@ import tritonclient.grpc as grpcclient
 import logging
 import numpy as np
 import json
+import time
 from typing import Dict, List, Any, Optional, Union, Tuple
 from app.core.config import settings
 
@@ -13,6 +14,7 @@ class TritonClient:
     """
     Triton推理服务器通用客户端
     支持服务器健康检查、模型信息查询和推理调用
+    包含自动重连和懒加载机制
     """
     def __init__(self, url=None, verbose=False):
         """
@@ -26,8 +28,78 @@ class TritonClient:
             url = settings.TRITON_URL
         self.url = url
         self.verbose = verbose
-        self.client = grpcclient.InferenceServerClient(url=url, verbose=verbose)
-        logger.info(f"初始化Triton客户端，连接到 {url}")
+        self._client = None  # 懒加载，不在初始化时连接
+        self._last_connection_attempt = 0
+        self._connection_retry_interval = 5  # 重连间隔（秒）
+        logger.info(f"初始化Triton客户端配置，目标服务器: {url}")
+    
+    def _get_client(self):
+        """
+        懒加载获取Triton客户端连接
+        包含自动重连机制
+        """
+        current_time = time.time()
+        
+        # 如果客户端存在且连接正常，直接返回
+        if self._client is not None:
+            try:
+                # 简单测试连接是否有效
+                self._client.is_server_live()
+                return self._client
+            except Exception:
+                logger.warning("检测到Triton连接失效，准备重新连接")
+                self._client = None
+        
+        # 限制重连频率
+        if current_time - self._last_connection_attempt < self._connection_retry_interval:
+            raise Exception(f"Triton服务连接失败，请等待{self._connection_retry_interval}秒后重试")
+        
+        # 尝试创建新连接
+        self._last_connection_attempt = current_time
+        try:
+            logger.info(f"尝试连接Triton服务器: {self.url}")
+            self._client = grpcclient.InferenceServerClient(url=self.url, verbose=self.verbose)
+            
+            # 测试连接
+            if self._client.is_server_live():
+                logger.info(f"成功连接到Triton服务器: {self.url}")
+                return self._client
+            else:
+                logger.error("Triton服务器无响应")
+                self._client = None
+                raise Exception("Triton服务器无响应")
+                
+        except Exception as e:
+            logger.error(f"连接Triton服务器失败: {str(e)}")
+            self._client = None
+            raise Exception(f"无法连接到Triton服务器 {self.url}: {str(e)}")
+    
+    @property
+    def client(self):
+        """获取客户端连接（自动重连）"""
+        return self._get_client()
+    
+    def is_connected(self) -> bool:
+        """
+        检查当前是否连接到Triton服务器
+        """
+        try:
+            return self._client is not None and self._client.is_server_live()
+        except Exception:
+            return False
+    
+    def reconnect(self) -> bool:
+        """
+        强制重新连接到Triton服务器
+        """
+        try:
+            self._client = None
+            self._last_connection_attempt = 0  # 重置重连时间限制
+            self._get_client()
+            return True
+        except Exception as e:
+            logger.error(f"强制重连失败: {str(e)}")
+            return False
     
     def is_server_live(self) -> bool:
         """

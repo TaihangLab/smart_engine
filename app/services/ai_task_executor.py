@@ -585,7 +585,13 @@ class AITaskExecutor:
             # 获取摄像头信息
             camera_info = CameraService.get_ai_camera_by_id(task.camera_id, db)
             camera_name = camera_info.get("name", f"摄像头{task.camera_id}") if camera_info else f"摄像头{task.camera_id}"
-            location = camera_info.get("location", "未知位置") if camera_info else "未知位置"
+            
+            # 确保location字段不为None，优先使用camera_info中的location，如果为None或空字符串则使用默认值
+            location = "未知位置"
+            if camera_info:
+                camera_location = camera_info.get("location")
+                if camera_location:  # 检查是否为None或空字符串
+                    location = camera_location
             
             # 直接从alert_data中获取预警信息
             alert_info_data = alert_data.get("alert_info", {})
@@ -660,9 +666,11 @@ class AITaskExecutor:
                 "result": formatted_results
             }
             
-            # 记录预警信息到数据库（暂时注释，等开发人员完善）
-            # alert_id = alert_service.create_alert(complete_alert, db)
-            # complete_alert["alert_id"] = alert_id
+            # 记录预警信息到数据库
+            from app.models.alert import AlertCreate
+            alert_create = AlertCreate(**complete_alert)
+            db_alert = alert_service.create_alert(db, alert_create)
+            complete_alert["alert_id"] = db_alert.id
             
             logger.info(f"已生成完整预警信息: task_id={task.id}, camera_id={task.camera_id}, level={level}")
             logger.info(f"预警详情: {alert_info['name']} - {alert_info['description']}")
