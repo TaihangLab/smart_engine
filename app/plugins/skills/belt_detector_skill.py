@@ -31,7 +31,8 @@ class BeltDetectorSkill(BaseSkill):
             "conf_thres": 0.5,
             "iou_thres": 0.45,
             "max_det": 300,
-            "input_size": [640, 640]
+            "input_size": [640, 640],
+            "enable_default_sort_tracking": True  # 默认启用SORT跟踪，用于人员安全带佩戴分析
         }
     }
     
@@ -137,9 +138,19 @@ class BeltDetectorSkill(BaseSkill):
             # 后处理结果
             results = self.postprocess(outputs, image)
             
+            # 可选的跟踪功能（根据配置决定）
+            # 安全带检测通常需要跟踪来避免重复计数
+            if self.config.get("params", {}).get("enable_default_sort_tracking", True):
+                results = self.add_tracking_ids(results)
+            
             # 应用电子围栏过滤（如果提供了围栏配置）
             if fence_config:
-                results = self.filter_detections_by_fence(results, fence_config)
+                filtered_results = []
+                for detection in results:
+                    point = self._get_detection_point(detection)
+                    if point and self.is_point_inside_fence(point, fence_config):
+                        filtered_results.append(detection)
+                results = filtered_results
             
             # 构建结果数据
             result_data = {

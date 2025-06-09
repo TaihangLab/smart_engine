@@ -119,17 +119,16 @@ class BaseSkill(ABC):
             self.status = self.config.get("status", True)
             self.skill_id = f"{self.name}_{id(self)}"
         
-        # 初始化跟踪器（用于围栏进入/离开检测）
+        # 初始化跟踪器（用于目标跟踪）
         try:
             from app.services.tracker_service import TrackerService
             self.tracker = TrackerService(
                 max_age=30, 
                 min_hits=3, 
-                iou_threshold=0.3,
-                custom_point_func=self._get_detection_point  # 传递自定义检测点获取方法
+                iou_threshold=0.3
             )
         except ImportError:
-            self.log("warning", "无法导入跟踪器服务，将使用传统围栏过滤方式")
+            self.log("warning", "无法导入跟踪器服务，将跳过目标跟踪")
             self.tracker = None
         
         # 初始化技能
@@ -206,90 +205,59 @@ class BaseSkill(ABC):
         log_method = getattr(logger, level.lower(), logger.info)
         log_method(f"{message}")
     
-    def filter_detections_by_fence(self, detections: List[Dict], fence_config: Dict) -> List[Dict]:
+    def add_tracking_ids(self, detections: List[Dict]) -> List[Dict]:
         """
-        根据电子围栏配置过滤检测结果（使用跟踪的围栏进入/离开检测）
-        子类可以覆盖此方法实现自定义的围栏过滤逻辑
+        为检测结果添加跟踪ID
         
         Args:
             detections: 检测结果列表
+            
+        Returns:
+            带跟踪ID的检测结果列表
+        """
+        if self.tracker:
+            return self.tracker.update(detections)
+        else:
+            return detections
+    
+    def is_point_inside_fence(self, point: Tuple[float, float], fence_config: Dict) -> bool:
+        """
+        判断点是否在围栏内
+        
+        Args:
+            point: 检测点坐标 (x, y)
             fence_config: 电子围栏配置
             
         Returns:
-            过滤后的检测结果列表（带track_id）
+            是否在围栏内
         """
         try:
-            # 如果未启用电子围栏，返回所有检测结果
+            # 如果未启用电子围栏，返回False
             if not fence_config or not fence_config.get("enabled", False):
-                return detections
+                return False
             
-            # 如果没有跟踪器，使用传统方式
-            if not self.tracker:
-                return self._filter_detections_traditional(detections, fence_config)
-            
-            # 使用跟踪器进行围栏检测
-            filtered_detections, fence_events = self.tracker.update(detections, fence_config)
-            
-            # 记录围栏事件
-            if fence_events:
-                for event in fence_events:
-                    event_type = event.get("event_type", "unknown")
-                    track_id = event.get("track_id", "unknown")
-                    self.log("info", f"围栏事件: track_id={track_id}, 事件={event_type}")
-            
-            return filtered_detections
-            
-        except Exception as e:
-            self.log("error", f"电子围栏过滤检测结果时出错: {str(e)}")
-            return detections  # 出错时返回所有检测结果
-    
-    def _filter_detections_traditional(self, detections: List[Dict], fence_config: Dict) -> List[Dict]:
-        """
-        传统的围栏过滤方式（不使用跟踪）
-        """
-        try:
             # 现有系统使用points字段，它本身就是多边形数组格式
             polygons = fence_config.get("points", [])
-            if not polygons or len(polygons) == 0:
-                return detections  # 没有多边形定义，返回所有检测结果
+            if not polygons:
+                return False
             
-            # 获取触发模式
-            trigger_mode = fence_config.get("trigger_mode", "inside")
-            
-            # 传统模式下，inside表示围栏内，outside表示围栏外
-            filtered_detections = []
-            
-            for detection in detections:
-                # 获取检测点（默认使用检测框中心点）
-                detection_point = self._get_detection_point(detection)
-                if not detection_point:
-                    continue
-                    
-                # 判断点是否在任一多边形内
-                is_inside_any = False
-                for polygon in polygons:
-                    if len(polygon) < 3:
-                        continue  # 跳过点数不足的多边形
-                    
-                    # 转换多边形点格式
-                    poly_points = [(p["x"], p["y"]) for p in polygon]
-                    
-                    # 判断点是否在多边形内
-                    if self._point_in_polygon(detection_point, poly_points):
-                        is_inside_any = True
-                        break
+            # 判断点是否在任一多边形内
+            for polygon in polygons:
+                if len(polygon) < 3:
+                    continue  # 跳过点数不足的多边形
                 
-                # 根据触发模式决定是否包含此检测结果
-                if trigger_mode == "inside" and is_inside_any:
-                    filtered_detections.append(detection)
-                elif trigger_mode == "outside" and not is_inside_any:
-                    filtered_detections.append(detection)
+                # 转换多边形点格式
+                poly_points = [(p["x"], p["y"]) for p in polygon]
+                
+                # 判断点是否在多边形内
+                if self._point_in_polygon(point, poly_points):
+                    return True
             
-            return filtered_detections
+            return False
             
         except Exception as e:
-            self.log("error", f"传统围栏过滤时出错: {str(e)}")
-            return detections
+            self.log("error", f"判断点是否在围栏内时出错: {str(e)}")
+            return False
     
     def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
         """

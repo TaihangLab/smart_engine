@@ -41,7 +41,8 @@ class CocoDetectorSkill(BaseSkill):
             "conf_thres": 0.5,
             "iou_thres": 0.45,
             "max_det": 300,
-            "input_size": [640, 640]
+            "input_size": [640, 640],
+            "enable_default_sort_tracking": False  # 默认不启用SORT跟踪，COCO检测主要用于单帧物体识别
         }
     }
     
@@ -136,11 +137,21 @@ class CocoDetectorSkill(BaseSkill):
             detections = outputs["output0"]
             results = self.postprocess(detections, image)
             
-            # 3. 应用电子围栏过滤（如果提供了围栏配置）
-            if fence_config:
-                results = self.filter_detections_by_fence(results, fence_config)
+            # 3. 可选的跟踪功能（根据配置决定）
+            # COCO检测默认不启用跟踪，因为通常用于单帧物体检测
+            if self.config.get("params", {}).get("enable_default_sort_tracking", False):
+                results = self.add_tracking_ids(results)
             
-            # 4. 构建结果数据
+            # 4. 应用电子围栏过滤（如果提供了围栏配置）
+            if fence_config:
+                filtered_results = []
+                for detection in results:
+                    point = self._get_detection_point(detection)
+                    if point and self.is_point_inside_fence(point, fence_config):
+                        filtered_results.append(detection)
+                results = filtered_results
+            
+            # 5. 构建结果数据
             result_data = {
                 "detections": results,
                 "count": len(results),
@@ -148,7 +159,7 @@ class CocoDetectorSkill(BaseSkill):
                 "safety_metrics": self.analyze_safety(results)
             }
             
-            # 5. 返回结果
+            # 6. 返回结果
             return SkillResult.success_result(result_data)
             
         except Exception as e:

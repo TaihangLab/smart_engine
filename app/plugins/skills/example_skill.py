@@ -28,7 +28,8 @@ class SimpleCounterSkill(BaseSkill):
         "required_models": [],          # 无需AI模型
         "params": {
             "count_threshold": 128,     # 计数阈值
-            "use_mean": True            # 是否使用均值
+            "use_mean": True,           # 是否使用均值
+            "enable_default_sort_tracking": False    # 是否启用跟踪
         }
     }
     
@@ -121,11 +122,21 @@ class SimpleCounterSkill(BaseSkill):
                     "class_name": "bright_region"
                 })
             
-            # 4. 应用电子围栏过滤（如果提供了围栏配置）
-            if fence_config:
-                detections = self.filter_detections_by_fence(detections, fence_config)
+            # 4. 可选的跟踪功能（根据配置决定）
+            # 示例技能默认不启用跟踪，因为只是演示用途
+            if self.config.get("params", {}).get("enable_default_sort_tracking", False):
+                detections = self.add_tracking_ids(detections)
             
-            # 5. 构建结果数据
+            # 5. 应用电子围栏过滤（如果提供了围栏配置）
+            if fence_config:
+                filtered_detections = []
+                for detection in detections:
+                    point = self._get_detection_point(detection)
+                    if point and self.is_point_inside_fence(point, fence_config):
+                        filtered_detections.append(detection)
+                detections = filtered_detections
+            
+            # 6. 构建结果数据
             result_data = {
                 "image_shape": image.shape,
                 "average_value": float(np.mean(gray)),
@@ -137,7 +148,7 @@ class SimpleCounterSkill(BaseSkill):
                 "safety_metrics": self.analyze_safety(detections)
             }
             
-            # 6. 返回结果
+            # 7. 返回结果
             return SkillResult.success_result(result_data)
             
         except Exception as e:
