@@ -449,10 +449,10 @@ class ReloadSkillsResponse(BaseModel):
 @router.post("/reload", response_model=ReloadSkillsResponse)
 def reload_skills(db: Session = Depends(get_db)):
     """
-    热加载技能类和实例（无需重启系统）
+    热加载技能类（无需重启系统）
     
-    将重新扫描技能目录，并重新加载技能实例。
-    此操作可以用于在添加新技能后，不重启系统即可加载技能。
+    将重新扫描技能目录，并重新加载技能类。
+    此操作可以用于在添加新技能后，不重启系统即可加载技能类。
     
     Returns:
         操作结果
