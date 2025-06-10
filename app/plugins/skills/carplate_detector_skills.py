@@ -55,8 +55,7 @@ class PlateRecognitionSkill(BaseSkill):
                 return SkillResult.error_result("图像无效或加载失败")
 
             detections = self.detect_plates(image)
-            if fence_config:
-                detections = self.filter_detections_by_fence(detections, fence_config)
+
 
             for det in detections:
                 crop_img = self.crop_plate(image, det["bbox"], expand_ratio=self.expand_ratio)
@@ -64,10 +63,28 @@ class PlateRecognitionSkill(BaseSkill):
                 det["plate_text"] = plate_text
                 det["plate_score"] = plate_score
 
+            if self.config.get("params", {}).get("enable_default_sort_tracking", False):
+                results = self.add_tracking_ids(detections)
+
+            if self.is_fence_config_valid(fence_config):
+                self.log("info", f"应用电子围栏过滤: {fence_config}")
+                filtered_results = []
+                for detection in results:
+                    point = self._get_detection_point(detection)
+                    if point and self.is_point_inside_fence(point, fence_config):
+                        filtered_results.append(detection)
+                results = filtered_results
+                self.log("info", f"围栏过滤后检测结果数量: {len(results)}")
+            elif fence_config:
+                self.log("info", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
+
+
+
             result_data = {
                 "detections": detections,
                 "count": len(detections)
             }
+
 
             return SkillResult.success_result(result_data)
 
@@ -198,21 +215,6 @@ class PlateRecognitionSkill(BaseSkill):
         y2 = min(y2 + dh, h - 1)
         return img[y1:y2, x1:x2]
 
-    def filter_detections_by_fence(self, detections: List[Dict], fence_config: Dict) -> List[Dict]:
-        polygon = fence_config.get("polygon")
-        if not polygon:
-            return detections
-        fence = np.array(polygon, dtype=np.int32)
-        filtered = []
-        for det in detections:
-            bbox = det.get("bbox", [])
-            if len(bbox) != 4:
-                continue
-            center_x = (bbox[0] + bbox[2]) / 2
-            center_y = (bbox[1] + bbox[3]) / 2
-            if cv2.pointPolygonTest(fence, (center_x, center_y), False) >= 0:
-                filtered.append(det)
-        return filtered
 
 if __name__ == "__main__":
     skill = PlateRecognitionSkill(PlateRecognitionSkill.DEFAULT_CONFIG)

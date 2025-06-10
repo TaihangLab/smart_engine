@@ -24,7 +24,8 @@ class GloveDetectorSkill(BaseSkill):
             "conf_thres": 0.5,
             "iou_thres": 0.45,
             "max_det": 300,
-            "input_size": [640, 640]
+            "input_size": [640, 640],
+            "enable_default_sort_tracking": False
         }
     }
 
@@ -74,8 +75,22 @@ class GloveDetectorSkill(BaseSkill):
                 return SkillResult.error_result("推理失败")
 
             results = self.postprocess(outputs, image)
-            if fence_config:
-                results = self.filter_detections_by_fence(results, fence_config)
+
+            if self.config.get("params", {}).get("enable_default_sort_tracking", False):
+                results = self.add_tracking_ids(results)
+
+            if self.is_fence_config_valid(fence_config):
+                self.log("info", f"应用电子围栏过滤: {fence_config}")
+                filtered_results = []
+                for detection in results:
+                    point = self._get_detection_point(detection)
+                    if point and self.is_point_inside_fence(point, fence_config):
+                        filtered_results.append(detection)
+                results = filtered_results
+                self.log("info", f"围栏过滤后检测结果数量: {len(results)}")
+            elif fence_config:
+                self.log("info", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
+
 
             result_data = {
                 "detections": results,
@@ -140,17 +155,6 @@ class GloveDetectorSkill(BaseSkill):
 
         return results
 
-    def filter_detections_by_fence(self, detections: List[Dict], fence_config: Dict) -> List[Dict]:
-        polygon = fence_config.get("polygon")
-        if not polygon:
-            return detections
-        fence = np.array(polygon, dtype=np.int32)
-        filtered = []
-        for det in detections:
-            point = self._get_detection_point(det)
-            if point is not None and cv2.pointPolygonTest(fence, point, False) >= 0:
-                filtered.append(det)
-        return filtered
 
     def analyze_safety(self, detections):
         """
