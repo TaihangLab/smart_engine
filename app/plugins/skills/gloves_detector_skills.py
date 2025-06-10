@@ -111,8 +111,22 @@ class GloveDetectorSkill(BaseSkill):
         return np.expand_dims(img.transpose(2, 0, 1), axis=0)
 
     def postprocess(self, outputs, original_img):
+        """后处理模型输出
+
+        Args:
+            outputs: 模型输出
+            original_img: 原始图像
+
+        Returns:
+            检测结果列表
+        """
+        # 获取原始图像尺寸
         height, width = original_img.shape[:2]
+
+        # 获取output0数据
         detections = outputs["output0"]
+
+        # 转置并压缩输出 (1,84,8400) -> (8400,84)
         detections = np.squeeze(detections, axis=0)
         detections = np.transpose(detections, (1, 0))
 
@@ -121,36 +135,49 @@ class GloveDetectorSkill(BaseSkill):
         y_factor = height / self.input_height
 
         for i in range(detections.shape[0]):
-            class_scores = detections[i][4:]
-            max_score = np.amax(class_scores)
+            classes_scores = detections[i][4:]
+            max_score = np.amax(classes_scores)
+
             if max_score >= self.conf_thres:
-                class_id = int(np.argmax(class_scores))
-                x, y, w, h = detections[i][:4]
+                class_id = np.argmax(classes_scores)
+                x, y, w, h = detections[i][0], detections[i][1], detections[i][2], detections[i][3]
+
+                # 坐标转换
                 left = int((x - w / 2) * x_factor)
                 top = int((y - h / 2) * y_factor)
                 width_box = int(w * x_factor)
                 height_box = int(h * y_factor)
 
+                # 边界检查
+                left = max(0, left)
+                top = max(0, top)
+                width_box = min(width_box, width - left)
+                height_box = min(height_box, height - top)
+
                 boxes.append([left, top, width_box, height_box])
                 scores.append(max_score)
                 class_ids.append(class_id)
 
+        # 修改：按类别执行NMS
         results = []
-        for class_id in set(class_ids):
+        unique_class_ids = set(class_ids)
+        for class_id in unique_class_ids:
             cls_indices = [i for i, cid in enumerate(class_ids) if cid == class_id]
             cls_boxes = [boxes[i] for i in cls_indices]
             cls_scores = [scores[i] for i in cls_indices]
+
             nms_indices = cv2.dnn.NMSBoxes(cls_boxes, cls_scores, self.conf_thres, self.iou_thres)
             if isinstance(nms_indices, (list, tuple, np.ndarray)):
-                nms_indices = nms_indices.flatten()
-            for j in nms_indices:
-                idx = cls_indices[j]
+                nms_indices = np.array(nms_indices).flatten()
+
+            for idx_in_cls in nms_indices:
+                idx = cls_indices[idx_in_cls]
                 box = boxes[idx]
                 results.append({
                     "bbox": [box[0], box[1], box[0] + box[2], box[1] + box[3]],
-                    "confidence": float(cls_scores[j]),
+                    "confidence": float(cls_scores[idx_in_cls]),
                     "class_id": int(class_id),
-                    "class_name": self.class_names.get(class_id, "unknown")
+                    "class_name": self.class_names.get(int(class_id), "unknown")
                 })
 
         return results
@@ -256,7 +283,7 @@ class GloveDetectorSkill(BaseSkill):
 
 if __name__ == "__main__":
     detector = GloveDetectorSkill(GloveDetectorSkill.DEFAULT_CONFIG)
-    image_path = "F:/G2.JPG"
+    image_path = "F:/gloves.JPG"
     image = cv2.imread(image_path)
 
     result = detector.process(image)
