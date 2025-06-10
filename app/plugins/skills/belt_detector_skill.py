@@ -142,7 +142,7 @@ class BeltDetectorSkill(BaseSkill):
             # 安全带检测通常需要跟踪来避免重复计数
             if self.config.get("params", {}).get("enable_default_sort_tracking", True):
                 results = self.add_tracking_ids(results)
-            
+
             # 应用电子围栏过滤（如果提供了围栏配置）
             if fence_config:
                 filtered_results = []
@@ -391,7 +391,7 @@ if __name__ == "__main__":
     result = detector.process(test_image)
     
     if not result.success:
-        print(f"检测失败: {result.error_message}")
+        print(f"检测失败: {result.error_message}")  
         exit(1)
         
     # 获取检测结果
