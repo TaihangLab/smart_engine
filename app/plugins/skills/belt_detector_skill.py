@@ -311,12 +311,14 @@ class BeltDetectorSkill(BaseSkill):
         if unsafe_count > 0:
             alert_triggered = True
             # 根据未佩戴安全带的高空作业人员数量确定预警等级（1级最高，4级最低）
-            if unsafe_count >= 3:
-                alert_level = 1  # 最高预警：3人及以上未佩戴安全带
-            elif unsafe_count >= 2:
+            if unsafe_count >= 6:
+                alert_level = 1  # 最高预警：5人及以上未佩戴安全带
+            elif 3 <= unsafe_count <= 5:
                 alert_level = 2  # 高级预警：2人未佩戴安全带
-            else:
-                alert_level = 3  # 中级预警：1人未佩戴安全带
+            elif 1 < unsafe_count <= 2:
+                alert_level = 3
+            else :
+                alert_level = 4  # 极轻预警：1人未佩戴安全带
             
             # 生成预警信息
             level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}

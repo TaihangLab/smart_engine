@@ -232,14 +232,18 @@ class GloveDetectorSkill(BaseSkill):
         alert_description = ""
 
         if alert_triggered:
-            # 预警等级判断规则：
-            # ≥3人违规 → 严重（等级1）
-            # =2人违规 → 中等（等级2）
-            # =1人违规 → 轻微（等级3）
-            alert_level = 1 if non_compliant >= 3 else (2 if non_compliant == 2 else 3)
+            # 按人数范围判断预警等级
+            if non_compliant >= 6:
+                alert_level = 1  # 严重
+            elif 3 <= non_compliant <= 5:
+                alert_level = 2  # 中等
+            elif 1 < non_compliant <= 2:
+                alert_level = 3  # 轻微
+            else:
+                alert_level = 4  # 极轻（如果你有这个等级）
 
             # 中文等级映射
-            severity = {1: "严重", 2: "中等", 3: "轻微"}.get(alert_level, "严重")
+            severity = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}.get(alert_level, "未知")
 
             # 构建预警内容
             alert_name = "未佩戴绝缘手套"
@@ -283,7 +287,7 @@ class GloveDetectorSkill(BaseSkill):
 
 if __name__ == "__main__":
     detector = GloveDetectorSkill(GloveDetectorSkill.DEFAULT_CONFIG)
-    image_path = "F:/gloves.JPG"
+    image_path = "F:/G2.JPG"
     image = cv2.imread(image_path)
 
     result = detector.process(image)

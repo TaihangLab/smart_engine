@@ -264,12 +264,14 @@ class WorkDetectorSkill(BaseSkill):
         alert_description = ""
 
         if alert_triggered:
-            if non_compliant_persons >= 3:
-                alert_level = 1
-            elif non_compliant_persons == 2:
-                alert_level = 2
-            else:
+            if non_compliant_persons >= 6:
+                alert_level = 1  # 最高预警：6人及以上未穿工作服
+            elif 3 <= non_compliant_persons <= 5:
+                alert_level = 2  # 高级预警：3人以上未穿工作服
+            elif 1 < non_compliant_persons <= 2:
                 alert_level = 3
+            else :
+                alert_level = 4  # 极轻预警：1人未穿工作服
 
             level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
             severity = level_names.get(alert_level, "严重")
