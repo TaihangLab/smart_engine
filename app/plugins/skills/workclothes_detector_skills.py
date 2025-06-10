@@ -117,9 +117,18 @@ class WorkDetectorSkill(BaseSkill):
                 return SkillResult.error_result("推理失败")
             # 后处理结果
             results = self.postprocess(outputs, image)
-            # 3. 应用电子围栏过滤（如果提供了围栏配置）
-            if fence_config:
-                results = self.filter_detections_by_fence(results, fence_config)
+            # 3. 应用电子围栏过滤（如果提供了有效的围栏配置）
+            if self.is_fence_config_valid(fence_config):
+                self.log("info", f"应用电子围栏过滤: {fence_config}")
+                filtered_results = []
+                for detection in results:
+                    point = self._get_detection_point(detection)
+                    if point and self.is_point_inside_fence(point, fence_config):
+                        filtered_results.append(detection)
+                results = filtered_results
+                self.log("info", f"围栏过滤后检测结果数量: {len(results)}")
+            elif fence_config:
+                self.log("info", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
             # 4. 构建结果数据
             result_data = {
                 "detections": results,
@@ -211,20 +220,7 @@ class WorkDetectorSkill(BaseSkill):
 
         return results
 
-    def filter_detections_by_fence(self, detections: List[Dict], fence_config: Dict) -> List[Dict]:
-        polygon = fence_config.get("polygon")
-        if not polygon:
-            return detections
 
-        fence = np.array(polygon, dtype=np.int32)
-        filtered = []
-
-        for det in detections:
-            point = self._get_detection_point(det)
-            if point is not None:
-                if cv2.pointPolygonTest(fence, point, False) >= 0:
-                    filtered.append(det)
-        return filtered
 
     def analyze_safety(self, detections):
         """分析安全状况，检查是否有人未穿着工作服

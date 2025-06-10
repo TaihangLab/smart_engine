@@ -142,14 +142,18 @@ class CocoDetectorSkill(BaseSkill):
             if self.config.get("params", {}).get("enable_default_sort_tracking", False):
                 results = self.add_tracking_ids(results)
             
-            # 4. 应用电子围栏过滤（如果提供了围栏配置）
-            if fence_config:
+            # 4. 应用电子围栏过滤（如果提供了有效的围栏配置）
+            if self.is_fence_config_valid(fence_config):
+                self.log("info", f"应用电子围栏过滤: {fence_config}")
                 filtered_results = []
                 for detection in results:
                     point = self._get_detection_point(detection)
                     if point and self.is_point_inside_fence(point, fence_config):
                         filtered_results.append(detection)
                 results = filtered_results
+                self.log("info", f"围栏过滤后检测结果数量: {len(results)}")
+            elif fence_config:
+                self.log("info", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
             
             # 5. 构建结果数据
             result_data = {
