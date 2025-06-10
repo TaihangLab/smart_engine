@@ -220,6 +220,35 @@ class BaseSkill(ABC):
         else:
             return detections
     
+    def is_fence_config_valid(self, fence_config: Dict) -> bool:
+        """
+        检查围栏配置是否有效
+        
+        Args:
+            fence_config: 电子围栏配置
+            
+        Returns:
+            围栏配置是否有效
+        """
+        if not fence_config:
+            return False
+        
+        # 检查是否启用
+        if not fence_config.get("enabled", False):
+            return False
+        
+        # 检查points是否为空
+        polygons = fence_config.get("points", [])
+        if not polygons:
+            return False
+        
+        # 检查是否有有效的多边形（至少3个点）
+        for polygon in polygons:
+            if len(polygon) >= 3:
+                return True
+        
+        return False
+
     def is_point_inside_fence(self, point: Tuple[float, float], fence_config: Dict) -> bool:
         """
         判断点是否在围栏内
@@ -232,14 +261,12 @@ class BaseSkill(ABC):
             是否在围栏内
         """
         try:
-            # 如果未启用电子围栏，返回False
-            if not fence_config or not fence_config.get("enabled", False):
+            # 如果围栏配置无效，返回False
+            if not self.is_fence_config_valid(fence_config):
                 return False
             
             # 现有系统使用points字段，它本身就是多边形数组格式
             polygons = fence_config.get("points", [])
-            if not polygons:
-                return False
             
             # 判断点是否在任一多边形内
             for polygon in polygons:

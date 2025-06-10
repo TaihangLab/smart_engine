@@ -37,7 +37,7 @@ class SkillClassService:
         
         logger.info(f"分页获取技能类，页码={page}，每页数量={limit}，启用状态={status}，技能类名称={query_name}，技能类类型={query_type}")
         skill_classes, total = SkillClassDAO.get_paginated(db, skip=skip, limit=limit, status=status, query_name=query_name, query_type=query_type)
-    
+
         # 构建响应数据
         result = []
         for skill_class in skill_classes:
