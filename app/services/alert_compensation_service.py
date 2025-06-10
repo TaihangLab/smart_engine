@@ -143,19 +143,15 @@ class AlertCompensationService:
                 except:
                     pass
             
-            # 4. 检查死信原因
+            # 4. 检查死信原因 - 统一重试策略，不再基于优先级区分
             if dead_reason in ['rejected', 'expired']:
-                # 被拒绝或过期的消息，根据业务重要性决定
+                # 被拒绝或过期的消息，统一重试处理
                 message_data = dead_info.get('message_data', {})
                 alert_level = message_data.get('alert_level', 1)
                 
-                # 高级别报警继续重试（使用配置参数）
-                if alert_level >= settings.DEAD_LETTER_HIGH_PRIORITY_LEVEL:
-                    logger.info(f"🔥 高级别报警死信消息准备重试: level={alert_level}")
-                    return True
-                else:
-                    logger.debug(f"⚠️ 低级别报警死信消息跳过重试: level={alert_level}")
-                    return False
+                # 移除优先级判断，统一重试策略
+                logger.debug(f"📋 死信消息准备重试: level={alert_level}")
+                return True
             
             # 5. 其他情况默认重试
             logger.debug(f"🔄 死信消息符合重试条件: retry={retry_count}, death={death_count}")
