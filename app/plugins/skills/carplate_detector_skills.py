@@ -18,6 +18,7 @@ class PlateRecognitionSkill(BaseSkill):
         "status": True,
         "required_models": ["ocr_det", "ocr_rec"],
         "params": {
+            "classes":["plate"],
             "conf_thres": 0.2,
             "iou_thres": 0.5,
             "input_size": [640, 640],
@@ -35,7 +36,7 @@ class PlateRecognitionSkill(BaseSkill):
         self.model_det = self.config["required_models"][0]
         self.model_rec = self.config["required_models"][1]
         self.char_dict_path = params.get("char_dict_path")
-
+        self.classes = self.config["params"].get("classes", ["plate"])
         self.char_map = self._load_characters(self.char_dict_path)
 
         self.log("info", f"初始化车牌识别技能：检测模型={self.model_det}，识别模型={self.model_rec}")
@@ -99,29 +100,52 @@ class PlateRecognitionSkill(BaseSkill):
         x_factor = width / self.input_width
         y_factor = height / self.input_height
 
-        boxes, scores = [], []
+        boxes, scores, class_ids = [], [], []
+
         for i in range(output.shape[0]):
             cls_scores = output[i][4:]
             score = np.max(cls_scores)
             if score >= self.conf_thres:
+                class_id = int(np.argmax(cls_scores))
                 x, y, w, h = output[i][:4]
                 left = int((x - w / 2) * x_factor)
                 top = int((y - h / 2) * y_factor)
                 box_w = int(w * x_factor)
                 box_h = int(h * y_factor)
+                left = max(0, left)
+                top = max(0, top)
+                box_w = min(box_w, width - left)
+                box_h = min(box_h, height - top)
+
                 boxes.append([left, top, box_w, box_h])
                 scores.append(score)
+                class_ids.append(class_id)
 
-        indices = cv2.dnn.NMSBoxes(boxes, scores, self.conf_thres, self.iou_thres)
         results = []
-        if indices is not None and len(indices) > 0:
-            indices = np.array(indices).flatten()
-            for i in indices:
-                box = boxes[i]
+        unique_class_ids = set(class_ids)
+
+        for class_id in unique_class_ids:
+            # 当前类别的框索引
+            cls_indices = [i for i, cid in enumerate(class_ids) if cid == class_id]
+            cls_boxes = [boxes[i] for i in cls_indices]
+            cls_scores = [scores[i] for i in cls_indices]
+
+            # 对该类执行 NMS
+            nms_indices = cv2.dnn.NMSBoxes(cls_boxes, cls_scores, self.conf_thres, self.iou_thres)
+            if isinstance(nms_indices, (list, tuple, np.ndarray)):
+                nms_indices = nms_indices.flatten()
+
+            for j in nms_indices:
+                idx = cls_indices[j]
+                box = boxes[idx]
                 results.append({
                     "bbox": [box[0], box[1], box[0] + box[2], box[1] + box[3]],
-                    "confidence": float(scores[i])
+                    "confidence": float(cls_scores[j]),
+                    "class_id": int(class_id),
+                    "class_name": self.classes[class_id] if hasattr(self, 'classes') and class_id < len(
+                        self.classes) else "plate"
                 })
+
         return results
 
     def recognize_text(self, image: np.ndarray) -> Tuple[str, float]:
@@ -200,6 +224,6 @@ if __name__ == "__main__":
     else:
         for idx, det in enumerate(result.data["detections"]):
             print(f"车牌{idx+1}:")
-            print(f"  - 坐标: {det['bbox']}")
+            # print(f"  - 坐标: {det['bbox']}")
             print(f"  - 内容: {det['plate_text']}")
-            print(f"  - 置信度: {det['plate_score']:.2f}")
+            # print(f"  - 置信度: {det['plate_score']:.2f}")
