@@ -15,10 +15,9 @@
 - **技能热加载**：支持动态加载技能插件，无需重启系统
 - **异步预警处理**：预警生成采用异步机制，不阻塞视频处理主流程
 - **MinIO存储**：预警图片自动上传至MinIO，支持按任务和摄像头ID分类存储
-- **RabbitMQ消息队列**：支持预警消息队列处理和恢复机制
+- **RabbitMQ消息队列**：支持预警消息队列处理和补偿机制
 - **SSE实时通信**：支持Server-Sent Events实时推送预警信息
 - **系统监控**：提供健康检查接口，监控系统和依赖服务状态
-- **自动恢复机制**：支持启动时自动恢复未处理的预警消息
 
 ## 技术架构
 
@@ -66,8 +65,7 @@ app/
 │   ├── triton_client.py                # Triton推理客户端
 │   ├── tracker_service.py              # 跟踪服务
 │   ├── wvp_client.py                   # WVP客户端
-│   ├── startup_recovery_service.py     # 启动恢复服务
-│   └── message_recovery_service.py     # 消息恢复服务
+│   └── model_service.py               # 模型管理服务
 ├── skills/                 # 技能系统核心
 │   ├── skill_base.py       # 技能基类
 │   ├── skill_factory.py    # 技能工厂，负责创建技能对象
@@ -133,7 +131,6 @@ app/
 - RabbitMQ消息队列确保预警可靠传递
 - SSE实时推送预警信息到前端
 - 预警补偿机制处理失败的预警消息
-- 启动时自动恢复未处理的预警
 
 ### 电子围栏系统
 

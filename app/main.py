@@ -123,22 +123,8 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ 启动SSE连接管理器失败: {str(e)}")
     
-    # 🔄 启动系统自动恢复程序
-    logger.info("🔄 开始检查启动恢复程序配置...")
-    logger.info(f"STARTUP_RECOVERY_ENABLED = {settings.STARTUP_RECOVERY_ENABLED}")
-    logger.info(f"STARTUP_RECOVERY_DELAY_SECONDS = {settings.STARTUP_RECOVERY_DELAY_SECONDS}")
-    
-    # 检查是否启用启动自动恢复
-    if settings.STARTUP_RECOVERY_ENABLED:
-        logger.info("✅ 启动自动恢复已启用，正在启动系统自动恢复程序...")
-        try:
-            # 在后台异步执行启动恢复，不阻塞应用启动
-            task = asyncio.create_task(run_startup_recovery_task())
-            logger.info(f"✅ 启动恢复任务已创建: {task}")
-        except Exception as startup_error:
-            logger.error(f"❌ 创建启动恢复任务失败: {str(startup_error)}", exc_info=True)
-    else:
-        logger.info("ℹ️ 启动自动恢复已禁用")
+    # 🔄 重启恢复机制已彻底删除
+    logger.info("ℹ️ 系统已移除所有恢复机制，采用简化架构")
     
     logger.info("✅ Smart Engine 应用启动完成")
     
@@ -160,8 +146,8 @@ async def lifespan(app: FastAPI):
         except Exception as e:
             logger.error(f"❌ 关闭SSE连接管理器失败: {str(e)}")
         
-        # 记录关闭时间（可用于下次启动时判断停机时间）
-        logger.info("📝 记录系统关闭时间")
+        # 系统正常关闭
+        logger.info("📝 系统正常关闭")
         
         logger.info("✅ Smart Engine 应用关闭完成")
         
@@ -209,33 +195,7 @@ try:
 except Exception as e:
     logger.warning(f"未能挂载静态文件目录: {str(e)}")
 
-async def run_startup_recovery_task():
-    """在后台运行启动恢复任务"""
-    logger.info("🚀 启动恢复任务开始执行...")
-    logger.info(f"⏱️ 将延迟 {settings.STARTUP_RECOVERY_DELAY_SECONDS} 秒后开始恢复")
-    
-    try:
-        # 使用配置的延迟时间，确保应用完全启动
-        await asyncio.sleep(settings.STARTUP_RECOVERY_DELAY_SECONDS)
-        logger.info("⏰ 延迟时间结束，开始导入启动恢复服务...")
-        
-        from app.services.startup_recovery_service import run_startup_recovery
-        logger.info("✅ 启动恢复服务导入成功，开始执行恢复...")
-        
-        result = await run_startup_recovery()
-        logger.info(f"🔍 启动恢复执行完成，结果: {result}")
-        
-        if result.get("recovery_triggered"):
-            total_recovered = result.get('recovery_stats', {}).get('total_recovered', 0)
-            duration = result.get('total_duration', 0)
-            logger.info(f"🎉 启动恢复完成: 恢复了 {total_recovered} 条消息，耗时 {duration:.2f} 秒")
-        else:
-            logger.info("ℹ️ 启动检查完成，无需恢复")
-            
-    except Exception as e:
-        logger.error(f"❌ 启动恢复任务失败: {str(e)}", exc_info=True)
-        
-    logger.info("🏁 启动恢复任务执行结束")
+# 启动恢复任务函数已彻底删除 - 简化系统架构
 
 def serve():
     """启动REST API服务"""
