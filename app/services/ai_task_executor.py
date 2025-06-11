@@ -646,11 +646,15 @@ class AITaskExecutor:
             
             # 解析电子围栏配置
             electronic_fence = self._parse_fence_config(task)
-            fence_points = electronic_fence.get("points", []) if electronic_fence else []
+
+            # 获取技能信息
+            from app.services.skill_class_service import SkillClassService
+            skill_class = SkillClassService.get_by_id(task.skill_class_id, db, is_detail=False)
+            skill_class_id = skill_class["id"] if skill_class else task.skill_class_id
+            skill_name_zh = skill_class["name_zh"] if skill_class else "未知技能"
             
             # 构建完整的预警信息
             complete_alert = {
-                # 移除alert_id，由alert_service.create_alert生成
                 "alert_time": datetime.now().isoformat(),
                 "alert_level": level,
                 "alert_name": alert_info["name"],
@@ -660,10 +664,12 @@ class AITaskExecutor:
                 "camera_id": task.camera_id,
                 "camera_name": camera_name,
                 "task_id": task.id,
-                "electronic_fence": fence_points,
+                "skill_class_id": skill_class_id,
+                "skill_name_zh": skill_name_zh,
+                "electronic_fence": electronic_fence,
                 "minio_frame_object_name": minio_frame_object_name,  # 传递object_name而不是URL
                 "minio_video_object_name": minio_video_object_name,  # TODO: 实现视频录制和上传 传递object_name而不是URL
-                "result": formatted_results
+                "result": formatted_results,
             }
             
             # 记录预警信息到数据库
