@@ -528,38 +528,20 @@ class AlertService:
         }
 
     async def _direct_broadcast(self, alert_data: Dict[str, Any]) -> None:
-        """直接广播到所有客户端 - 使用连接管理器的优化版本"""
-        if not sse_manager.connected_clients:
-            logger.info("📡 没有已连接的SSE客户端，跳过广播")
-            return
-        
+        """🚀 高性能直接广播到所有客户端"""
         alert_id = alert_data.get('id', 'unknown')
         alert_type = alert_data.get('alert_type', 'unknown')
-        client_count = len(sse_manager.connected_clients)
         
-        logger.info(f"📡 开始直接广播报警 [ID={alert_id}, 类型={alert_type}] 到 {client_count} 个客户端")
+        logger.info(f"📡 开始高性能广播报警 [ID={alert_id}, 类型={alert_type}]")
         
         # 构造SSE格式的消息
         message = json.dumps(alert_data, cls=DateTimeEncoder)
         sse_message = f"data: {message}\n\n"
         
-        # 🚀 使用连接管理器的安全发送方法
-        tasks = []
-        for client_queue in sse_manager.connected_clients.copy():
-            task = asyncio.create_task(sse_manager.send_to_client(client_queue, sse_message))
-            tasks.append(task)
+        # 🚀 使用连接管理器的高性能批量广播
+        success_count = await sse_manager.broadcast_message(sse_message)
         
-        # 等待所有发送任务完成
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        # 统计结果
-        success_count = sum(1 for result in results if result is True)
-        failed_count = len(results) - success_count
-        
-        if failed_count > 0:
-            logger.warning(f"📡 广播报警完成 [ID={alert_id}]: 成功={success_count}, 失败={failed_count}")
-        else:
-            logger.info(f"📡 广播报警完成 [ID={alert_id}]: 成功发送给 {success_count} 个客户端")
+        logger.info(f"📡 高性能广播完成 [ID={alert_id}]: 成功发送给 {success_count} 个客户端")
 
 # 创建全局AlertService实例
 alert_service = AlertService()

@@ -6,7 +6,7 @@ import asyncio
 from datetime import datetime
 from typing import Dict, Any
 
-from app.services.alert_service import connected_clients
+from app.services.sse_connection_manager import sse_manager
 from app.services.rabbitmq_client import rabbitmq_client
 from app.core.config import settings
 
@@ -174,10 +174,7 @@ class AlertCompensationService:
                     "max_retry_hours": self.max_retry_hours,
                     "service_status": "运行中" if self.is_running else "已停止"
                 },
-                "sse_clients": {
-                    "connected_count": len(connected_clients),
-                    "status": "正常" if len(connected_clients) >= 0 else "异常"
-                },
+                "sse_clients": sse_manager.get_basic_stats(),
                 "dead_letter_queue": dead_letter_stats,
                 "system_status": {
                     "overall": "正常" if self.is_running and dead_letter_stats.get('status') == 'available' else "异常",
@@ -192,9 +189,7 @@ class AlertCompensationService:
                     "service_status": "运行中" if self.is_running else "已停止",
                     "error": str(e)
                 },
-                "sse_clients": {
-                    "connected_count": len(connected_clients)
-                },
+                "sse_clients": sse_manager.get_basic_stats(),
                 "dead_letter_queue": {
                     "status": "error",
                     "error": str(e)

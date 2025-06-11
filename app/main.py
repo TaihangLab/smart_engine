@@ -123,8 +123,7 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ 启动SSE连接管理器失败: {str(e)}")
     
-    # 🔄 重启恢复机制已彻底删除
-    logger.info("ℹ️ 系统已移除所有恢复机制，采用简化架构")
+    # ✅ 系统架构已完全简化，无需恢复机制
     
     logger.info("✅ Smart Engine 应用启动完成")
     
@@ -195,7 +194,7 @@ try:
 except Exception as e:
     logger.warning(f"未能挂载静态文件目录: {str(e)}")
 
-# 启动恢复任务函数已彻底删除 - 简化系统架构
+# ✅ 系统采用简化架构，无需重启恢复机制
 
 def serve():
     """启动REST API服务"""
