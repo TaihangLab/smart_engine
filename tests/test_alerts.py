@@ -50,7 +50,9 @@ def mock_alerts():
                 }
             ],
             minio_frame_object_name="alerts/test_alert_1/frame.jpg",
-            minio_video_object_name="test_alert_1_video.mp4"
+            minio_video_object_name="test_alert_1_video.mp4",
+            skill_class_id=1001,
+            skill_name_zh="安全帽检测"
         ),
         Alert(
             id=2,
@@ -77,7 +79,9 @@ def mock_alerts():
                 }
             ],
             minio_frame_object_name="alerts/test_alert_2/frame.jpg",
-            minio_video_object_name="test_alert_2_video.mp4"
+            minio_video_object_name="test_alert_2_video.mp4",
+            skill_class_id=1002,
+            skill_name_zh="区域入侵检测"
         ),
         Alert(
             id=3,
@@ -104,7 +108,9 @@ def mock_alerts():
                 }
             ],
             minio_frame_object_name="alerts/test_alert_3/frame.jpg",
-            minio_video_object_name="test_alert_3_video.mp4"
+            minio_video_object_name="test_alert_3_video.mp4",
+            skill_class_id=1003,
+            skill_name_zh="异常行为检测"
         )
     ]
 

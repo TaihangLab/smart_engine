@@ -12,8 +12,8 @@ class AlertStatus(IntEnum):
     PENDING = 1      # 待处理
     PROCESSING = 2   # 处理中
     RESOLVED = 3     # 已处理
-    IGNORED = 4      # 已忽略
-    EXPIRED = 5      # 已过期
+    ARCHIVED = 4     # 已归档
+    FALSE_ALARM = 5  # 误报
 
     @classmethod
     def get_display_name(cls, value: int) -> str:
@@ -22,8 +22,8 @@ class AlertStatus(IntEnum):
             cls.PENDING: "待处理",
             cls.PROCESSING: "处理中", 
             cls.RESOLVED: "已处理",
-            cls.IGNORED: "已忽略",
-            cls.EXPIRED: "已过期"
+            cls.ARCHIVED: "已归档",
+            cls.FALSE_ALARM: "误报"
         }
         return status_names.get(value, "未知状态")
 
@@ -49,8 +49,12 @@ class Alert(Base):
     minio_frame_object_name = Column(String(255))
     minio_video_object_name = Column(String(255))
     
+    # 🆕 新增技能相关字段
+    skill_class_id = Column(Integer, nullable=True, index=True, comment="技能类别ID")
+    skill_name_zh = Column(String(128), nullable=True, comment="技能中文名称")
+    
     # 状态相关字段 - 使用TINYINT类型（SQLAlchemy用Integer映射，数据库层面指定为TINYINT UNSIGNED）
-    status = Column(Integer, default=AlertStatus.PENDING, index=True, comment="报警状态：1=待处理，2=处理中，3=已处理，4=已忽略，5=已过期")
+    status = Column(Integer, default=AlertStatus.PENDING, index=True, comment="报警状态：1=待处理，2=处理中，3=已处理，4=已归档，5=误报")
     processed_at = Column(DateTime, nullable=True, comment="处理完成时间")
     processed_by = Column(String(100), nullable=True, comment="处理人员")
     processing_notes = Column(String(1000), nullable=True, comment="处理备注")
@@ -69,10 +73,13 @@ class AlertCreate(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[List[List[int]]] = None
+    electronic_fence: Optional[Dict[str, Any]] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_object_name: str
     minio_video_object_name: str
+    # 🆕 新增技能相关字段
+    skill_class_id: Optional[int] = None
+    skill_name_zh: Optional[str] = None
     # 🆕 新增状态字段，创建时默认为待处理 - 使用整数类型
     status: int = AlertStatus.PENDING
     processing_notes: Optional[str] = None
@@ -89,7 +96,24 @@ class AlertCreate(BaseModel):
                 "camera_id": 1,
                 "camera_name": "摄像头01",
                 "task_id": 1,
-                "electronic_fence": [[100,100],[300,100],[300,300],[100,300]],
+                "electronic_fence": {
+                    "enabled": True,
+                    "points": [
+                        [
+                            {"x": 95.78125, "y": 93.08331298828125},
+                            {"x": 103.78125, "y": 214.08331298828125},
+                            {"x": 223.78125, "y": 206.08331298828125},
+                            {"x": 173.78125, "y": 85.08331298828125}
+                        ],
+                        [
+                            {"x": 331.78125, "y": 108.08331298828125},
+                            {"x": 329.78125, "y": 208.08331298828125},
+                            {"x": 447.78125, "y": 206.08331298828125},
+                            {"x": 433.78125, "y": 97.08331298828125}
+                        ]
+                    ],
+                    "trigger_mode": "inside"
+                },
                 "result": [
                     {
                         "score": 0.8241143226623535,
@@ -100,10 +124,32 @@ class AlertCreate(BaseModel):
                             "left": 383,
                             "height": 204
                         }
+                    },
+                    {
+                        "score": 0.8606756329536438,
+                        "name": "家居家纺",
+                        "location": {
+                            "width": 112,
+                            "top": 105,
+                            "left": 139,
+                            "height": 203
+                        }
+                    },
+                    {
+                        "score": 0.6238403916358948,
+                        "name": "食品饮料",
+                        "location": {
+                            "width": 67,
+                            "top": 125,
+                            "left": 491,
+                            "height": 176
+                        }
                     }
                 ],
                 "minio_frame_object_name": "5678/frame.jpg",
                 "minio_video_object_name": "5678/video.mp4",
+                "skill_class_id": 1001,
+                "skill_name_zh": "安全帽检测",
                 "status": 1,
                 "processing_notes": "系统自动检测到的安全隐患"
             }
@@ -129,10 +175,13 @@ class AlertResponse(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[List[List[int]]] = None
+    electronic_fence: Optional[Dict[str, Any]] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_url: str
     minio_video_url: str
+    # 🆕 新增技能相关字段
+    skill_class_id: Optional[int] = None
+    skill_name_zh: Optional[str] = None
     # 🆕 新增状态相关字段 - 使用整数类型，但响应时包含显示名称
     status: int = AlertStatus.PENDING  # 数据库中的整数值
     status_display: str = AlertStatus.get_display_name(AlertStatus.PENDING)  # 中文显示名称

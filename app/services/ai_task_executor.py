@@ -540,7 +540,7 @@ class AITaskExecutor:
         try:
             result = future.result()
             if result:
-                logger.info(f"预警生成成功: alert_id={result.get('alert_id', 'N/A')}")
+                logger.info(f"预警生成成功")
             else:
                 logger.warning("预警生成失败")
         except Exception as e:
@@ -576,9 +576,9 @@ class AITaskExecutor:
             level: 预警等级（技能返回的实际预警等级）
         """
         try:
-            from app.services.alert_service import alert_service
             from app.services.camera_service import CameraService
             from app.services.minio_client import minio_client
+            from app.services.rabbitmq_client import rabbitmq_client
             from datetime import datetime
             import cv2
             
@@ -672,17 +672,22 @@ class AITaskExecutor:
                 "result": formatted_results,
             }
             
-            # 记录预警信息到数据库
-            from app.models.alert import AlertCreate
-            alert_create = AlertCreate(**complete_alert)
-            db_alert = alert_service.create_alert(db, alert_create)
-            complete_alert["alert_id"] = db_alert.id
+            # 🔧 修复架构问题：发送到RabbitMQ而不是直接存数据库
+            # 这样能确保：
+            # 1. 统一的处理流程 - 所有报警都通过RabbitMQ
+            # 2. 自动前端广播 - handle_alert_message()会自动广播给前端
+            # 3. 可靠性保证 - 享受RabbitMQ的重试、死信队列等特性
+            # 4. 架构一致性 - 与测试报警使用相同的路径
+            success = rabbitmq_client.publish_alert(complete_alert)
             
-            logger.info(f"已生成完整预警信息: task_id={task.id}, camera_id={task.camera_id}, level={level}")
-            logger.info(f"预警详情: {alert_info['name']} - {alert_info['description']}")
-            logger.info(f"MinIO截图对象名: {minio_frame_object_name}")
-            
-            return complete_alert
+            if success:
+                logger.info(f"✅ 已发送预警消息到RabbitMQ: task_id={task.id}, camera_id={task.camera_id}, level={level}")
+                logger.info(f"预警详情: {alert_info['name']} - {alert_info['description']}")
+                logger.info(f"MinIO截图对象名: {minio_frame_object_name}")
+                return complete_alert
+            else:
+                logger.error(f"❌ 发送预警消息到RabbitMQ失败: task_id={task.id}")
+                return None
             
         except Exception as e:
             logger.error(f"生成报警时出错: {str(e)}")

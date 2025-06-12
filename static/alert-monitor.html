@@ -362,13 +362,13 @@
             border: 1px solid #b7eb8f;
         }
         
-        .status-ignored {
+        .status-archived {
             background-color: #f5f5f5;
             color: #8c8c8c;
             border: 1px solid #d9d9d9;
         }
         
-        .status-expired {
+        .status-false-alarm {
             background-color: #fff2f0;
             color: #cf1322;
             border: 1px solid #ffccc7;
@@ -400,8 +400,84 @@
             color: white;
         }
         
-        .status-btn-ignore {
+        /* 🆕 检测结果样式 */
+        .detection-results {
+            margin-top: 15px;
+            padding: 12px;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            border-left: 3px solid #1890ff;
+        }
+        
+        .detection-results h4 {
+            margin: 0 0 10px 0;
+            color: #1890ff;
+            font-size: 0.9rem;
+        }
+        
+        .detection-list {
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        
+        .detection-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px;
+            background-color: white;
+            border-radius: 4px;
+            border: 1px solid #e8e8e8;
+            flex-wrap: wrap;
+        }
+        
+        .detection-name {
+            font-weight: bold;
+            color: #262626;
+            min-width: 80px;
+        }
+        
+        .detection-score {
+            background-color: #52c41a;
+            color: white;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 0.8rem;
+            font-weight: bold;
+            min-width: 50px;
+            text-align: center;
+        }
+        
+        .detection-location {
+            color: #666;
+            font-size: 0.85rem;
+            flex: 1;
+            min-width: 200px;
+        }
+        
+        /* 🆕 电子围栏信息样式 */
+        .fence-info {
+            margin-top: 10px;
+            padding: 8px 12px;
+            background-color: #fff7e6;
+            border-radius: 4px;
+            border-left: 3px solid #faad14;
+        }
+        
+        .fence-info p {
+            margin: 0;
+            color: #d46b08;
+            font-size: 0.9rem;
+        }
+        
+        .status-btn-archive {
             background-color: #8c8c8c;
+            color: white;
+        }
+        
+        .status-btn-false-alarm {
+            background-color: #f5222d;
             color: white;
         }
         
@@ -468,8 +544,8 @@
                 <option value="1">待处理</option>
                 <option value="2">处理中</option>
                 <option value="3">已处理</option>
-                <option value="4">已忽略</option>
-                <option value="5">已过期</option>
+                <option value="4">已归档</option>
+                <option value="5">误报</option>
             </select>
             </div>
             
@@ -513,7 +589,7 @@
         
         <div class="actions">
             <div>
-                <button id="send-test-alert" class="test-button">🚀 发送测试报警</button>
+                <button id="send-test-alert" class="test-button">🎯 生成测试报警</button>
                 <span id="status-message" class="status-message"></span>
             </div>
             <div>
@@ -547,8 +623,8 @@
           1: { class: 'status-pending', icon: '⏳', display: '待处理' },
           2: { class: 'status-processing', icon: '🔄', display: '处理中' },
           3: { class: 'status-resolved', icon: '✅', display: '已处理' },
-          4: { class: 'status-ignored', icon: '🚫', display: '已忽略' },
-          5: { class: 'status-expired', icon: '⏰', display: '已过期' }
+          4: { class: 'status-archived', icon: '📂', display: '已归档' },
+          5: { class: 'status-false-alarm', icon: '❌', display: '误报' }
         };
 
         // 获取状态信息的辅助函数
@@ -832,6 +908,14 @@
         function handleAlertMessage(alert) {
           console.log('处理报警消息:', alert);
           
+          // 🆕 调试新字段格式
+          if (alert.electronic_fence) {
+            console.log('🚧 收到电子围栏数据:', alert.electronic_fence);
+          }
+          if (alert.result && Array.isArray(alert.result)) {
+            console.log('🎯 收到检测结果数据:', alert.result.length + '个对象');
+          }
+          
           // 创建报警元素
           const alertElement = createAlertElement(alert);
           
@@ -920,8 +1004,11 @@
                 <button class="status-btn status-btn-resolve" onclick="updateAlertStatus(${alert.id}, 3)">
                   ✅ 标记已处理
                 </button>
-                <button class="status-btn status-btn-ignore" onclick="updateAlertStatus(${alert.id}, 4)">
-                  🚫 忽略
+                <button class="status-btn status-btn-archive" onclick="updateAlertStatus(${alert.id}, 4)">
+                  📂 归档
+                </button>
+                <button class="status-btn status-btn-false-alarm" onclick="updateAlertStatus(${alert.id}, 5)">
+                  ❌ 误报
                 </button>
               </div>
             `;
@@ -931,13 +1018,52 @@
                 <button class="status-btn status-btn-resolve" onclick="updateAlertStatus(${alert.id}, 3)">
                   ✅ 完成处理
                 </button>
-                <button class="status-btn status-btn-ignore" onclick="updateAlertStatus(${alert.id}, 4)">
-                  🚫 忽略
+                <button class="status-btn status-btn-archive" onclick="updateAlertStatus(${alert.id}, 4)">
+                  📂 归档
+                </button>
+                <button class="status-btn status-btn-false-alarm" onclick="updateAlertStatus(${alert.id}, 5)">
+                  ❌ 误报
                 </button>
               </div>
             `;
           }
           
+          // 🆕 处理检测结果数据
+          let detectionsHtml = '';
+          if (alert.result && Array.isArray(alert.result) && alert.result.length > 0) {
+            detectionsHtml = `
+              <div class="detection-results">
+                <h4>🎯 检测结果 (${alert.result.length}个对象)</h4>
+                <div class="detection-list">
+                  ${alert.result.map(detection => `
+                    <div class="detection-item">
+                      <span class="detection-name">${detection.name}</span>
+                      <span class="detection-score">${(detection.score * 100).toFixed(1)}%</span>
+                      <span class="detection-location">位置: (${detection.location?.left || 0}, ${detection.location?.top || 0}) 尺寸: ${detection.location?.width || 0}×${detection.location?.height || 0}</span>
+                    </div>
+                  `).join('')}
+                </div>
+              </div>
+            `;
+          }
+
+          // 🆕 处理电子围栏数据
+          let fenceHtml = '';
+          if (alert.electronic_fence && typeof alert.electronic_fence === 'object') {
+            const fence = alert.electronic_fence;
+            const enabled = fence.enabled ? '启用' : '禁用';
+            const triggerMode = fence.trigger_mode === 'inside' ? '区域内触发' : 
+                               fence.trigger_mode === 'outside' ? '区域外触发' : 
+                               fence.trigger_mode || '未知';
+            const pointsCount = fence.points ? fence.points.length : 0;
+            
+            fenceHtml = `
+              <div class="fence-info">
+                <p><strong>🚧 电子围栏:</strong> ${enabled} | ${triggerMode} | ${pointsCount}个区域</p>
+              </div>
+            `;
+          }
+
           // 构建HTML内容
           alertDiv.innerHTML = `
             <div class="alert-header">
@@ -958,6 +1084,10 @@
                 <p><strong>位置:</strong> ${alert.location || '未知'}</p>
                 <p><strong>报警等级:</strong> ${alert.alert_level || 1}</p>
                 <p><strong>任务ID:</strong> ${alert.task_id || '未知'}</p>
+                <p><strong>技能ID:</strong> ${alert.skill_class_id || '未知'}</p>
+                <p><strong>技能名称:</strong> ${alert.skill_name_zh || '未知'}</p>
+                ${fenceHtml}
+                ${detectionsHtml}
                 ${processedTimeHtml}
                 ${processedByHtml}
                 ${processingNotesHtml}
@@ -1103,7 +1233,7 @@
           }
         }
 
-        // 发送测试报警
+        // 生成测试报警（使用AI任务执行器）
         async function sendTestAlert() {
           const button = document.getElementById('send-test-alert');
           const originalText = button.innerHTML;
@@ -1111,10 +1241,10 @@
           try {
             // 禁用按钮并显示加载状态
             button.disabled = true;
-            button.innerHTML = '<span class="loading"></span>发送中...';
+            button.innerHTML = '<span class="loading"></span>生成中...';
             
-            showStatusMessage('正在发送测试报警...', 'info');
-            console.log('发送测试报警请求, 连接ID:', connectionId);
+            showStatusMessage('正在使用AI任务执行器生成测试报警...', 'info');
+            console.log('生成测试报警请求, 连接ID:', connectionId);
             
             const response = await fetch('/api/v1/alerts/test', {
               method: 'POST',
@@ -1128,13 +1258,28 @@
             }
             
             const result = await response.json();
-            console.log('测试报警发送成功:', result);
+            console.log('测试报警生成成功:', result);
             
-            showStatusMessage('✅ 测试报警发送成功！', 'success');
+            // 根据新接口的响应格式提供更详细的反馈
+            const alertId = result.alert_id || 'unknown';
+            const method = result.method || 'unknown';
+            const isAIExecutor = method.includes('ai_task_executor');
+            
+            if (isAIExecutor) {
+              showStatusMessage(`✅ 测试报警生成成功！使用AI任务执行器 (ID: ${alertId})`, 'success');
+              console.log(`🎯 调用方法: ${method}`);
+            } else {
+              showStatusMessage(`✅ 测试报警发送成功！(ID: ${alertId})`, 'success');
+            }
+            
+            // 如果响应包含方法信息，记录到控制台
+            if (result.method) {
+              console.log(`📋 执行方法: ${result.method}`);
+            }
             
           } catch (error) {
-            console.error('发送测试报警失败:', error);
-            showStatusMessage('❌ 发送失败: ' + error.message, 'error');
+            console.error('生成测试报警失败:', error);
+            showStatusMessage('❌ 生成失败: ' + error.message, 'error');
           } finally {
             // 恢复按钮状态
             button.disabled = false;

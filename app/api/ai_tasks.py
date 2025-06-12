@@ -24,7 +24,7 @@ class TaskBase(BaseModel):
     alert_level: Optional[int] = Field(None, description="报警级别", example=1)
     frame_rate: Optional[float] = Field(None, description="帧率", example=10.0)
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行周期", example={"enabled": True, "periods": [{"start": "08:00", "end": "18:00"}]})
-    electronic_fence: Optional[Dict[str, Any]] = Field(None, description="电子围栏配置", example={"enabled": True, "points": [[100, 100], [300, 100], [300, 300], [100, 300]], "trigger_mode": "inside"})
+    electronic_fence: Optional[Dict[str, Any]] = Field(None, description="电子围栏配置", example={"enabled": True, "points": [[{"x": 100, "y": 100}, {"x": 300, "y": 100}, {"x": 300, "y": 300}, {"x": 100, "y": 300}]], "trigger_mode": "inside"})
     
 
 class TaskCreate(TaskBase):
@@ -48,7 +48,7 @@ class TaskUpdate(BaseModel):
     alert_level: Optional[int] = Field(None, description="报警级别", example=2)
     frame_rate: Optional[float] = Field(None, description="帧率", example=15.0)
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行周期", example={"enabled": True, "periods": [{"start": "07:00", "end": "23:00"}]})
-    electronic_fence: Optional[Dict[str, Any]] = Field(None, description="电子围栏配置", example={"enabled": True, "points": [[150, 150], [350, 150], [350, 350], [150, 350]]})
+    electronic_fence: Optional[Dict[str, Any]] = Field(None, description="电子围栏配置", example={"enabled": True, "points": [[{"x": 150, "y": 150}, {"x": 350, "y": 150}, {"x": 350, "y": 350}, {"x": 150, "y": 350}]], "trigger_mode": "inside"})
     status: Optional[bool] = Field(None, description="任务状态", example=False)
     skill_config: Optional[Dict[str, Any]] = Field(None, description="自定义技能配置", example={
         "params": {

@@ -200,6 +200,9 @@ class AlertService:
                 result=alert.result,
                 minio_frame_object_name=alert.minio_frame_object_name,
                 minio_video_object_name=alert.minio_video_object_name,
+                # 🆕 新增技能相关字段
+                skill_class_id=alert.skill_class_id,
+                skill_name_zh=alert.skill_name_zh,
                 # 🆕 新增状态相关字段 - 确保始终有值
                 status=status_value,
                 processing_notes=alert.processing_notes
@@ -233,8 +236,8 @@ class AlertService:
         alert.processing_notes = status_update.processing_notes
         alert.updated_at = datetime.utcnow()
         
-        # 如果状态为已处理或已忽略，设置处理时间
-        if alert.status in [AlertStatus.RESOLVED, AlertStatus.IGNORED]:
+        # 如果状态为已处理、已归档或误报，设置处理时间
+        if alert.status in [AlertStatus.RESOLVED, AlertStatus.ARCHIVED, AlertStatus.FALSE_ALARM]:
             alert.processed_at = datetime.utcnow()
         
         db.commit()
@@ -574,6 +577,8 @@ def publish_test_alert() -> bool:
         "camera_id": 123,
         "camera_name": "测试摄像头",
         "task_id": 1,
+        "skill_class_id": 9999,
+        "skill_name_zh": "测试技能",
         "electronic_fence": [[50,50], [250,50], [250,250], [50,250]],
         "result": [
             {
