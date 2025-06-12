@@ -71,7 +71,7 @@ class AlertService:
             logger.info(f"将报警数据保存到数据库")
             with next(get_db()) as db:
                 created_alert = self.create_alert(db, AlertCreate(**alert_data))
-                logger.info(f"✅ 报警数据已保存到数据库: ID={created_alert.id}, 状态={created_alert.status}")
+                logger.info(f"✅ 报警数据已保存到数据库: ID={created_alert.alert_id}, 状态={created_alert.status}")
             
             # 🔥 修复：使用线程安全的方式调度异步广播
             alert_dict = AlertResponse.from_orm(created_alert).dict()
@@ -215,7 +215,7 @@ class AlertService:
             logger.debug(f"数据库事务已提交")
             
             db.refresh(db_alert)
-            logger.info(f"已创建报警记录: ID={db_alert.id}, 时间={alert.alert_time}, 名称={alert.alert_name}, 状态={db_alert.status}")
+            logger.info(f"已创建报警记录: ID={db_alert.alert_id}, 时间={alert.alert_time}, 名称={alert.alert_name}, 状态={db_alert.status}")
             
             return db_alert
             
@@ -226,7 +226,7 @@ class AlertService:
     
     def update_alert_status(self, db: Session, alert_id: int, status_update: AlertUpdate) -> Optional[Alert]:
         """更新报警状态"""
-        alert = db.query(Alert).filter(Alert.id == alert_id).first()
+        alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
         if not alert:
             return None
         
@@ -249,7 +249,7 @@ class AlertService:
         try:
             # 支持字符串和整数类型的ID
             alert_id_int = int(alert_id)
-            return db.query(Alert).filter(Alert.id == alert_id_int).first()
+            return db.query(Alert).filter(Alert.alert_id == alert_id_int).first()
         except (ValueError, TypeError):
             logger.warning(f"无效的报警ID格式: {alert_id}")
             return None
@@ -262,7 +262,7 @@ class AlertService:
                 db.query(Alert)
                 .filter(and_(
                     Alert.camera_id == alert.camera_id,
-                    Alert.id != alert.id,
+                    Alert.alert_id != alert.alert_id,
                     Alert.alert_time < alert.alert_time
                 ))
                 .order_by(Alert.alert_time.desc())
@@ -273,7 +273,7 @@ class AlertService:
             previous_alert_list = []
             for prev_alert in previous_alerts:
                 previous_alert_list.append({
-                    "alert_id": str(prev_alert.id),
+                    "alert_id": str(prev_alert.alert_id),
                     "alert_type": prev_alert.alert_type,
                     "alert_time": prev_alert.alert_time.isoformat(),
                     "alert_description": prev_alert.alert_description

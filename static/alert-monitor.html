@@ -952,7 +952,7 @@
         function createAlertElement(alert) {
           const alertDiv = document.createElement('div');
           alertDiv.className = 'alert-item';
-          alertDiv.dataset.alertId = alert.id;
+          alertDiv.dataset.alertId = alert.alert_id;
           alertDiv.dataset.cameraId = alert.camera_id;
           alertDiv.dataset.alertType = alert.alert_type;
           alertDiv.dataset.alertStatus = alert.status || '待处理';
@@ -998,30 +998,30 @@
           if (statusValue === 1) {
             statusActionsHtml = `
               <div class="status-actions">
-                <button class="status-btn status-btn-process" onclick="updateAlertStatus(${alert.id}, 2)">
+                <button class="status-btn status-btn-process" onclick="updateAlertStatus(${alert.alert_id}, 2)">
                   🔄 开始处理
                 </button>
-                <button class="status-btn status-btn-resolve" onclick="updateAlertStatus(${alert.id}, 3)">
-                  ✅ 标记已处理
-                </button>
-                <button class="status-btn status-btn-archive" onclick="updateAlertStatus(${alert.id}, 4)">
-                  📂 归档
-                </button>
-                <button class="status-btn status-btn-false-alarm" onclick="updateAlertStatus(${alert.id}, 5)">
-                  ❌ 误报
-                </button>
+                                  <button class="status-btn status-btn-resolve" onclick="updateAlertStatus(${alert.alert_id}, 3)">
+                    ✅ 标记已处理
+                  </button>
+                  <button class="status-btn status-btn-archive" onclick="updateAlertStatus(${alert.alert_id}, 4)">
+                    📂 归档
+                  </button>
+                  <button class="status-btn status-btn-false-alarm" onclick="updateAlertStatus(${alert.alert_id}, 5)">
+                    ❌ 误报
+                  </button>
               </div>
             `;
           } else if (statusValue === 2) {
             statusActionsHtml = `
               <div class="status-actions">
-                <button class="status-btn status-btn-resolve" onclick="updateAlertStatus(${alert.id}, 3)">
+                <button class="status-btn status-btn-resolve" onclick="updateAlertStatus(${alert.alert_id}, 3)">
                   ✅ 完成处理
                 </button>
-                <button class="status-btn status-btn-archive" onclick="updateAlertStatus(${alert.id}, 4)">
+                <button class="status-btn status-btn-archive" onclick="updateAlertStatus(${alert.alert_id}, 4)">
                   📂 归档
                 </button>
-                <button class="status-btn status-btn-false-alarm" onclick="updateAlertStatus(${alert.id}, 5)">
+                <button class="status-btn status-btn-false-alarm" onclick="updateAlertStatus(${alert.alert_id}, 5)">
                   ❌ 误报
                 </button>
               </div>
@@ -1077,7 +1077,7 @@
             </div>
             <div class="alert-body">
               <div class="alert-info">
-                <p><strong>ID:</strong> ${alert.id || '未知'}</p>
+                <p><strong>ID:</strong> ${alert.alert_id || '未知'}</p>
                 <p><strong>报警名称:</strong> ${alert.alert_name || '未知'}</p>
                 <p><strong>报警描述:</strong> ${alert.alert_description || '无描述'}</p>
                 <p><strong>摄像头:</strong> ${alert.camera_name || alert.camera_id}</p>

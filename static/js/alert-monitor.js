@@ -195,7 +195,7 @@ function handleAlertMessage(alert) {
 function createAlertElement(alert) {
   const alertDiv = document.createElement('div');
   alertDiv.className = 'alert-item';
-  alertDiv.dataset.alertId = alert.id;
+  alertDiv.dataset.alertId = alert.alert_id;
   alertDiv.dataset.cameraId = alert.camera_id;
   alertDiv.dataset.alertType = alert.alert_type;
   
@@ -253,7 +253,7 @@ function createAlertElement(alert) {
     </div>
     <div class="alert-body">
       <div class="alert-info">
-        <p><strong>ID:</strong> ${alert.id}</p>
+        <p><strong>ID:</strong> ${alert.alert_id}</p>
         <p><strong>报警名称:</strong> ${alert.alert_name || '未知'}</p>
         <p><strong>报警描述:</strong> ${alert.alert_description || '无描述'}</p>
         <p><strong>摄像头:</strong> ${alert.camera_name || alert.camera_id}</p>

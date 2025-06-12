@@ -34,7 +34,7 @@ class Alert(Base):
     """报警数据模型"""
     __tablename__ = "alerts"
 
-    id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
+    alert_id = Column(BigInteger, primary_key=True, index=True, autoincrement=True)
     alert_time = Column(DateTime, index=True)
     alert_type = Column(String(50), index=True)
     alert_level = Column(Integer, default=1)
@@ -165,7 +165,7 @@ class AlertUpdate(BaseModel):
 
 class AlertResponse(BaseModel):
     """报警响应模型"""
-    id: int
+    alert_id: int
     alert_time: datetime
     alert_type: str
     alert_level: int
