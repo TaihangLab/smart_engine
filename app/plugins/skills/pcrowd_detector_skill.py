@@ -385,16 +385,10 @@ class CrowdDetectorSkill(BaseSkill):
         if len(bbox) >= 4:
             # bbox格式: [x1, y1, x2, y2]
             center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
 
-            # 根据类别确定关键点
-            if class_name == "head":
-                # 头部类别：使用中心点
-                key_y = (bbox[1] + bbox[3]) / 2
-            else:
-                # 人员类别：使用底部中心点（人员脚部位置）
-                key_y = bbox[3]  # 使用底边作为关键点
-
-            return (center_x, key_y)
+            # 头部和人员类别都使用中心点
+            return (center_x, center_y)
         return None
 
 
@@ -406,7 +400,7 @@ if __name__ == "__main__":
     # 测试图像检测
     # test_image = np.zeros((640, 640, 3), dtype=np.uint8)
     # cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
-    image_path = "D:/1.jpg"
+    image_path = "D:/2.jpg"
     image = cv2.imread(image_path)
     
     # 执行检测
