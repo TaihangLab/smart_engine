@@ -28,6 +28,18 @@ class AlertStatus(IntEnum):
         return status_names.get(value, "未知状态")
 
 
+class ProcessStep(BaseModel):
+    """处理流程步骤模型"""
+    step: str          # 步骤名称：预警产生、待处理、处理中、已处理、归档
+    time: datetime     # 步骤时间
+    desc: str          # 描述
+    operator: str      # 操作人员
+
+
+class ProcessInfo(BaseModel):
+    """处理流程信息模型"""
+    remark: str = ""                # 备注，预留字段
+    steps: List[ProcessStep] = []   # 处理步骤列表
 
 
 class Alert(Base):
@@ -60,6 +72,77 @@ class Alert(Base):
     processing_notes = Column(String(1000), nullable=True, comment="处理备注")
     created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
+    
+    # 🆕 新增处理流程字段
+    process = Column(JSON, nullable=True, comment="处理流程信息，JSON格式存储")
+
+    def _build_default_process(self, alert_description: str = None) -> Dict[str, Any]:
+        """构建默认的处理流程"""
+        current_time = datetime.now()
+        desc = alert_description or self.alert_description or "系统检测到异常情况"
+        
+        return {
+            "remark": "",
+            "steps": [
+                {
+                    "step": "预警产生",
+                    "time": current_time.isoformat(),
+                    "desc": desc,
+                    "operator": "系统自动"
+                }
+            ]
+        }
+    
+    def add_process_step(self, step: str, desc: str, operator: str = "系统自动"):
+        """添加处理流程步骤"""
+        if not self.process:
+            self.process = self._build_default_process()
+        
+        current_time = datetime.now()
+        new_step = {
+            "step": step,
+            "time": current_time.isoformat(),
+            "desc": desc,
+            "operator": operator
+        }
+        
+        if "steps" not in self.process:
+            self.process["steps"] = []
+            
+        self.process["steps"].append(new_step)
+    
+    def update_status_with_process(self, new_status: int, desc: str, operator: str = "系统自动"):
+        """更新状态并自动添加对应的处理流程步骤"""
+        self.status = new_status
+        
+        # 根据状态映射对应的步骤名称
+        status_step_map = {
+            AlertStatus.PENDING: "待处理",
+            AlertStatus.PROCESSING: "处理中", 
+            AlertStatus.RESOLVED: "已处理",
+            AlertStatus.ARCHIVED: "归档",
+            AlertStatus.FALSE_ALARM: "误报"
+        }
+        
+        step_name = status_step_map.get(new_status, f"状态更新为{new_status}")
+        self.add_process_step(step_name, desc, operator)
+        
+        # 更新相关时间字段
+        if new_status in [AlertStatus.RESOLVED, AlertStatus.ARCHIVED, AlertStatus.FALSE_ALARM]:
+            self.processed_at = datetime.now()
+            
+    def get_process_summary(self) -> Dict[str, Any]:
+        """获取处理流程摘要信息"""
+        if not self.process or "steps" not in self.process:
+            return {"total_steps": 0, "latest_step": None, "latest_time": None}
+            
+        steps = self.process["steps"]
+        return {
+            "total_steps": len(steps),
+            "latest_step": steps[-1]["step"] if steps else None,
+            "latest_time": steps[-1]["time"] if steps else None,
+            "latest_operator": steps[-1]["operator"] if steps else None
+        }
 
 
 class AlertCreate(BaseModel):
@@ -83,6 +166,8 @@ class AlertCreate(BaseModel):
     # 🆕 新增状态字段，创建时默认为待处理 - 使用整数类型
     status: int = AlertStatus.PENDING
     processing_notes: Optional[str] = None
+    # 🆕 新增处理流程字段 - 创建时会自动生成初始流程
+    process: Optional[Dict[str, Any]] = None
 
     class Config:
         json_schema_extra = {
@@ -190,6 +275,8 @@ class AlertResponse(BaseModel):
     processing_notes: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
+    # 🆕 新增处理流程字段
+    process: Optional[Dict[str, Any]] = None
     
     @classmethod
     def from_orm(cls, obj):

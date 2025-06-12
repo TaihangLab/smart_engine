@@ -270,7 +270,7 @@ def get_alert(
     db: Session = Depends(get_db)
 ):
     """
-    根据ID获取单个报警记录详情
+    根据ID获取单个报警记录详情，包含完整的处理流程信息
     """
     logger.info(f"收到获取报警详情请求: ID={alert_id}")
     
@@ -279,8 +279,63 @@ def get_alert(
         logger.warning(f"报警记录不存在: ID={alert_id}")
         raise HTTPException(status_code=404, detail="报警记录不存在")
     
-    logger.info(f"获取报警详情成功: ID={alert_id}")
-    return alert
+    # 🆕 使用AlertResponse.from_orm转换，确保包含所有字段和URL
+    alert_response = AlertResponse.from_orm(alert)
+    
+    logger.info(f"获取报警详情成功: ID={alert_id}, 处理步骤数: {len(alert_response.process.get('steps', [])) if alert_response.process else 0}")
+    return alert_response
+
+@router.put("/{alert_id}/status", response_model=AlertResponse)
+def update_alert_status(
+    alert_id: int,
+    status_update: AlertUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    更新报警状态，自动记录处理流程
+    """
+    logger.info(f"收到更新报警状态请求: ID={alert_id}, 新状态={status_update.status}")
+    
+    updated_alert = alert_service.update_alert_status(db, alert_id, status_update)
+    if updated_alert is None:
+        logger.warning(f"报警记录不存在: ID={alert_id}")
+        raise HTTPException(status_code=404, detail="报警记录不存在")
+    
+    # 转换为响应模型
+    alert_response = AlertResponse.from_orm(updated_alert)
+    
+    logger.info(f"报警状态更新成功: ID={alert_id}, 新状态={updated_alert.status}, 处理步骤数: {len(alert_response.process.get('steps', [])) if alert_response.process else 0}")
+    return alert_response
+
+@router.get("/{alert_id}/process", response_model=Dict[str, Any])
+def get_alert_process(
+    alert_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    获取报警的处理流程详情
+    """
+    logger.info(f"收到获取报警处理流程请求: ID={alert_id}")
+    
+    alert = alert_service.get_alert_by_id(db, str(alert_id))
+    if alert is None:
+        logger.warning(f"报警记录不存在: ID={alert_id}")
+        raise HTTPException(status_code=404, detail="报警记录不存在")
+    
+    # 获取处理流程信息
+    process_info = alert.process or {"remark": "", "steps": []}
+    process_summary = alert.get_process_summary()
+    
+    response = {
+        "alert_id": alert.alert_id,
+        "current_status": alert.status,
+        "current_status_display": AlertStatus.get_display_name(alert.status),
+        "process": process_info,
+        "summary": process_summary
+    }
+    
+    logger.info(f"获取报警处理流程成功: ID={alert_id}, 步骤数: {process_summary['total_steps']}")
+    return response
 
 @router.post("/test", description="发送测试报警（仅供测试使用）")
 def send_test_alert(

@@ -208,6 +208,12 @@ class AlertService:
                 processing_notes=alert.processing_notes
             )
             
+            # 🆕 如果没有提供process数据，自动生成初始处理流程
+            if not alert.process:
+                db_alert.process = db_alert._build_default_process(alert.alert_description)
+            else:
+                db_alert.process = alert.process
+            
             db.add(db_alert)
             logger.debug(f"报警记录已添加到数据库会话")
             
@@ -230,15 +236,21 @@ class AlertService:
         if not alert:
             return None
         
-        # 使用整数值更新状态
-        alert.status = int(status_update.status)
+        # 构建状态更新描述
+        status_desc = status_update.processing_notes or f"状态更新为{AlertStatus.get_display_name(int(status_update.status))}"
+        operator = status_update.processed_by or "系统自动"
+        
+        # 🆕 使用新的状态更新方法，自动记录处理流程
+        alert.update_status_with_process(
+            new_status=int(status_update.status),
+            desc=status_desc,
+            operator=operator
+        )
+        
+        # 更新处理相关字段
         alert.processed_by = status_update.processed_by
         alert.processing_notes = status_update.processing_notes
         alert.updated_at = datetime.utcnow()
-        
-        # 如果状态为已处理、已归档或误报，设置处理时间
-        if alert.status in [AlertStatus.RESOLVED, AlertStatus.ARCHIVED, AlertStatus.FALSE_ALARM]:
-            alert.processed_at = datetime.utcnow()
         
         db.commit()
         db.refresh(alert)
