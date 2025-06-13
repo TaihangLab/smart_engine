@@ -434,6 +434,60 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
             detail=f"删除AI任务失败: {str(e)}"
         )
 
+class CleanupResponse(BaseModel):
+    """清理结果响应模型"""
+    success: bool = Field(..., description="是否成功", example=True)
+    checked_count: int = Field(..., description="检查的任务数量", example=50)
+    deleted_count: int = Field(..., description="删除的任务数量", example=3)
+    remaining_count: int = Field(..., description="剩余的任务数量", example=47)
+    message: str = Field(..., description="结果消息", example="清理完成：检查了 50 个任务，删除了 3 个无效任务，剩余 47 个任务")
+    error: Optional[str] = Field(None, description="错误信息")
+
+@router.post("/cleanup", response_model=CleanupResponse)
+def cleanup_invalid_tasks(db: Session = Depends(get_db)):
+    """
+    手动清理所有关联无效摄像头的AI任务
+    
+    该接口会检查所有AI任务（包括禁用的任务）关联的摄像头是否存在，
+    如果摄像头不存在，将自动删除该任务。
+    
+    适用场景:
+    - 摄像头被删除后，相关任务需要清理
+    - 定期维护，清理无效任务
+    - 系统迁移后的数据清理
+    
+    Args:
+        db: 数据库会话
+        
+    Returns:
+        CleanupResponse: 清理结果
+    """
+    try:
+        logger.info("收到手动清理无效任务的请求")
+        result = AITaskService.cleanup_invalid_tasks(db)
+        
+        # 构建响应
+        response = CleanupResponse(**result)
+        
+        if result.get("success", False):
+            logger.info(f"手动清理任务完成: {result.get('message', '')}")
+        else:
+            logger.error(f"手动清理任务失败: {result.get('error', '')}")
+        
+        return response
+        
+    except Exception as e:
+        error_msg = f"手动清理无效任务失败: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return CleanupResponse(
+            success=False,
+            checked_count=0,
+            deleted_count=0,
+            remaining_count=0,
+            message="清理失败，请查看日志了解详情",
+            error=error_msg
+        )
+
 @router.get("/camera/id/{camera_id}", response_model=TaskListResponse)
 def get_tasks_by_camera_id(
     camera_id: int = Path(..., description="摄像头ID"), 

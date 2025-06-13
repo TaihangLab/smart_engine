@@ -59,6 +59,9 @@ class AITaskExecutor:
         logger.info("开始为所有AI任务创建调度计划")
         db = next(get_db())
         try:
+            # 首先执行一次完整的任务清理检查（包括禁用的任务）
+            self._cleanup_invalid_tasks(db)
+            
             # 获取所有激活状态的任务
             all_tasks = AITaskService.get_all_tasks(db)
             active_tasks = [task for task in all_tasks.get("tasks", []) if task.get("status")]
@@ -66,6 +69,9 @@ class AITaskExecutor:
             
             for task in active_tasks:
                 self.schedule_task(task["id"], db)
+            
+            # 添加定期清理任务调度（每天凌晨2点执行）
+            self._schedule_periodic_cleanup()
                 
         except Exception as e:
             logger.error(f"创建任务调度计划时出错: {str(e)}")
@@ -803,6 +809,93 @@ class AITaskExecutor:
         except Exception as e:
             logger.error(f"格式化检测结果失败: {str(e)}")
             return []
+    
+    def _schedule_periodic_cleanup(self):
+        """调度定期清理任务"""
+        try:
+            # 移除已存在的清理作业
+            try:
+                self.scheduler.remove_job("periodic_cleanup")
+            except:
+                pass
+            
+            # 添加每天凌晨2点的定期清理作业
+            self.scheduler.add_job(
+                self._periodic_cleanup_task,
+                CronTrigger(hour=2, minute=0),  # 每天凌晨2点执行
+                id="periodic_cleanup",
+                replace_existing=True
+            )
+            logger.info("已添加定期任务清理调度（每天凌晨2点）")
+        except Exception as e:
+            logger.error(f"添加定期清理调度失败: {str(e)}")
+    
+    def _periodic_cleanup_task(self):
+        """定期清理任务的执行函数"""
+        logger.info("开始执行定期任务清理")
+        db = next(get_db())
+        try:
+            self._cleanup_invalid_tasks(db)
+        finally:
+            db.close()
+    
+    def _cleanup_invalid_tasks(self, db: Session):
+        """清理所有关联无效摄像头的任务（包括禁用的任务）"""
+        try:
+            logger.info("开始检查所有任务关联的摄像头有效性")
+            
+            # 获取所有任务（包括禁用的）
+            all_tasks = AITaskService.get_all_tasks(db)
+            all_task_list = all_tasks.get("tasks", [])
+            
+            deleted_count = 0
+            checked_count = 0
+            
+            for task_dict in all_task_list:
+                checked_count += 1
+                task_id = task_dict["id"]
+                camera_id = task_dict["camera_id"]
+                task_name = task_dict.get("name", f"任务{task_id}")
+                task_status = task_dict.get("status", 0)
+                
+                try:
+                    # 检查摄像头是否存在
+                    _, should_delete = self._get_stream_url(camera_id)
+                    
+                    if should_delete:
+                        logger.warning(f"检测到任务 {task_id}({task_name}, status={task_status}) 关联的摄像头 {camera_id} 不存在，将删除任务")
+                        
+                        # 删除任务
+                        try:
+                            AITaskService.delete_task(task_id, db)
+                            deleted_count += 1
+                            logger.info(f"已删除无效任务: {task_id}({task_name}) - 关联摄像头 {camera_id} 不存在")
+                            
+                            # 如果任务当前有调度，清理调度作业
+                            if task_id in self.task_jobs:
+                                self._clear_task_jobs(task_id)
+                                logger.info(f"已清理任务 {task_id} 的调度作业")
+                            
+                            # 如果任务当前正在运行，停止任务
+                            if task_id in self.running_tasks:
+                                self._stop_task_thread(task_id)
+                                logger.info(f"已停止任务 {task_id} 的执行线程")
+                                
+                        except Exception as e:
+                            logger.error(f"删除无效任务 {task_id} 时出错: {str(e)}")
+                    else:
+                        logger.debug(f"任务 {task_id}({task_name}) 关联的摄像头 {camera_id} 有效")
+                        
+                except Exception as e:
+                    logger.error(f"检查任务 {task_id} 摄像头有效性时出错: {str(e)}")
+            
+            if deleted_count > 0:
+                logger.info(f"任务清理完成: 检查了 {checked_count} 个任务，删除了 {deleted_count} 个无效任务")
+            else:
+                logger.info(f"任务清理完成: 检查了 {checked_count} 个任务，未发现无效任务")
+                
+        except Exception as e:
+            logger.error(f"执行任务清理时出错: {str(e)}")
 
 # 创建全局任务执行器实例
 task_executor = AITaskExecutor() 
