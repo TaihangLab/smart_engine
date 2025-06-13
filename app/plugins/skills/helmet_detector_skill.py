@@ -4,11 +4,21 @@
 import cv2
 import numpy as np
 from typing import Dict, List, Any, Tuple, Union, Optional
+from enum import IntEnum
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
-
 logger = logging.getLogger(__name__)
+
+ #  Enum - 基础枚举（可以是任何类型的值）
+ #  IntEnum - 整数枚举
+
+class AlertThreshold(IntEnum): 
+    """预警阈值枚举"""
+    LEVEL_1 = 3  # 一级预警：3名及以上
+    LEVEL_2 = 2  # 二级预警：2名
+    LEVEL_3 = 1  # 三级预警：1名
+    LEVEL_4 = 0  # 四级预警：预留
 
 class HelmetDetectorSkill(BaseSkill):
     """安全帽检测技能
@@ -16,7 +26,9 @@ class HelmetDetectorSkill(BaseSkill):
     使用YOLO模型检测工人头部和安全帽使用情况，基于triton_client全局单例
     """
 
-    # 默认配置
+
+
+    # 在类定义后设置DEFAULT_CONFIG
     DEFAULT_CONFIG = {
         "type": "detection",  # 技能类型：检测类
         "name": "helmet_detector",  # 技能唯一标识符
@@ -33,26 +45,26 @@ class HelmetDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": 3,  # 一级预警：3名及以上
-            "LEVEL_2_THRESHOLD": 2,  # 二级预警：2名
-            "LEVEL_3_THRESHOLD": 1,  # 三级预警：1名
-            "LEVEL_4_THRESHOLD": 0   # 四级预警：
+            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
+            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
+            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
+            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
         },
         "alert_definitions": [
             {
                 "level": 1,
                 "name": "一级-严重未戴安全帽",
-                "description": "当检测到{LEVEL_1_THRESHOLD}名及以上工人未佩戴安全帽时触发。"
+                "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上工人未佩戴安全帽时触发。"
             },
             {
                 "level": 2,
                 "name": "二级-中等未戴安全帽",
-                "description": "当检测到{LEVEL_2_THRESHOLD}名工人未佩戴安全帽时触发。"
+                "description": f"当检测到{AlertThreshold.LEVEL_2}名工人未佩戴安全帽时触发。"
             },
             {
                 "level": 3,
                 "name": "三级-轻微未戴安全帽",
-                "description": "当检测到{LEVEL_3_THRESHOLD}名工人未佩戴安全帽时触发。"
+                "description": f"当检测到{AlertThreshold.LEVEL_3}名工人未佩戴安全帽时触发。"
             },
             {
                 "level": 4,
