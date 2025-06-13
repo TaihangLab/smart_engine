@@ -5,11 +5,19 @@
 import cv2
 import numpy as np
 from typing import Dict, List, Any, Tuple, Union, Optional
+from enum import IntEnum
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
 
 logger = logging.getLogger(__name__)
+
+class AlertThreshold(IntEnum):
+    """预警阈值枚举"""
+    LEVEL_1 = 7  # 一级预警：7名及以上
+    LEVEL_2 = 4  # 二级预警：4-6名
+    LEVEL_3 = 2  # 三级预警：2-3名
+    LEVEL_4 = 0  # 四级预警：1名
 
 class WorkDetectorSkill(BaseSkill):
     DEFAULT_CONFIG = {
@@ -25,8 +33,32 @@ class WorkDetectorSkill(BaseSkill):
             "conf_thres": 0.5,
             "iou_thres": 0.45,
             "max_det": 300,
-            "input_size": [640, 640]
-        }
+            "input_size": [640, 640],
+            "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员安全带佩戴分析
+            # 预警人数阈值配置
+            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
+            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
+            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
+            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+        },
+        "alert_definitions": [
+            {
+                "level": 1,
+                "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上工人未规范穿着或未穿着工作服时触发。"
+            },
+            {
+                "level": 2,
+                "description": f"当检测到{AlertThreshold.LEVEL_2}名工人未规范穿着或未穿着工作服时触发。"
+            },
+            {
+                "level": 3,
+                "description": f"当检测到{AlertThreshold.LEVEL_3}名工人未规范穿着或未穿着工作服时触发。"
+            },
+            {
+                "level": 4,
+                "description": "当检测到潜在安全隐患时触发。"
+            }
+        ]
     }
 
     def _initialize(self) -> None:
@@ -49,6 +81,11 @@ class WorkDetectorSkill(BaseSkill):
         self.model_name = self.required_models[0]
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
+        # 预警阈值配置
+        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
+        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
+        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
+        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
         self.log("info", f"初始化工作服检测器: model={self.model_name}")
 
     def get_required_models(self) -> List[str]:
@@ -117,6 +154,10 @@ class WorkDetectorSkill(BaseSkill):
                 return SkillResult.error_result("推理失败")
             # 后处理结果
             results = self.postprocess(outputs, image)
+            # 可选的跟踪功能（根据配置决定）
+            # 工作服穿着检测通常需要跟踪来避免重复计数
+            if self.config.get("params", {}).get("enable_default_sort_tracking", True):
+                results = self.add_tracking_ids(results)
             # 3. 应用电子围栏过滤（如果提供了有效的围栏配置）
             if self.is_fence_config_valid(fence_config):
                 self.log("info", f"应用电子围栏过滤: {fence_config}")
@@ -264,11 +305,11 @@ class WorkDetectorSkill(BaseSkill):
         alert_description = ""
 
         if alert_triggered:
-            if non_compliant_persons >= 6:
+            if non_compliant_persons >= self.level_1_threshold:
                 alert_level = 1  # 最高预警：6人及以上未穿工作服
-            elif 3 <= non_compliant_persons <= 5:
+            elif self.level_2_threshold <= non_compliant_persons < self.level_1_threshold:
                 alert_level = 2  # 高级预警：3人以上未穿工作服
-            elif 1 < non_compliant_persons <= 2:
+            elif self.level_3_threshold <= non_compliant_persons < self.level_2_threshold:
                 alert_level = 3
             else :
                 alert_level = 4  # 极轻预警：1人未穿工作服

@@ -15,10 +15,10 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold(IntEnum): 
     """预警阈值枚举"""
-    LEVEL_1 = 3  # 一级预警：3名及以上
-    LEVEL_2 = 2  # 二级预警：2名
-    LEVEL_3 = 1  # 三级预警：1名
-    LEVEL_4 = 0  # 四级预警：预留
+    LEVEL_1 = 7  # 一级预警：7名及以上
+    LEVEL_2 = 4  # 二级预警：4-6名
+    LEVEL_3 = 2  # 三级预警：2-3名
+    LEVEL_4 = 0  # 四级预警：1名
 
 class HelmetDetectorSkill(BaseSkill):
     """安全帽检测技能
@@ -53,22 +53,18 @@ class HelmetDetectorSkill(BaseSkill):
         "alert_definitions": [
             {
                 "level": 1,
-                "name": "一级-严重未戴安全帽",
                 "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上工人未佩戴安全帽时触发。"
             },
             {
                 "level": 2,
-                "name": "二级-中等未戴安全帽",
                 "description": f"当检测到{AlertThreshold.LEVEL_2}名工人未佩戴安全帽时触发。"
             },
             {
                 "level": 3,
-                "name": "三级-轻微未戴安全帽",
                 "description": f"当检测到{AlertThreshold.LEVEL_3}名工人未佩戴安全帽时触发。"
             },
             {
                 "level": 4,
-                "name": "四级-极轻微未戴安全帽",
                 "description": "当检测到潜在安全隐患时触发。"
             }
         ]
@@ -327,9 +323,9 @@ class HelmetDetectorSkill(BaseSkill):
             alert_triggered = True
             if head_count >= self.level_1_threshold:
                 alert_level = 1
-            elif head_count >= self.level_2_threshold:
+            elif self.level_2_threshold <= head_count < self.level_1_threshold:
                 alert_level = 2
-            elif head_count >= self.level_3_threshold:
+            elif self.level_3_threshold <= head_count < self.level_2_threshold:
                 alert_level = 3
             else:
                 alert_level = 4

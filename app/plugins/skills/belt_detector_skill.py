@@ -5,11 +5,20 @@ import cv2
 import numpy as np
 from typing import Dict, List, Any, Tuple, Union, Optional
 import os
+from enum import IntEnum
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
 
 logger = logging.getLogger(__name__)
+
+
+class AlertThreshold(IntEnum):
+    """预警阈值枚举"""
+    LEVEL_1 = 7  # 一级预警：7名及以上
+    LEVEL_2 = 4  # 二级预警：4-6名
+    LEVEL_3 = 2  # 三级预警：2-3名
+    LEVEL_4 = 0  # 四级预警：1名
 
 class BeltDetectorSkill(BaseSkill):
     """安全带检测技能
@@ -32,8 +41,31 @@ class BeltDetectorSkill(BaseSkill):
             "iou_thres": 0.45,
             "max_det": 300,
             "input_size": [640, 640],
-            "enable_default_sort_tracking": True  # 默认启用SORT跟踪，用于人员安全带佩戴分析
-        }
+            "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员安全带佩戴分析
+            # 预警人数阈值配置
+            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
+            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
+            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
+            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+        },
+        "alert_definitions": [
+            {
+                "level": 1,
+                "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上高空作业工人未佩戴安全带时触发。"
+            },
+            {
+                "level": 2,
+                "description": f"当检测到{AlertThreshold.LEVEL_2}名高空作业工人未佩戴安全带时触发。"
+            },
+            {
+                "level": 3,
+                "description": f"当检测到{AlertThreshold.LEVEL_3}名高空作业工人未佩戴安全带时触发。"
+            },
+            {
+                "level": 4,
+                "description": "当检测到潜在安全隐患时触发。"
+            }
+        ]
     }
     
     def _initialize(self) -> None:
@@ -61,6 +93,11 @@ class BeltDetectorSkill(BaseSkill):
         self.model_name = self.required_models[0] 
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
+        # 预警阈值配置
+        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
+        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
+        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
+        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
         
         self.log("info", f"初始化安全带检测器: model={self.model_name}")
     
@@ -311,12 +348,12 @@ class BeltDetectorSkill(BaseSkill):
         if unsafe_count > 0:
             alert_triggered = True
             # 根据未佩戴安全带的高空作业人员数量确定预警等级（1级最高，4级最低）
-            if unsafe_count >= 6:
-                alert_level = 1  # 最高预警：5人及以上未佩戴安全带
-            elif 3 <= unsafe_count <= 5:
-                alert_level = 2  # 高级预警：2人未佩戴安全带
-            elif 1 < unsafe_count <= 2:
-                alert_level = 3
+            if unsafe_count >= self.level_1_threshold:
+                alert_level = 1  # 最高预警：7人及以上未佩戴安全带
+            elif self.level_2_threshold <= unsafe_count < self.level_1_threshold:
+                alert_level = 2  # 高级预警：4-6人未佩戴安全带
+            elif self.level_3_threshold <= unsafe_count < self.level_2_threshold:
+                alert_level = 3  # 轻微预警：2-3人未佩戴安全带
             else :
                 alert_level = 4  # 极轻预警：1人未佩戴安全带
             
@@ -390,7 +427,7 @@ if __name__ == "__main__":
     # test_image = np.zeros((640, 640, 3), dtype=np.uint8)
     # cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
     # 读取本地图片
-    image_path = "F:/belt.jpg"  # <-- 替换为你的图片路径
+    image_path = "F:/belts.JPG"  # <-- 替换为你的图片路径
     test_image = cv2.imread(image_path)
     
     # 执行检测
