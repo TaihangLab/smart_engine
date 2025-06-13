@@ -270,7 +270,7 @@ def get_alert(
     db: Session = Depends(get_db)
 ):
     """
-    根据ID获取单个报警记录详情
+    根据ID获取单个报警记录详情，包含完整的处理流程信息
     """
     logger.info(f"收到获取报警详情请求: ID={alert_id}")
     
@@ -279,187 +279,171 @@ def get_alert(
         logger.warning(f"报警记录不存在: ID={alert_id}")
         raise HTTPException(status_code=404, detail="报警记录不存在")
     
-    logger.info(f"获取报警详情成功: ID={alert_id}")
-    return alert
-
-@router.post("/test", description="发送测试报警（仅供测试使用）")
-def send_test_alert():
-    """
-    发送测试报警消息到RabbitMQ（仅用于测试）
-    """
-    logger.info("收到发送测试报警请求")
+    # 🆕 使用AlertResponse.from_orm转换，确保包含所有字段和URL
+    alert_response = AlertResponse.from_orm(alert)
     
-    success = publish_test_alert()
-    if success:
-        logger.info("测试报警发送成功")
-        return {"message": "测试报警已发送"}
-    else:
-        logger.error("测试报警发送失败")
-        raise HTTPException(status_code=500, detail="发送测试报警失败")
+    logger.info(f"获取报警详情成功: ID={alert_id}, 处理步骤数: {len(alert_response.process.get('steps', [])) if alert_response.process else 0}")
+    return alert_response
 
 @router.put("/{alert_id}/status", response_model=AlertResponse)
 def update_alert_status(
     alert_id: int,
-    alert_update: AlertUpdate,
+    status_update: AlertUpdate,
     db: Session = Depends(get_db)
 ):
     """
-    更新报警状态
-    
-    🎯 企业级状态管理：
-    - 支持状态流转：待处理 -> 处理中 -> 已处理/已忽略
-    - 记录处理人员和处理时间
-    - 支持处理备注
+    更新报警状态，自动记录处理流程
     """
-    logger.info(f"收到更新报警状态请求: ID={alert_id}, 新状态={alert_update.status.value}")
+    logger.info(f"收到更新报警状态请求: ID={alert_id}, 新状态={status_update.status}")
     
-    # 更新报警状态
-    updated_alert = alert_service.update_alert_status(db, alert_id, alert_update)
+    updated_alert = alert_service.update_alert_status(db, alert_id, status_update)
     if updated_alert is None:
         logger.warning(f"报警记录不存在: ID={alert_id}")
         raise HTTPException(status_code=404, detail="报警记录不存在")
     
-    logger.info(f"报警状态更新成功: ID={alert_id}, 状态={updated_alert.status}")
-    return AlertResponse.from_orm(updated_alert)
+    # 转换为响应模型
+    alert_response = AlertResponse.from_orm(updated_alert)
+    
+    logger.info(f"报警状态更新成功: ID={alert_id}, 新状态={updated_alert.status}, 处理步骤数: {len(alert_response.process.get('steps', [])) if alert_response.process else 0}")
+    return alert_response
 
-@router.get("/statistics", response_model=Dict[str, Any])
-def get_alerts_statistics(
-    start_date: Optional[str] = Query(None, description="开始日期（YYYY-MM-DD格式）"),
-    end_date: Optional[str] = Query(None, description="结束日期（YYYY-MM-DD格式）"), 
+@router.get("/{alert_id}/process", response_model=Dict[str, Any])
+def get_alert_process(
+    alert_id: int,
     db: Session = Depends(get_db)
 ):
     """
-    获取报警统计信息
-    
-    🎯 企业级数据分析：
-    - 状态分布统计
-    - 类型分布统计
-    - 等级分布统计
-    - 时间范围分析
+    获取报警的处理流程详情
     """
-    logger.info(f"收到获取报警统计请求: start_date={start_date}, end_date={end_date}")
+    logger.info(f"收到获取报警处理流程请求: ID={alert_id}")
     
-    try:
-        # 解析日期参数
-        parsed_start_date = None
-        parsed_end_date = None
-        
-        if start_date:
-            try:
-                parsed_start_date = datetime.strptime(start_date, "%Y-%m-%d")
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"开始日期格式错误，应为YYYY-MM-DD格式: {start_date}")
-        
-        if end_date:
-            try:
-                parsed_end_date = datetime.strptime(end_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-            except ValueError:
-                raise HTTPException(status_code=400, detail=f"结束日期格式错误，应为YYYY-MM-DD格式: {end_date}")
-        
-        # 验证日期范围
-        if parsed_start_date and parsed_end_date and parsed_start_date > parsed_end_date:
-            raise HTTPException(status_code=400, detail="开始日期不能晚于结束日期")
-        
-        # 获取统计信息
-        statistics = alert_service.get_alerts_statistics(db)
-        
-        logger.info(f"获取报警统计成功: 总计 {statistics['total_alerts']} 条报警")
-        return statistics
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取报警统计失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取统计信息失败: {str(e)}")
+    alert = alert_service.get_alert_by_id(db, str(alert_id))
+    if alert is None:
+        logger.warning(f"报警记录不存在: ID={alert_id}")
+        raise HTTPException(status_code=404, detail="报警记录不存在")
+    
+    # 获取处理流程信息
+    process_info = alert.process or {"remark": "", "steps": []}
+    process_summary = alert.get_process_summary()
+    
+    response = {
+        "alert_id": alert.alert_id,
+        "current_status": alert.status,
+        "current_status_display": AlertStatus.get_display_name(alert.status),
+        "process": process_info,
+        "summary": process_summary
+    }
+    
+    logger.info(f"获取报警处理流程成功: ID={alert_id}, 步骤数: {process_summary['total_steps']}")
+    return response
 
-@router.get("/by-status/{status}", response_model=List[AlertResponse])
-def get_alerts_by_status(
-    status: AlertStatus,
-    limit: int = Query(100, description="返回记录数限制"),
+@router.post("/test", description="发送测试报警（仅供测试使用）")
+def send_test_alert(
     db: Session = Depends(get_db)
 ):
     """
-    根据状态获取报警列表
-    
-    🎯 快速状态查询：
-    - 支持按状态快速筛选
-    - 适用于工作台场景
-    - 高性能查询优化
+    使用AI任务执行器生成测试报警（仅用于测试）
     """
-    logger.info(f"收到按状态查询报警请求: status={status.value}, limit={limit}")
+    logger.info("收到发送测试报警请求")
     
     try:
-        # 获取指定状态的报警
-        alerts = alert_service.get_alerts_by_status(db, status, limit)
+        # 导入必要的模块
+        from app.services.ai_task_executor import task_executor
+        from app.models.ai_task import AITask
+        import numpy as np
+        import cv2
+        import json
+        from datetime import datetime
         
-        # 转换为响应模型
-        alert_responses = [AlertResponse.from_orm(alert) for alert in alerts]
-        
-        logger.info(f"按状态查询成功: 返回 {len(alert_responses)} 条 {status.value} 状态的报警")
-        return alert_responses
-        
-    except Exception as e:
-        logger.error(f"按状态查询报警失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"查询失败: {str(e)}")
-
-@router.post("/batch-update-status")
-def batch_update_alert_status(
-    alert_ids: List[int],
-    status: AlertStatus,
-    processed_by: Optional[str] = None,
-    processing_notes: Optional[str] = None,
-    db: Session = Depends(get_db)
-):
-    """
-    批量更新报警状态
-    
-    🎯 企业级批量操作：
-    - 支持批量状态更新
-    - 提高运维效率
-    - 事务安全保证
-    """
-    logger.info(f"收到批量更新报警状态请求: IDs={alert_ids}, 状态={status.value}, 处理人={processed_by}")
-    
-    if not alert_ids:
-        raise HTTPException(status_code=400, detail="请提供要更新的报警ID列表")
-    
-    if len(alert_ids) > 100:
-        raise HTTPException(status_code=400, detail="单次批量操作不能超过100条记录")
-    
-    try:
-        updated_alerts = []
-        failed_ids = []
-        
-        # 创建更新对象
-        alert_update = AlertUpdate(
-            status=status,
-            processed_by=processed_by,
-            processing_notes=processing_notes
+        # 创建模拟的AITask对象
+        mock_task = AITask(
+            id=9999,  # 测试任务ID
+            name="测试报警任务",
+            description="用于测试报警功能的模拟任务",
+            status=True,
+            alert_level=1,
+            frame_rate=1.0,
+            running_period='{"enabled": true, "periods": [{"start": "00:00", "end": "23:59"}]}',
+            electronic_fence='{"enabled": true, "points": [[{"x": 100, "y": 80}, {"x": 500, "y": 80}, {"x": 500, "y": 350}, {"x": 100, "y": 350}]], "trigger_mode": "inside"}',
+            task_type="detection",
+            config='{}',
+            camera_id=123,
+            skill_class_id=9999,
+            skill_config='{}'
         )
         
-        # 批量更新
-        for alert_id in alert_ids:
-            try:
-                updated_alert = alert_service.update_alert_status(db, alert_id, alert_update)
-                if updated_alert:
-                    updated_alerts.append(updated_alert.id)
-                else:
-                    failed_ids.append(alert_id)
-            except Exception as e:
-                logger.error(f"更新报警 {alert_id} 状态失败: {str(e)}")
-                failed_ids.append(alert_id)
-        
-        result = {
-            "success_count": len(updated_alerts),
-            "failed_count": len(failed_ids),
-            "updated_alert_ids": updated_alerts,
-            "failed_alert_ids": failed_ids,
-            "message": f"批量更新完成: 成功 {len(updated_alerts)} 条，失败 {len(failed_ids)} 条"
+        # 创建模拟的报警数据（使用与示例一致的检测结果格式）
+        mock_alert_data = {
+            "detections": [
+                {
+                    "bbox": [383, 113, 472, 317],  # [x1, y1, x2, y2] - 果蔬生鲜区域
+                    "confidence": 0.8241143226623535,
+                    "class_name": "果蔬生鲜"
+                },
+                {
+                    "bbox": [139, 105, 251, 308],  # [x1, y1, x2, y2] - 家居家纺区域
+                    "confidence": 0.8606756329536438,
+                    "class_name": "家居家纺"
+                },
+                {
+                    "bbox": [491, 125, 558, 301],  # [x1, y1, x2, y2] - 食品饮料区域
+                    "confidence": 0.6238403916358948,
+                    "class_name": "食品饮料"
+                }
+            ],
+            "alert_info": {
+                "alert_triggered": True,
+                "alert_level": 1,
+                "alert_name": "商品区域检测报警",
+                "alert_type": "product_area_detection",
+                "alert_description": "检测到多个商品区域有异常活动，请及时查看"
+            }
         }
         
-        logger.info(f"批量更新报警状态完成: {result['message']}")
-        return result
+        # 创建模拟的图像帧（640x480的蓝色图像，标准监控摄像头分辨率）
+        mock_frame = np.full((480, 640, 3), (255, 128, 0), dtype=np.uint8)  # 橙蓝色背景
         
+        # 绘制多个检测框和标签
+        # 1. 果蔬生鲜区域（绿色框）
+        cv2.rectangle(mock_frame, (383, 113), (472, 317), (0, 255, 0), 2)
+        cv2.putText(mock_frame, "果蔬生鲜 0.82", (385, 110), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+        
+        # 2. 家居家纺区域（蓝色框）
+        cv2.rectangle(mock_frame, (139, 105), (251, 308), (255, 0, 0), 2)
+        cv2.putText(mock_frame, "家居家纺 0.86", (141, 102), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 0, 0), 2)
+        
+        # 3. 食品饮料区域（红色框）
+        cv2.rectangle(mock_frame, (491, 125), (558, 301), (0, 0, 255), 2)
+        cv2.putText(mock_frame, "食品饮料 0.62", (493, 122), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 0, 255), 2)
+        
+        # 在左上角添加时间戳和摄像头信息
+        timestamp_text = f"测试时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        cv2.putText(mock_frame, timestamp_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        cv2.putText(mock_frame, "摄像头ID: 123", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
+        
+        logger.info("正在调用AI任务执行器生成测试报警...")
+        
+        # 调用AI任务执行器的_generate_alert方法
+        result = task_executor._generate_alert(
+            task=mock_task,
+            alert_data=mock_alert_data,
+            frame=mock_frame,
+            db=db,
+            level=1
+        )
+        
+        if result:
+            logger.info("测试报警生成成功")
+            return {
+                "message": "测试报警已生成并发送",
+                "alert_id": result.get("task_id", "unknown"),
+                "method": "ai_task_executor._generate_alert"
+            }
+        else:
+            logger.error("测试报警生成失败")
+            raise HTTPException(status_code=500, detail="生成测试报警失败")
+            
     except Exception as e:
-        logger.error(f"批量更新报警状态失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"批量更新失败: {str(e)}")
+        logger.error(f"发送测试报警失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"发送测试报警失败: {str(e)}")
+

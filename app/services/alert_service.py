@@ -71,7 +71,7 @@ class AlertService:
             logger.info(f"将报警数据保存到数据库")
             with next(get_db()) as db:
                 created_alert = self.create_alert(db, AlertCreate(**alert_data))
-                logger.info(f"✅ 报警数据已保存到数据库: ID={created_alert.id}, 状态={created_alert.status}")
+                logger.info(f"✅ 报警数据已保存到数据库: ID={created_alert.alert_id}, 状态={created_alert.status}")
             
             # 🔥 修复：使用线程安全的方式调度异步广播
             alert_dict = AlertResponse.from_orm(created_alert).dict()
@@ -200,10 +200,19 @@ class AlertService:
                 result=alert.result,
                 minio_frame_object_name=alert.minio_frame_object_name,
                 minio_video_object_name=alert.minio_video_object_name,
+                # 🆕 新增技能相关字段
+                skill_class_id=alert.skill_class_id,
+                skill_name_zh=alert.skill_name_zh,
                 # 🆕 新增状态相关字段 - 确保始终有值
                 status=status_value,
                 processing_notes=alert.processing_notes
             )
+            
+            # 🆕 如果没有提供process数据，自动生成初始处理流程
+            if not alert.process:
+                db_alert.process = db_alert._build_default_process(alert.alert_description)
+            else:
+                db_alert.process = alert.process
             
             db.add(db_alert)
             logger.debug(f"报警记录已添加到数据库会话")
@@ -212,7 +221,7 @@ class AlertService:
             logger.debug(f"数据库事务已提交")
             
             db.refresh(db_alert)
-            logger.info(f"已创建报警记录: ID={db_alert.id}, 时间={alert.alert_time}, 名称={alert.alert_name}, 状态={db_alert.status}")
+            logger.info(f"已创建报警记录: ID={db_alert.alert_id}, 时间={alert.alert_time}, 名称={alert.alert_name}, 状态={db_alert.status}")
             
             return db_alert
             
@@ -223,19 +232,25 @@ class AlertService:
     
     def update_alert_status(self, db: Session, alert_id: int, status_update: AlertUpdate) -> Optional[Alert]:
         """更新报警状态"""
-        alert = db.query(Alert).filter(Alert.id == alert_id).first()
+        alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
         if not alert:
             return None
         
-        # 使用整数值更新状态
-        alert.status = int(status_update.status)
+        # 构建状态更新描述
+        status_desc = status_update.processing_notes or f"状态更新为{AlertStatus.get_display_name(int(status_update.status))}"
+        operator = status_update.processed_by or "系统自动"
+        
+        # 🆕 使用新的状态更新方法，自动记录处理流程
+        alert.update_status_with_process(
+            new_status=int(status_update.status),
+            desc=status_desc,
+            operator=operator
+        )
+        
+        # 更新处理相关字段
         alert.processed_by = status_update.processed_by
         alert.processing_notes = status_update.processing_notes
         alert.updated_at = datetime.utcnow()
-        
-        # 如果状态为已处理或已忽略，设置处理时间
-        if alert.status in [AlertStatus.RESOLVED, AlertStatus.IGNORED]:
-            alert.processed_at = datetime.utcnow()
         
         db.commit()
         db.refresh(alert)
@@ -246,7 +261,7 @@ class AlertService:
         try:
             # 支持字符串和整数类型的ID
             alert_id_int = int(alert_id)
-            return db.query(Alert).filter(Alert.id == alert_id_int).first()
+            return db.query(Alert).filter(Alert.alert_id == alert_id_int).first()
         except (ValueError, TypeError):
             logger.warning(f"无效的报警ID格式: {alert_id}")
             return None
@@ -259,7 +274,7 @@ class AlertService:
                 db.query(Alert)
                 .filter(and_(
                     Alert.camera_id == alert.camera_id,
-                    Alert.id != alert.id,
+                    Alert.alert_id != alert.alert_id,
                     Alert.alert_time < alert.alert_time
                 ))
                 .order_by(Alert.alert_time.desc())
@@ -270,7 +285,7 @@ class AlertService:
             previous_alert_list = []
             for prev_alert in previous_alerts:
                 previous_alert_list.append({
-                    "alert_id": str(prev_alert.id),
+                    "alert_id": str(prev_alert.alert_id),
                     "alert_type": prev_alert.alert_type,
                     "alert_time": prev_alert.alert_time.isoformat(),
                     "alert_description": prev_alert.alert_description
@@ -574,6 +589,8 @@ def publish_test_alert() -> bool:
         "camera_id": 123,
         "camera_name": "测试摄像头",
         "task_id": 1,
+        "skill_class_id": 9999,
+        "skill_name_zh": "测试技能",
         "electronic_fence": [[50,50], [250,50], [250,250], [50,250]],
         "result": [
             {

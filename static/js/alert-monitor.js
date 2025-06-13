@@ -160,6 +160,14 @@ function updateConnectionStatus(status) {
 
 // 处理报警消息
 function handleAlertMessage(alert) {
+  // 🆕 调试新字段格式
+  if (alert.electronic_fence) {
+    console.log('🚧 收到电子围栏数据:', alert.electronic_fence);
+  }
+  if (alert.result && Array.isArray(alert.result)) {
+    console.log('🎯 收到检测结果数据:', alert.result.length + '个对象');
+  }
+
   // 增加报警计数
   alertCount++;
   if (alertCountElement) {
@@ -187,7 +195,7 @@ function handleAlertMessage(alert) {
 function createAlertElement(alert) {
   const alertDiv = document.createElement('div');
   alertDiv.className = 'alert-item';
-  alertDiv.dataset.alertId = alert.id;
+  alertDiv.dataset.alertId = alert.alert_id;
   alertDiv.dataset.cameraId = alert.camera_id;
   alertDiv.dataset.alertType = alert.alert_type;
   
@@ -201,6 +209,42 @@ function createAlertElement(alert) {
   // 获取报警类型显示文本
   const alertTypeText = ALERT_TYPES[alert.alert_type] || alert.alert_type;
   
+  // 🆕 处理检测结果数据
+  let detectionsHtml = '';
+  if (alert.result && Array.isArray(alert.result) && alert.result.length > 0) {
+    detectionsHtml = `
+      <div class="detection-results">
+        <h4>🎯 检测结果 (${alert.result.length}个对象)</h4>
+        <div class="detection-list">
+          ${alert.result.map(detection => `
+            <div class="detection-item">
+              <span class="detection-name">${detection.name}</span>
+              <span class="detection-score">${(detection.score * 100).toFixed(1)}%</span>
+              <span class="detection-location">位置: (${detection.location?.left || 0}, ${detection.location?.top || 0}) 尺寸: ${detection.location?.width || 0}×${detection.location?.height || 0}</span>
+            </div>
+          `).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  // 🆕 处理电子围栏数据
+  let fenceHtml = '';
+  if (alert.electronic_fence && typeof alert.electronic_fence === 'object') {
+    const fence = alert.electronic_fence;
+    const enabled = fence.enabled ? '启用' : '禁用';
+    const triggerMode = fence.trigger_mode === 'inside' ? '区域内触发' : 
+                       fence.trigger_mode === 'outside' ? '区域外触发' : 
+                       fence.trigger_mode || '未知';
+    const pointsCount = fence.points ? fence.points.length : 0;
+    
+    fenceHtml = `
+      <div class="fence-info">
+        <p><strong>🚧 电子围栏:</strong> ${enabled} | ${triggerMode} | ${pointsCount}个区域</p>
+      </div>
+    `;
+  }
+
   // 构建HTML内容
   alertDiv.innerHTML = `
     <div class="alert-header">
@@ -209,13 +253,17 @@ function createAlertElement(alert) {
     </div>
     <div class="alert-body">
       <div class="alert-info">
-        <p><strong>ID:</strong> ${alert.id}</p>
+        <p><strong>ID:</strong> ${alert.alert_id}</p>
         <p><strong>报警名称:</strong> ${alert.alert_name || '未知'}</p>
         <p><strong>报警描述:</strong> ${alert.alert_description || '无描述'}</p>
         <p><strong>摄像头:</strong> ${alert.camera_name || alert.camera_id}</p>
         <p><strong>位置:</strong> ${alert.location || '未知'}</p>
         <p><strong>报警等级:</strong> ${alert.alert_level || 1}</p>
         <p><strong>任务ID:</strong> ${alert.task_id || '未知'}</p>
+        <p><strong>技能ID:</strong> ${alert.skill_class_id || '未知'}</p>
+        <p><strong>技能名称:</strong> ${alert.skill_name_zh || '未知'}</p>
+        ${fenceHtml}
+        ${detectionsHtml}
       </div>
       <div class="alert-image">
         <img src="${alert.minio_frame_url || '/static/img/no-image.png'}" alt="报警截图" onerror="this.src='/static/img/no-image.png'">
@@ -307,21 +355,43 @@ async function loadHistoricalAlerts() {
   }
 }
 
-// 发送测试报警
+// 生成测试报警（使用AI任务执行器）
 async function sendTestAlert() {
   try {
+    console.log('🧪 开始生成测试报警...');
+    
     const response = await fetch('/api/v1/alerts/test', {
-      method: 'POST'
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      }
     });
     
     if (!response.ok) {
-      throw new Error('发送测试报警失败');
+      throw new Error(`生成测试报警失败: HTTP ${response.status}`);
     }
     
-    console.log('已发送测试报警');
+    const result = await response.json();
+    console.log('✅ 测试报警生成成功:', result);
+    
+    // 根据新接口的响应格式提供详细日志
+    const alertId = result.alert_id || 'unknown';
+    const method = result.method || 'unknown';
+    
+    if (method.includes('ai_task_executor')) {
+      console.log(`🎯 使用AI任务执行器生成报警 (ID: ${alertId})`);
+      console.log(`📋 执行方法: ${method}`);
+    } else {
+      console.log(`📤 报警已发送 (ID: ${alertId})`);
+    }
+    
+    // 记录完整响应信息
+    if (result.message) {
+      console.log(`💬 服务器响应: ${result.message}`);
+    }
     
   } catch (error) {
-    console.error('发送测试报警失败:', error);
+    console.error('❌ 生成测试报警失败:', error);
   }
 }
 
