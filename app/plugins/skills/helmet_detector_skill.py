@@ -31,23 +31,28 @@ class HelmetDetectorSkill(BaseSkill):
             "iou_thres": 0.45,
             "max_det": 300,
             "input_size": [640, 640],
-            "enable_default_sort_tracking": True  # 默认启用SORT跟踪，用于人员行为分析
+            "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
+            # 预警人数阈值配置
+            "LEVEL_1_THRESHOLD": 3,  # 一级预警：3名及以上
+            "LEVEL_2_THRESHOLD": 2,  # 二级预警：2名
+            "LEVEL_3_THRESHOLD": 1,  # 三级预警：1名
+            "LEVEL_4_THRESHOLD": 0   # 四级预警：
         },
         "alert_definitions": [
             {
                 "level": 1,
                 "name": "一级-严重未戴安全帽",
-                "description": "当检测到3名及以上工人未佩戴安全帽时触发。"
+                "description": "当检测到{LEVEL_1_THRESHOLD}名及以上工人未佩戴安全帽时触发。"
             },
             {
                 "level": 2,
                 "name": "二级-中等未戴安全帽",
-                "description": "当检测到2名工人未佩戴安全帽时触发。"
+                "description": "当检测到{LEVEL_2_THRESHOLD}名工人未佩戴安全帽时触发。"
             },
             {
                 "level": 3,
                 "name": "三级-轻微未戴安全帽",
-                "description": "当检测到1名工人未佩戴安全帽时触发。"
+                "description": "当检测到{LEVEL_3_THRESHOLD}名工人未佩戴安全帽时触发。"
             },
             {
                 "level": 4,
@@ -77,6 +82,12 @@ class HelmetDetectorSkill(BaseSkill):
         self.model_name = self.required_models[0]
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
+        
+        # 预警阈值配置
+        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
+        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
+        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
+        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
         
         self.log("info", f"初始化安全帽检测器: model={self.model_name}")
 
@@ -302,12 +313,14 @@ class HelmetDetectorSkill(BaseSkill):
 
         if head_count > 0:
             alert_triggered = True
-            if head_count >= 3:
+            if head_count >= self.level_1_threshold:
                 alert_level = 1
-            elif head_count >= 2:
+            elif head_count >= self.level_2_threshold:
                 alert_level = 2
-            else:
+            elif head_count >= self.level_3_threshold:
                 alert_level = 3
+            else:
+                alert_level = 4
 
             level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
             severity = level_names.get(alert_level, "严重")
