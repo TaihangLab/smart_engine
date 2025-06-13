@@ -32,7 +32,29 @@ class HelmetDetectorSkill(BaseSkill):
             "max_det": 300,
             "input_size": [640, 640],
             "enable_default_sort_tracking": True  # 默认启用SORT跟踪，用于人员行为分析
-        }
+        },
+        "alert_definitions": [
+            {
+                "level": 1,
+                "name": "一级-严重未戴安全帽",
+                "description": "当检测到3名及以上工人未佩戴安全帽时触发。"
+            },
+            {
+                "level": 2,
+                "name": "二级-中等未戴安全帽",
+                "description": "当检测到2名工人未佩戴安全帽时触发。"
+            },
+            {
+                "level": 3,
+                "name": "三级-轻微未戴安全帽",
+                "description": "当检测到1名工人未佩戴安全帽时触发。"
+            },
+            {
+                "level": 4,
+                "name": "四级-极轻微未戴安全帽",
+                "description": "当检测到潜在安全隐患时触发。"
+            }
+        ]
     }
 
     def _initialize(self) -> None:
