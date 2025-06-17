@@ -1,9 +1,11 @@
 import cv2
 import numpy as np
+import os
 from typing import List, Dict, Any, Tuple, Union, Optional
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
+from PIL import Image, ImageDraw, ImageFont
 
 logger = logging.getLogger(__name__)
 
@@ -22,7 +24,7 @@ class PlateRecognitionSkill(BaseSkill):
             "conf_thres": 0.2,
             "iou_thres": 0.5,
             "input_size": [640, 640],
-            "char_dict_path": "./p.txt",
+            "char_dict_path": "p.txt",  # 只保存文件名，在_initialize中构建完整路径
             "expand_ratio": 0.08
         }
     }
@@ -35,7 +37,15 @@ class PlateRecognitionSkill(BaseSkill):
         self.expand_ratio = params.get("expand_ratio")
         self.model_det = self.config["required_models"][0]
         self.model_rec = self.config["required_models"][1]
-        self.char_dict_path = params.get("char_dict_path")
+        
+        # 构建字符字典文件的完整路径
+        char_dict_filename = params.get("char_dict_path", "p.txt")
+        # 如果是相对路径，则相对于当前技能文件所在目录
+        if not os.path.isabs(char_dict_filename):
+            self.char_dict_path = os.path.join(os.path.dirname(__file__), char_dict_filename)
+        else:
+            self.char_dict_path = char_dict_filename
+            
         self.classes = self.config["params"].get("classes", ["plate"])
         self.char_map = self._load_characters(self.char_dict_path)
 
@@ -45,8 +55,13 @@ class PlateRecognitionSkill(BaseSkill):
         return self.config.get("required_models")
 
     def _load_characters(self, path: str) -> List[str]:
+        """加载字符字典文件"""
+        self.log("info", f"加载字符字典文件: {path}")
+        
         with open(path, "r", encoding="utf-8") as f:
-            return [line.strip() for line in f if line.strip()]
+            char_list = [line.strip() for line in f if line.strip()]
+            self.log("info", f"成功加载字符字典，共 {len(char_list)} 个字符")
+            return char_list
 
     def process(self, input_data: Union[np.ndarray, str, Dict[str, Any]], fence_config: Dict = None) -> SkillResult:
         try:
@@ -55,15 +70,18 @@ class PlateRecognitionSkill(BaseSkill):
                 return SkillResult.error_result("图像无效或加载失败")
 
             detections = self.detect_plates(image)
+            self.log("info", f"检测到 {len(detections)} 个车牌")
 
-
-            for det in detections:
+            for i, det in enumerate(detections):
                 crop_img = self.crop_plate(image, det["bbox"], expand_ratio=self.expand_ratio)
                 plate_text, plate_score = self.recognize_text(crop_img)
                 det["plate_text"] = plate_text
                 det["plate_score"] = plate_score
+                self.log("info", f"车牌{i+1}: {plate_text}, 置信度: {plate_score:.3f}, 位置: {det['bbox']}")
 
-            if self.config.get("params", {}).get("enable_default_sort_tracking", False):
+            results = detections
+            
+            if self.config.get("params", {}).get("enable_default_sort_tracking", True):
                 results = self.add_tracking_ids(detections)
 
             if self.is_fence_config_valid(fence_config):
@@ -81,11 +99,11 @@ class PlateRecognitionSkill(BaseSkill):
 
 
             result_data = {
-                "detections": detections,
-                "count": len(detections)
+                "detections": results,
+                "count": len(results)
             }
 
-
+            self.log("info", f"车牌识别完成，最终结果数量: {len(detections)}")
             return SkillResult.success_result(result_data)
 
         except Exception as e:
@@ -214,6 +232,238 @@ class PlateRecognitionSkill(BaseSkill):
         x2 = min(x2 + dw, w - 1)
         y2 = min(y2 + dh, h - 1)
         return img[y1:y2, x1:x2]
+    
+    def draw_detections_on_frame(self, frame: np.ndarray, detections: List[Dict]) -> np.ndarray:
+        """
+        在帧上绘制车牌检测框和识别结果（支持中文显示）
+        
+        Args:
+            frame: 输入图像帧
+            detections: 检测结果列表，每个检测包含bbox、confidence、plate_text等信息
+            
+        Returns:
+            绘制了检测框和车牌文字的图像帧
+        """
+        try:
+            # 确保使用帧的副本，避免修改原始帧
+            annotated_frame = frame.copy()
+            
+            # 定义颜色（BGR格式 -> RGB格式转换）
+            box_color = (0, 255, 0)        # 绿色检测框
+            text_bg_color = (0, 0, 0)      # 黑色文字背景
+            text_color = (255, 255, 255)   # 白色文字
+            confidence_color = (255, 255, 0)  # 黄色置信度文字
+            
+            # 转换为PIL图像以支持中文绘制
+            pil_image = Image.fromarray(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
+            draw = ImageDraw.Draw(pil_image)
+            
+            # 尝试加载中文字体
+            try:
+                # 多平台字体路径
+                font_paths = [
+                    # Windows系统字体
+                    "C:/Windows/Fonts/msyh.ttc",  # 微软雅黑
+                    "C:/Windows/Fonts/simhei.ttf",  # 黑体
+                    "C:/Windows/Fonts/simsun.ttc",  # 宋体
+                    
+                    # Linux系统字体 - 中文字体
+                    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # 文泉驿微米黑
+                    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",    # 文泉驿正黑
+                    "/usr/share/fonts/truetype/arphic/ukai.ttc",       # AR PL UKai
+                    "/usr/share/fonts/truetype/arphic/uming.ttc",      # AR PL UMing
+                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Noto Sans CJK
+                    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",  # Droid Sans Fallback
+                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Liberation Sans
+                    
+                    # Ubuntu/Debian 额外路径
+                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                    "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                    
+                    # CentOS/RHEL 路径
+                    "/usr/share/fonts/chinese/TrueType/wqy-zenhei.ttc",
+                    "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+                    
+                    # macOS系统字体
+                    "/System/Library/Fonts/Arial.ttf",
+                    "/System/Library/Fonts/Helvetica.ttc",
+                    "/Library/Fonts/Arial.ttf",
+                ]
+                
+                font_main = None
+                font_sub = None
+                found_font_path = None
+                
+                for font_path in font_paths:
+                    if os.path.exists(font_path):
+                        try:
+                            font_main = ImageFont.truetype(font_path, 24)  # 主文字字体
+                            font_sub = ImageFont.truetype(font_path, 18)   # 副文字字体
+                            found_font_path = font_path
+                            self.log("info", f"成功加载字体: {font_path}")
+                            break
+                        except Exception as font_error:
+                            self.log("warning", f"字体文件存在但加载失败: {font_path}, 错误: {font_error}")
+                            continue
+                
+                # 如果没有找到字体，尝试使用系统默认字体
+                if font_main is None:
+                    self.log("warning", "未找到合适的字体文件，尝试使用默认字体")
+                    try:
+                        # 尝试使用PIL的默认字体，并设置一个合理的大小
+                        font_main = ImageFont.load_default()
+                        font_sub = ImageFont.load_default()
+                        self.log("info", "使用PIL默认字体")
+                    except Exception as default_error:
+                        self.log("error", f"加载默认字体也失败: {default_error}")
+                        # 最后的备选方案：创建一个简单的字体对象
+                        font_main = None
+                        font_sub = None
+                    
+            except Exception as e:
+                self.log("error", f"字体加载过程出现异常: {str(e)}")
+                font_main = None
+                font_sub = None
+            
+            for i, detection in enumerate(detections):
+                bbox = detection.get("bbox", [])
+                confidence = detection.get("confidence", 0.0)
+                plate_text = detection.get("plate_text", "")
+                plate_score = detection.get("plate_score", 0.0)
+                
+                if len(bbox) >= 4:
+                    x1, y1, x2, y2 = bbox
+                    
+                    # 绘制检测框（继续用OpenCV，因为PIL绘制矩形较复杂）
+                    cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), box_color, 2)
+                    
+                    # 准备显示文字
+                    if plate_text:
+                        # 主要显示车牌号码
+                        if font_main is not None:
+                            main_text = f"车牌: {plate_text}"
+                            # 副标题显示置信度信息
+                            sub_text = f"检测:{confidence:.2f} 识别:{plate_score:.2f}"
+                        else:
+                            # 如果没有中文字体，使用英文
+                            main_text = f"Plate: {plate_text}"
+                            sub_text = f"Det:{confidence:.2f} Rec:{plate_score:.2f}"
+                    else:
+                        if font_main is not None:
+                            main_text = "车牌: 识别中..."
+                            sub_text = f"置信度: {confidence:.2f}"
+                        else:
+                            main_text = "Plate: Processing..."
+                            sub_text = f"Conf: {confidence:.2f}"
+                    
+                    # 获取文字尺寸和确定绘制方式
+                    use_pil_draw = font_main is not None
+                    
+                    if use_pil_draw:
+                        # 使用PIL绘制中文
+                        try:
+                            main_bbox = draw.textbbox((0, 0), main_text, font=font_main)
+                            sub_bbox = draw.textbbox((0, 0), sub_text, font=font_sub)
+                            
+                            main_w = main_bbox[2] - main_bbox[0]
+                            main_h = main_bbox[3] - main_bbox[1]
+                            sub_w = sub_bbox[2] - sub_bbox[0]
+                            sub_h = sub_bbox[3] - sub_bbox[1]
+                        except:
+                            # 如果textbbox不可用，使用textsize（较老的PIL版本）
+                            try:
+                                main_w, main_h = draw.textsize(main_text, font=font_main)
+                                sub_w, sub_h = draw.textsize(sub_text, font=font_sub)
+                            except:
+                                # PIL方法都失败，改用OpenCV
+                                use_pil_draw = False
+                    
+                    if not use_pil_draw:
+                        # 使用OpenCV绘制英文，计算文字尺寸
+                        font_cv = cv2.FONT_HERSHEY_SIMPLEX
+                        main_font_scale = 0.7
+                        sub_font_scale = 0.5
+                        thickness = 2
+                        
+                        (main_w, main_h), main_baseline = cv2.getTextSize(main_text, font_cv, main_font_scale, thickness)
+                        (sub_w, sub_h), sub_baseline = cv2.getTextSize(sub_text, font_cv, sub_font_scale, 1)
+                    
+                    # 计算总的文字区域
+                    max_text_width = max(main_w, sub_w)
+                    total_text_height = main_h + sub_h + 10  # 10像素间距
+                    
+                    # 确定文字背景位置（检测框上方，如果空间不够则放在框内）
+                    if y1 - total_text_height - 10 > 0:
+                        # 检测框上方有足够空间
+                        text_bg_top = int(y1 - total_text_height - 10)
+                        text_bg_bottom = int(y1 - 5)
+                    else:
+                        # 检测框上方空间不足，放在框内顶部
+                        text_bg_top = int(y1 + 5)
+                        text_bg_bottom = int(y1 + total_text_height + 10)
+                    
+                    text_bg_left = int(x1)
+                    text_bg_right = int(x1 + max_text_width + 20)
+                    
+                    # 确保文字背景不超出图像边界
+                    text_bg_right = min(text_bg_right, annotated_frame.shape[1])
+                    text_bg_bottom = min(text_bg_bottom, annotated_frame.shape[0])
+                    text_bg_left = max(text_bg_left, 0)
+                    text_bg_top = max(text_bg_top, 0)
+                    
+                    # 绘制文字背景（半透明）
+                    overlay = annotated_frame.copy()
+                    cv2.rectangle(overlay, (text_bg_left, text_bg_top), (text_bg_right, text_bg_bottom), text_bg_color, -1)
+                    cv2.addWeighted(overlay, 0.7, annotated_frame, 0.3, 0, annotated_frame)
+                    
+                    # 根据字体可用性选择绘制方式
+                    if use_pil_draw:
+                        # 使用PIL绘制中文
+                        # 重新转换为PIL图像以绘制文字
+                        pil_image = Image.fromarray(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
+                        draw = ImageDraw.Draw(pil_image)
+                        
+                        # 绘制主文字（车牌号码）
+                        main_text_x = text_bg_left + 10
+                        main_text_y = text_bg_top + 5
+                        draw.text((main_text_x, main_text_y), main_text, 
+                                 fill=text_color, font=font_main)
+                        
+                        # 绘制副文字（置信度信息）
+                        sub_text_x = text_bg_left + 10
+                        sub_text_y = main_text_y + main_h + 5
+                        draw.text((sub_text_x, sub_text_y), sub_text, 
+                                 fill=confidence_color, font=font_sub)
+                        
+                        # 转换回OpenCV格式
+                        annotated_frame = cv2.cvtColor(np.array(pil_image), cv2.COLOR_RGB2BGR)
+                    else:
+                        # 使用OpenCV绘制英文（兜底方案）
+                        # 绘制主文字（车牌号码）
+                        main_text_x = text_bg_left + 10
+                        main_text_y = text_bg_top + main_h + main_baseline + 5
+                        cv2.putText(annotated_frame, main_text, (main_text_x, main_text_y), 
+                                   font_cv, main_font_scale, text_color, thickness)
+                        
+                        # 绘制副文字（置信度信息）
+                        sub_text_x = text_bg_left + 10
+                        sub_text_y = main_text_y + sub_h + sub_baseline + 5
+                        cv2.putText(annotated_frame, sub_text, (sub_text_x, sub_text_y), 
+                                   font_cv, sub_font_scale, confidence_color, 1)
+                    
+                    # 在检测框左上角添加序号（英文数字，用OpenCV绘制）
+                    number_text = f"#{i+1}"
+                    cv2.putText(annotated_frame, number_text, (int(x1-5), int(y1-5)), 
+                               cv2.FONT_HERSHEY_SIMPLEX, 0.6, box_color, 2)
+            
+            return annotated_frame
+            
+        except Exception as e:
+            self.log("error", f"绘制车牌检测结果时出错: {str(e)}")
+            # 如果绘制失败，返回原始帧
+            return frame
+    
+    
 
 
 if __name__ == "__main__":

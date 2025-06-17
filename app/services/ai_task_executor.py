@@ -8,6 +8,9 @@ import time
 import json
 import os
 import logging
+import subprocess
+import signal
+import queue
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
@@ -22,6 +25,620 @@ from app.services.camera_service import CameraService
 from app.services.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
+
+class ThreadedFrameReader:
+    """多线程帧读取器 - 用于获取最新帧"""
+    
+    def __init__(self, stream_url: str):
+        self.stream_url = stream_url
+        self.latest_frame = None
+        self.frame_lock = threading.Lock()
+        self.running = False
+        self.read_thread = None
+        self.cap = None
+        
+    def start(self) -> bool:
+        """启动帧读取线程"""
+        try:
+            self.cap = cv2.VideoCapture(self.stream_url)
+            if not self.cap.isOpened():
+                logger.error(f"无法打开视频流: {self.stream_url}")
+                return False
+                
+            # 设置缓冲区为1以减少延迟
+            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            self.running = True
+            self.read_thread = threading.Thread(target=self._read_frames, daemon=True)
+            self.read_thread.start()
+            
+            logger.info(f"多线程帧读取器已启动: {self.stream_url}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"启动多线程帧读取器失败: {str(e)}")
+            return False
+    
+    def _read_frames(self):
+        """帧读取线程函数"""
+        while self.running:
+            try:
+                if self.cap and self.cap.isOpened():
+                    ret, frame = self.cap.read()
+                    if ret:
+                        # 只保留最新帧，线程安全更新
+                        with self.frame_lock:
+                            self.latest_frame = frame.copy()
+                    else:
+                        # 读取失败，稍作延迟后继续
+                        time.sleep(0.1)
+                else:
+                    time.sleep(0.1)
+            except Exception as e:
+                logger.error(f"读取帧时出错: {str(e)}")
+                time.sleep(0.1)
+    
+    def get_latest_frame(self) -> Optional[np.ndarray]:
+        """获取最新帧"""
+        try:
+            with self.frame_lock:
+                if self.latest_frame is not None:
+                    return self.latest_frame.copy()
+                return None
+        except Exception as e:
+            logger.error(f"获取最新帧时出错: {str(e)}")
+            return None
+    
+    def stop(self):
+        """停止帧读取"""
+        self.running = False
+        if self.read_thread and self.read_thread.is_alive():
+            self.read_thread.join(timeout=5)
+        if self.cap:
+            self.cap.release()
+        logger.info("多线程帧读取器已停止")
+
+
+class OptimizedAsyncProcessor:
+    """优化的异步帧处理器 - 减少拷贝，提升性能"""
+    
+    def __init__(self, task_id: int, max_queue_size: int = 2):
+        self.task_id = task_id
+        self.max_queue_size = max_queue_size
+        
+        # 使用更高效的数据结构
+        self.frame_buffer = queue.Queue(maxsize=max_queue_size)  # 统一帧缓冲区
+        self.result_buffer = queue.Queue(maxsize=2)  # 检测结果缓冲区（更小）
+        
+        # 线程控制
+        self.running = False
+        self.detection_thread = None
+        self.streaming_thread = None
+        
+        # 共享状态 - 使用原子操作减少锁竞争
+        self.latest_detection_result = None
+        self.latest_annotated_frame = None
+        self.latest_raw_frame = None
+        self.frame_timestamp = 0
+        self.result_lock = threading.RLock()  # 可重入锁
+        
+        # 动态统计信息
+        self.stats = {
+            "frames_captured": 0,
+            "frames_detected": 0,
+            "frames_streamed": 0,
+            "frames_dropped": 0,
+            "detection_fps": 0.0,
+            "streaming_fps": 0.0,
+            "avg_detection_time": 0.0,
+            "memory_usage_mb": 0.0
+        }
+        
+        # 性能监控
+        self.detection_times = []
+        self.last_stats_update = time.time()
+        
+    def start(self, skill_instance, task_config, rtsp_streamer=None):
+        """启动异步处理"""
+        self.skill_instance = skill_instance
+        self.task_config = task_config
+        self.rtsp_streamer = rtsp_streamer
+        self.running = True
+        
+        # 启动检测线程
+        self.detection_thread = threading.Thread(
+            target=self._detection_worker, 
+            daemon=True, 
+            name=f"Detection-{self.task_id}"
+        )
+        self.detection_thread.start()
+        
+        # 启动推流线程（如果启用了RTSP推流）
+        if self.rtsp_streamer:
+            self.streaming_thread = threading.Thread(
+                target=self._streaming_worker, 
+                daemon=True, 
+                name=f"Streaming-{self.task_id}"
+            )
+            self.streaming_thread.start()
+            
+        logger.info(f"任务 {self.task_id} 异步帧处理器已启动")
+        
+    def put_raw_frame(self, frame: np.ndarray) -> bool:
+        """优化的帧投递 - 减少内存拷贝"""
+        try:
+            current_time = time.time()
+            
+            # 智能丢帧策略
+            if self.frame_buffer.full():
+                try:
+                    # 丢弃最旧的帧
+                    old_frame_data = self.frame_buffer.get_nowait()
+                    self.stats["frames_dropped"] += 1
+                except queue.Empty:
+                    pass
+            
+            # 只拷贝一次，附加时间戳
+            frame_data = {
+                "frame": frame,  # 直接引用，避免不必要拷贝
+                "timestamp": current_time,
+                "frame_id": self.stats["frames_captured"]
+            }
+            
+            self.frame_buffer.put(frame_data, block=False)
+            self.stats["frames_captured"] += 1
+            
+            # 更新共享状态（原子操作）
+            with self.result_lock:
+                self.latest_raw_frame = frame
+                self.frame_timestamp = current_time
+            
+            return True
+            
+        except queue.Full:
+            self.stats["frames_dropped"] += 1
+            return False
+    
+    def _detection_worker(self):
+        """优化的检测工作线程"""
+        logger.info(f"任务 {self.task_id} 检测线程已启动")
+        
+        while self.running:
+            try:
+                # 获取帧数据（超时1秒）
+                frame_data = self.frame_buffer.get(timeout=1.0)
+                frame = frame_data["frame"]
+                frame_timestamp = frame_data["timestamp"]
+                
+                # 记录检测开始时间
+                detection_start = time.time()
+                
+                # 执行检测
+                fence_config = self.task_config.get("fence_config", {})
+                result = self.skill_instance.process(frame, fence_config)
+                
+                # 记录检测耗时
+                detection_time = time.time() - detection_start
+                self.detection_times.append(detection_time)
+                
+                # 保持检测时间列表大小合理
+                if len(self.detection_times) > 100:
+                    self.detection_times = self.detection_times[-50:]
+                
+                if result.success:
+                    # 根据是否启用推流决定是否绘制检测框
+                    if self.rtsp_streamer:
+                        # 启用推流时才绘制检测框，优先使用技能的自定义绘制函数
+                        annotated_frame = self._draw_detections_with_skill(frame, result.data)
+                    else:
+                        # 未启用推流时直接使用原始帧
+                        annotated_frame = frame
+                    
+                    # 原子更新共享状态
+                    with self.result_lock:
+                        self.latest_detection_result = result
+                        self.latest_annotated_frame = annotated_frame
+                    
+                    # 高效投递结果
+                    try:
+                        if self.result_buffer.full():
+                            self.result_buffer.get_nowait()  # 丢弃旧结果
+                        
+                        self.result_buffer.put({
+                            "result": result,
+                            "frame": annotated_frame,  # 直接引用
+                            "timestamp": time.time(),
+                            "frame_timestamp": frame_timestamp
+                        }, block=False)
+                    except queue.Full:
+                        pass
+                    
+                    self.stats["frames_detected"] += 1
+                    
+                    # 动态统计更新
+                    self._update_stats()
+                
+            except queue.Empty:
+                continue
+            except Exception as e:
+                logger.error(f"任务 {self.task_id} 检测线程出错: {str(e)}")
+                time.sleep(0.1)
+                
+        logger.info(f"任务 {self.task_id} 检测线程已停止")
+    
+    def _streaming_worker(self):
+        """优化的推流工作线程 - 智能帧率调整"""
+        logger.info(f"任务 {self.task_id} 推流线程已启动")
+        
+        # 自适应推流控制
+        streaming_fps = self.rtsp_streamer.fps if self.rtsp_streamer else 15.0
+        target_interval = 1.0 / streaming_fps
+        adaptive_interval = target_interval
+        last_push_time = time.time()
+        
+        # 推流统计
+        streaming_count = 0
+        last_stats_time = time.time()
+        consecutive_failures = 0
+        
+        while self.running:
+            try:
+                current_time = time.time()
+                
+                # 自适应帧率控制
+                if current_time - last_push_time < adaptive_interval:
+                    sleep_time = max(0.001, adaptive_interval - (current_time - last_push_time))
+                    time.sleep(sleep_time)
+                    continue
+                
+                # 智能获取推流帧
+                frame_to_stream = self._get_optimal_streaming_frame()
+                
+                # 推流
+                if frame_to_stream is not None and self.rtsp_streamer and self.rtsp_streamer.is_running:
+                    if self.rtsp_streamer.push_frame(frame_to_stream):
+                        streaming_count += 1
+                        self.stats["frames_streamed"] += 1
+                        last_push_time = current_time
+                        consecutive_failures = 0
+                        
+                        # 动态调整推流间隔（成功时逐渐恢复目标帧率）
+                        adaptive_interval = max(target_interval, adaptive_interval * 0.99)
+                        
+                    else:
+                        consecutive_failures += 1
+                        # 推流失败时适当降低帧率
+                        if consecutive_failures > 3:
+                            adaptive_interval = min(adaptive_interval * 1.2, target_interval * 2)
+                            logger.warning(f"任务 {self.task_id} 推流连续失败，降低帧率")
+                        
+                        time.sleep(0.05)  # 短暂等待
+                else:
+                    time.sleep(0.1)
+                
+                # 定期更新统计
+                if current_time - last_stats_time >= 3.0:  # 每3秒更新
+                    if streaming_count > 0:
+                        self.stats["streaming_fps"] = streaming_count / (current_time - last_stats_time)
+                        logger.debug(f"任务 {self.task_id} 推流FPS: {self.stats['streaming_fps']:.2f}")
+                    streaming_count = 0
+                    last_stats_time = current_time
+                
+            except Exception as e:
+                logger.error(f"任务 {self.task_id} 推流线程出错: {str(e)}")
+                time.sleep(0.1)
+                
+        logger.info(f"任务 {self.task_id} 推流线程已停止")
+    
+    def _get_optimal_streaming_frame(self):
+        """智能获取最优推流帧"""
+        # 优先获取最新检测结果
+        try:
+            result_data = self.result_buffer.get_nowait()
+            return result_data["frame"]
+        except queue.Empty:
+            pass
+        
+        # 其次使用共享状态中的最新帧
+        with self.result_lock:
+            if self.latest_annotated_frame is not None:
+                return self.latest_annotated_frame
+        
+        return None
+    
+    def _update_stats(self):
+        """动态更新统计信息"""
+        current_time = time.time()
+        
+        # 限制更新频率
+        if current_time - self.last_stats_update < 2.0:
+            return
+        
+        # 计算平均检测时间
+        if self.detection_times:
+            self.stats["avg_detection_time"] = sum(self.detection_times) / len(self.detection_times)
+        
+        # 计算检测FPS
+        time_window = current_time - self.last_stats_update
+        if time_window > 0:
+            frames_in_window = len([t for t in self.detection_times if current_time - t <= time_window])
+            self.stats["detection_fps"] = frames_in_window / time_window
+        
+        # 估算内存使用（简单估算）
+        queue_sizes = (
+            self.frame_buffer.qsize() + 
+            self.result_buffer.qsize()
+        )
+        self.stats["memory_usage_mb"] = queue_sizes * 2.0  # 粗略估算
+        
+        self.last_stats_update = current_time
+        
+        # 定期日志输出
+        if self.stats["frames_detected"] % 50 == 0 and self.stats["frames_detected"] > 0:
+            logger.info(f"任务 {self.task_id} 性能统计: "
+                       f"检测FPS={self.stats['detection_fps']:.1f}, "
+                       f"推流FPS={self.stats['streaming_fps']:.1f}, "
+                       f"平均检测时间={self.stats['avg_detection_time']*1000:.1f}ms, "
+                       f"丢帧率={self.stats['frames_dropped']/(self.stats['frames_captured']+1)*100:.1f}%")
+    
+    def get_latest_result(self):
+        """获取最新的检测结果"""
+        try:
+            return self.result_buffer.get_nowait()
+        except queue.Empty:
+            return None
+    
+    def _draw_detections_with_skill(self, frame: np.ndarray, alert_data: Dict) -> np.ndarray:
+        """使用技能的自定义绘制函数或默认绘制函数"""
+        try:
+            detections = alert_data.get("detections", [])
+            
+            # 检查技能是否有自定义的绘制函数
+            if (hasattr(self.skill_instance, 'draw_detections_on_frame') and 
+                callable(getattr(self.skill_instance, 'draw_detections_on_frame'))):
+                # 使用技能的自定义绘制函数
+                logger.debug(f"任务 {self.task_id} 使用技能自定义绘制函数")
+                return self.skill_instance.draw_detections_on_frame(frame, detections)
+            else:
+                # 使用默认的绘制函数
+                logger.debug(f"任务 {self.task_id} 使用默认绘制函数")
+                return self._draw_detections_on_frame(frame, alert_data)
+        except Exception as e:
+            logger.error(f"任务 {self.task_id} 使用技能绘制函数时出错: {str(e)}，回退到默认绘制")
+            return self._draw_detections_on_frame(frame, alert_data)
+    
+    def _draw_detections_on_frame(self, frame: np.ndarray, alert_data: Dict) -> np.ndarray:
+        """在帧上绘制检测框（默认方法）"""
+        try:
+            detections = alert_data.get("detections", [])
+            colors = [
+                (0, 255, 0), (255, 0, 0), (0, 255, 255), (255, 0, 255), (255, 255, 0),
+                (128, 0, 128), (255, 165, 0), (0, 128, 255), (128, 128, 128), (0, 0, 255),
+            ]
+            
+            class_color_map = {}
+            color_index = 0
+            
+            for detection in detections:
+                bbox = detection.get("bbox", [])
+                confidence = detection.get("confidence", 0.0)
+                class_name = detection.get("class_name", "unknown")
+                
+                if len(bbox) >= 4:
+                    x1, y1, x2, y2 = bbox
+                    
+                    if class_name not in class_color_map:
+                        class_color_map[class_name] = colors[color_index % len(colors)]
+                        color_index += 1
+                    
+                    color = class_color_map[class_name]
+                    cv2.rectangle(frame, (int(x1), int(y1)), (int(x2), int(y2)), color, 2)
+                    
+                    label = f"{class_name}: {confidence:.2f}"
+                    (text_width, text_height), baseline = cv2.getTextSize(
+                        label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2
+                    )
+                    
+                    cv2.rectangle(
+                        frame, (int(x1), int(y1) - text_height - baseline - 5),
+                        (int(x1) + text_width, int(y1)), color, -1
+                    )
+                    cv2.putText(
+                        frame, label, (int(x1), int(y1) - baseline - 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2
+                    )
+            
+            return frame
+        except Exception as e:
+            logger.error(f"绘制检测框时出错: {str(e)}")
+            return frame
+    
+    def get_stats(self):
+        """获取统计信息"""
+        return self.stats.copy()
+    
+    def stop(self):
+        """优雅停止异步处理"""
+        logger.info(f"任务 {self.task_id} 开始停止异步处理器...")
+        self.running = False
+        
+        # 等待线程结束（增加超时时间）
+        threads_to_wait = []
+        if self.detection_thread and self.detection_thread.is_alive():
+            threads_to_wait.append(("检测", self.detection_thread))
+        if self.streaming_thread and self.streaming_thread.is_alive():
+            threads_to_wait.append(("推流", self.streaming_thread))
+        
+        for thread_name, thread in threads_to_wait:
+            thread.join(timeout=3)
+            if thread.is_alive():
+                logger.warning(f"任务 {self.task_id} {thread_name}线程未能及时停止")
+        
+        # 清空队列
+        self._clear_queue(self.frame_buffer)
+        self._clear_queue(self.result_buffer)
+        
+        # 输出最终统计
+        logger.info(f"任务 {self.task_id} 最终统计: "
+                   f"采集帧数={self.stats['frames_captured']}, "
+                   f"检测帧数={self.stats['frames_detected']}, "
+                   f"推流帧数={self.stats['frames_streamed']}, "
+                   f"丢帧数={self.stats['frames_dropped']}")
+        
+        logger.info(f"任务 {self.task_id} 异步帧处理器已停止")
+    
+    def _clear_queue(self, q):
+        """高效清空队列"""
+        cleared_count = 0
+        try:
+            while True:
+                q.get_nowait()
+                cleared_count += 1
+        except queue.Empty:
+            pass
+        
+        if cleared_count > 0:
+            logger.debug(f"任务 {self.task_id} 清理了 {cleared_count} 个队列项")
+    
+    def get_performance_report(self):
+        """获取详细性能报告"""
+        current_time = time.time()
+        uptime = current_time - (self.last_stats_update - 2.0) if self.last_stats_update > 0 else 0
+        
+        return {
+            "task_id": self.task_id,
+            "uptime_seconds": uptime,
+            "queue_status": {
+                "frame_buffer_size": self.frame_buffer.qsize(),
+                "result_buffer_size": self.result_buffer.qsize(),
+                "max_queue_size": self.max_queue_size
+            },
+            "performance": self.stats.copy(),
+            "efficiency": {
+                "processing_rate": self.stats["frames_detected"] / max(self.stats["frames_captured"], 1),
+                "streaming_rate": self.stats["frames_streamed"] / max(self.stats["frames_detected"], 1),
+                "drop_rate": self.stats["frames_dropped"] / max(self.stats["frames_captured"], 1)
+            }
+        }
+
+
+class FFmpegRTSPStreamer:
+    """FFmpeg RTSP推流器 - 用于推送检测结果视频流"""
+    
+    def __init__(self, rtsp_url: str, fps: float = 15.0, width: int = 1920, height: int = 1080, 
+                 crf: int = 23, max_bitrate: str = "2M", buffer_size: str = "4M"):
+        self.rtsp_url = rtsp_url
+        self.fps = fps
+        self.width = width
+        self.height = height
+        self.crf = crf
+        self.max_bitrate = max_bitrate
+        self.buffer_size = buffer_size
+        self.process = None
+        self.is_running = False
+        
+    def start(self) -> bool:
+        """启动FFmpeg推流进程"""
+        try:
+            if self.is_running:
+                logger.warning("FFmpeg推流器已在运行")
+                return True
+            
+            # 构建FFmpeg命令
+            ffmpeg_cmd = [
+                'ffmpeg',
+                '-y',  # 覆盖输出文件
+                '-f', 'rawvideo',  # 输入格式
+                '-vcodec', 'rawvideo',
+                '-pix_fmt', 'bgr24',  # OpenCV的BGR格式
+                '-s', f'{self.width}x{self.height}',  # 视频尺寸
+                '-r', str(self.fps),  # 帧率
+                '-i', '-',  # 从stdin读取
+                '-c:v', 'libx264',  # H264编码
+                '-preset', 'ultrafast',  # 编码速度
+                '-tune', 'zerolatency',  # 零延迟调优
+                '-crf', str(self.crf),  # 质量参数
+                '-maxrate', self.max_bitrate,  # 最大码率
+                '-bufsize', self.buffer_size,  # 缓冲区大小
+                '-g', str(int(self.fps)),  # GOP大小
+                '-f', 'rtsp',  # 输出格式
+                self.rtsp_url
+            ]
+            
+            # 启动FFmpeg进程
+            self.process = subprocess.Popen(
+                ffmpeg_cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=0
+            )
+            
+            self.is_running = True
+            logger.info(f"FFmpeg RTSP推流器已启动: {self.rtsp_url}")
+            return True
+            
+        except Exception as e:
+            logger.error(f"启动FFmpeg推流器失败: {str(e)}")
+            return False
+    
+    def push_frame(self, frame: np.ndarray) -> bool:
+        """推送一帧数据"""
+        try:
+            if not self.is_running or not self.process:
+                return False
+            
+            # 检查进程是否还在运行
+            if self.process.poll() is not None:
+                logger.warning("FFmpeg进程已退出，尝试重启")
+                self.is_running = False
+                return False
+            
+            # 调整帧尺寸
+            if frame.shape[1] != self.width or frame.shape[0] != self.height:
+                frame = cv2.resize(frame, (self.width, self.height))
+            
+            # 写入帧数据
+            self.process.stdin.write(frame.tobytes())
+            self.process.stdin.flush()
+            
+            return True
+            
+        except BrokenPipeError:
+            logger.warning("FFmpeg推流管道断开")
+            self.is_running = False
+            return False
+        except Exception as e:
+            logger.error(f"推送帧数据失败: {str(e)}")
+            return False
+    
+    def stop(self):
+        """停止FFmpeg推流"""
+        try:
+            if self.process:
+                self.is_running = False
+                
+                # 关闭stdin
+                if self.process.stdin:
+                    self.process.stdin.close()
+                
+                # 等待进程结束
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    # 强制终止
+                    self.process.terminate()
+                    try:
+                        self.process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                
+                self.process = None
+                logger.info("FFmpeg推流器已停止")
+                
+        except Exception as e:
+            logger.error(f"停止FFmpeg推流器时出错: {str(e)}")
+
 
 class AITaskExecutor:
     """基于精确调度的AI任务执行器"""
@@ -274,58 +891,255 @@ class AITaskExecutor:
                 logger.error(f"加载任务 {task.id} 的技能实例失败")
                 return
                 
-            # 打开视频流
-            cap = cv2.VideoCapture(stream_url)
-            if not cap.isOpened():
-                logger.error(f"无法打开视频流: {stream_url}")
-                return
+            # 尝试使用GStreamer打开视频流
+            cap = self._create_gstreamer_capture(stream_url)
+            frame_reader = None
+            use_gstreamer = cap.isOpened()
+            
+            if not use_gstreamer:
+                logger.warning(f"GStreamer失败，切换到多线程读取模式: {stream_url}")
+                # 使用多线程帧读取器作为fallback
+                frame_reader = ThreadedFrameReader(stream_url)
+                if not frame_reader.start():
+                    logger.error(f"多线程帧读取器也无法启动: {stream_url}")
+                    return
+            
+            # 初始化优化的异步帧处理器
+            frame_processor = OptimizedAsyncProcessor(task.id, max_queue_size=2)
+            
+            # 检查是否需要启用RTSP推流
+            rtsp_streamer = None
+            task_config = json.loads(task.config) if isinstance(task.config, str) else (task.config or {})
+            
+            # 从全局配置和任务配置中确定是否启用推流
+            from app.core.config import settings
+            global_rtsp_enabled = settings.RTSP_STREAMING_ENABLED
+            task_rtsp_enabled = task_config.get("rtsp_streaming", {}).get("enabled", False)
+
+
+            if global_rtsp_enabled and task_rtsp_enabled:
+                # 获取技能名称用于构建推流地址
+                from app.services.skill_class_service import SkillClassService
+                skill_class = SkillClassService.get_by_id(task.skill_class_id, db, is_detail=False)
+                skill_name = skill_class["name"] if skill_class else "unknown"
                 
-            # 设置帧率控制
+                # 从全局配置读取参数
+                rtsp_base_url = settings.RTSP_STREAMING_BASE_URL
+                rtsp_sign = settings.RTSP_STREAMING_SIGN
+                rtsp_url = f"{rtsp_base_url}/{skill_name}_{task.id}?sign={rtsp_sign}"
+                
+                # 获取视频流分辨率
+                stream_width, stream_height = self._get_video_resolution(cap if use_gstreamer else frame_reader)
+                
+                # 获取推流帧率
+                # 使用任务帧率和全局默认帧率中的最大值
+                if task.frame_rate > 0:
+                    base_fps = max(task.frame_rate, settings.RTSP_STREAMING_DEFAULT_FPS)
+                    logger.info(f"任务 {task.id} 推流帧率: max({task.frame_rate}, {settings.RTSP_STREAMING_DEFAULT_FPS}) = {base_fps}")
+                else:
+                    # 使用全局默认帧率
+                    base_fps = settings.RTSP_STREAMING_DEFAULT_FPS
+                    logger.info(f"任务 {task.id} 帧率无效({task.frame_rate})，使用默认帧率: {base_fps}")
+                
+                # 限制在合理范围内
+                stream_fps = min(max(base_fps, settings.RTSP_STREAMING_MIN_FPS), settings.RTSP_STREAMING_MAX_FPS)
+                
+                if stream_fps != base_fps:
+                    logger.info(f"任务 {task.id} 推流帧率已调整: {base_fps} -> {stream_fps} (限制范围: {settings.RTSP_STREAMING_MIN_FPS}-{settings.RTSP_STREAMING_MAX_FPS})")
+                
+                # 创建并启动RTSP推流器
+                rtsp_streamer = FFmpegRTSPStreamer(
+                    rtsp_url=rtsp_url, 
+                    fps=stream_fps, 
+                    width=stream_width, 
+                    height=stream_height,
+                    crf=settings.RTSP_STREAMING_QUALITY_CRF,
+                    max_bitrate=settings.RTSP_STREAMING_MAX_BITRATE,
+                    buffer_size=settings.RTSP_STREAMING_BUFFER_SIZE
+                )
+                if rtsp_streamer.start():
+                    logger.info(f"任务 {task.id} RTSP推流已启动: {rtsp_url} ({stream_width}x{stream_height}@{stream_fps}fps)")
+                else:
+                    logger.error(f"任务 {task.id} RTSP推流启动失败")
+                    rtsp_streamer = None
+            
+            # 启动异步帧处理器
+            task_processor_config = {
+                "fence_config": self._parse_fence_config(task)
+            }
+            frame_processor.start(skill_instance, task_processor_config, rtsp_streamer)
+            
+            # 设置视频采集帧率控制
             frame_interval = 1.0 / task.frame_rate if task.frame_rate > 0 else 1.0
             last_frame_time = 0
             
-            # 主处理循环
+            # 主视频采集循环（只负责读取和投递帧）
             while not stop_event.is_set():
                 # 帧率控制
                 current_time = time.time()
                 if current_time - last_frame_time < frame_interval:
-                    time.sleep(0.01)  # 小睡避免CPU过载
+                    # 计算精确的睡眠时间，最小1ms
+                    sleep_time = max(0.001, frame_interval - (current_time - last_frame_time))
+                    time.sleep(sleep_time)
                     continue
                     
                 last_frame_time = current_time
                 
-                # 读取一帧
-                ret, frame = cap.read()
-                if not ret:
-                    logger.warning(f"任务 {task.id} 读取视频帧失败，尝试重新连接...")
-                    # 尝试重新连接
-                    cap.release()
-                    time.sleep(3)  # 等待几秒再重连
-                    cap = cv2.VideoCapture(stream_url)
-                    if not cap.isOpened():
-                        logger.error(f"无法重新连接视频流: {stream_url}")
-                        break
+                # 根据模式读取帧
+                if use_gstreamer:
+                    # GStreamer模式：直接读取
+                    ret, frame = cap.read()
+                    if not ret:
+                        logger.warning(f"任务 {task.id} GStreamer读取失败，直接切换到多线程模式: {stream_url}")
+                        # 直接切换到多线程模式，不再尝试重连GStreamer
+                        cap.release()
+                        use_gstreamer = False
+                        frame_reader = ThreadedFrameReader(stream_url)
+                        if not frame_reader.start():
+                            logger.error(f"无法启动多线程帧读取器")
+                            break
+                        logger.info(f"任务 {task.id} 已成功切换到多线程帧读取模式")
+                        continue
+                else:
+                    # 多线程模式：获取最新帧
+                    frame = frame_reader.get_latest_frame()
+                    if frame is None:
+                        logger.warning(f"任务 {task.id} 多线程读取器无帧可用")
+                        time.sleep(0.1)
+                        continue
+                
+                # 将原始帧投递到优化的异步处理器
+                # 注意：这里frame会被直接引用，不进行拷贝
+                if not frame_processor.put_raw_frame(frame):
+                    # 队列满了，继续采集下一帧（智能丢帧策略已内置）
                     continue
                 
-                # 直接调用技能实例的process方法处理单帧
-                # 将电子围栏配置传递给技能
-                fence_config = self._parse_fence_config(task)
-                result = skill_instance.process(frame, fence_config)
-                
-                # 处理技能返回的结果
-                if result.success:
-                    self._handle_skill_result(result, task, frame, db)
-                else:
-                    logger.warning(f"任务 {task.id} 处理结果失败: {result.error_message}")
+                # 检查是否有检测结果需要处理（用于预警生成）
+                detection_result = frame_processor.get_latest_result()
+                if detection_result:
+                    result = detection_result["result"]
+                    if result.success:
+                        # 处理技能返回的结果（主要是生成预警）
+                        # 注意：这里使用原始帧而不是标注帧来生成预警截图
+                        self._handle_skill_result(result, task, frame, db)
+            
+            # 停止异步处理器
+            frame_processor.stop()
                 
             # 释放资源
-            cap.release()
+            if use_gstreamer and cap:
+                cap.release()
+            elif frame_reader:
+                frame_reader.stop()
+                
+            # 停止RTSP推流器
+            if rtsp_streamer:
+                rtsp_streamer.stop()
+                
             logger.info(f"任务 {task.id} 执行已停止")
             
         except Exception as e:
             logger.error(f"执行任务 {task.id} 时出错: {str(e)}", exc_info=True)
         finally:
             db.close()
+    
+    def _get_video_resolution(self, video_source) -> Tuple[int, int]:
+        """获取视频流的分辨率
+        
+        Args:
+            video_source: 可以是cv2.VideoCapture对象或ThreadedFrameReader对象
+            
+        Returns:
+            Tuple[int, int]: (宽度, 高度)，失败时返回默认分辨率(1920, 1080)
+        """
+        try:
+            if isinstance(video_source, cv2.VideoCapture):
+                # GStreamer模式
+                if video_source.isOpened():
+                    width = int(video_source.get(cv2.CAP_PROP_FRAME_WIDTH))
+                    height = int(video_source.get(cv2.CAP_PROP_FRAME_HEIGHT))
+                    if width > 0 and height > 0:
+                        logger.info(f"从VideoCapture获取视频分辨率: {width}x{height}")
+                        return width, height
+            elif hasattr(video_source, 'get_latest_frame'):
+                # 多线程模式
+                frame = video_source.get_latest_frame()
+                if frame is not None:
+                    height, width = frame.shape[:2]
+                    logger.info(f"从ThreadedFrameReader获取视频分辨率: {width}x{height}")
+                    return width, height
+            
+            # 如果无法获取分辨率，返回默认值
+            logger.warning("无法获取视频分辨率，使用默认分辨率: 1920x1080")
+            return 1920, 1080
+            
+        except Exception as e:
+            logger.error(f"获取视频分辨率时出错: {str(e)}")
+            return 1920, 1080
+
+    def _create_gstreamer_capture(self, stream_url: str) -> cv2.VideoCapture:
+        """创建使用GStreamer的VideoCapture对象以获取最新帧
+        
+        Args:
+            stream_url: 视频流地址
+            
+        Returns:
+            配置了GStreamer pipeline的VideoCapture对象
+        """
+        try:
+            # 根据流类型构建不同的GStreamer pipeline
+            if stream_url.startswith('rtsp://'):
+                # RTSP流 - 设置较小的缓冲区以减少延迟
+                gst_pipeline = (
+                    f"rtspsrc location={stream_url} latency=0 buffer-mode=1 ! "
+                    "queue max-size-buffers=1 leaky=downstream ! "
+                    "rtph264depay ! h264parse ! avdec_h264 ! "
+                    "videoconvert ! appsink drop=true max-buffers=1"
+                )
+            elif stream_url.startswith('http://') and stream_url.endswith('.flv'):
+                # FLV流
+                gst_pipeline = (
+                    f"souphttpsrc location={stream_url} ! "
+                    "queue max-size-buffers=1 leaky=downstream ! "
+                    "flvdemux ! h264parse ! avdec_h264 ! "
+                    "videoconvert ! appsink drop=true max-buffers=1"
+                )
+            elif stream_url.startswith('http://') and '.m3u8' in stream_url:
+                # HLS流
+                gst_pipeline = (
+                    f"souphttpsrc location={stream_url} ! "
+                    "queue max-size-buffers=1 leaky=downstream ! "
+                    "hlsdemux ! h264parse ! avdec_h264 ! "
+                    "videoconvert ! appsink drop=true max-buffers=1"
+                )
+            else:
+                # 回退到标准OpenCV方法
+                logger.warning(f"不支持的流格式，使用标准OpenCV方法: {stream_url}")
+                return cv2.VideoCapture(stream_url)
+            
+            # 创建GStreamer VideoCapture
+            cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
+            
+            if cap.isOpened():
+                logger.info(f"成功创建GStreamer capture: {stream_url}")
+                # 设置缓冲区大小为1以获得最新帧
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            else:
+                logger.warning(f"GStreamer capture创建失败，回退到标准方法: {stream_url}")
+                cap = cv2.VideoCapture(stream_url)
+                if cap.isOpened():
+                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            
+            return cap
+            
+        except Exception as e:
+            logger.error(f"创建GStreamer capture失败: {str(e)}，使用标准方法")
+            cap = cv2.VideoCapture(stream_url)
+            if cap.isOpened():
+                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+            return cap
+    
+
     
     def _get_stream_url(self, camera_id: int) -> Tuple[Optional[str], bool]:
         """获取摄像头流地址
@@ -381,10 +1195,10 @@ class AITaskExecutor:
             
             # 合并默认配置和任务特定配置
             default_config = skill_class.default_config if skill_class.default_config else {}
-            task_config = json.loads(task.skill_config) if isinstance(task.skill_config, str) else (task.skill_config or {})
+            task_skill_config = json.loads(task.skill_config) if isinstance(task.skill_config, str) else (task.skill_config or {})
             
             # 深度合并配置
-            merged_config = self._merge_config(default_config, task_config)
+            merged_config = self._merge_config(default_config, task_skill_config)
             
             # 使用技能工厂创建技能对象
             skill_instance = skill_factory.create_skill(skill_class.name, merged_config)
@@ -400,11 +1214,11 @@ class AITaskExecutor:
             logger.error(f"创建技能对象时出错: {str(e)}")
             return None
     
-    def _merge_config(self, default_config: dict, task_config: dict) -> dict:
+    def _merge_config(self, default_config: dict, task_skill_config: dict) -> dict:
         """深度合并配置"""
         merged = default_config.copy()
         
-        for key, value in task_config.items():
+        for key, value in task_skill_config.items():
             if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
                 # 如果两个值都是字典，递归合并
                 merged[key] = self._merge_config(merged[key], value)
@@ -607,8 +1421,8 @@ class AITaskExecutor:
                 "description": alert_info_data.get("alert_description", f"{camera_name}检测到安全风险，请及时处理。")
             }
             
-            # 在frame上绘制检测框
-            annotated_frame = self._draw_detections_on_frame(frame.copy(), alert_data)
+            # 在frame上绘制检测框（预警截图，尝试使用技能的自定义绘制函数）
+            annotated_frame = self._draw_alert_detections_with_skill(task, frame.copy(), alert_data)
             
             # 直接将annotated_frame编码为字节数据并上传到MinIO
             timestamp = int(time.time())
@@ -699,9 +1513,29 @@ class AITaskExecutor:
             logger.error(f"生成报警时出错: {str(e)}")
             return None
     
+    def _draw_alert_detections_with_skill(self, task: AITask, frame: np.ndarray, alert_data: Dict) -> np.ndarray:
+        """为预警截图绘制检测框，优先使用技能的自定义绘制函数"""
+        try:
+            # 尝试创建技能实例以使用其自定义绘制函数
+            db = next(get_db())
+            try:
+                skill_instance = self._load_skill_for_task(task, db)
+                if skill_instance and hasattr(skill_instance, 'draw_detections_on_frame'):
+                    detections = alert_data.get("detections", [])
+                    logger.debug(f"预警截图使用技能 {task.skill_class_id} 的自定义绘制函数")
+                    return skill_instance.draw_detections_on_frame(frame, detections)
+                else:
+                    logger.debug(f"技能 {task.skill_class_id} 无自定义绘制函数，使用默认方法")
+                    return self._draw_detections_on_frame(frame, alert_data)
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"使用技能绘制预警截图时出错: {str(e)}，回退到默认绘制")
+            return self._draw_detections_on_frame(frame, alert_data)
+    
     def _draw_detections_on_frame(self, frame: np.ndarray, alert_data: Dict) -> np.ndarray:
         """在帧上绘制检测框和标签（通用方法）
-        
+        ·
         Args:
             frame: 输入图像帧
             alert_data: 包含检测结果的报警数据
