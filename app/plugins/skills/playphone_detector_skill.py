@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold(IntEnum):
     """预警阈值枚举"""
-    LEVEL_1 = 7  # 一级预警：7名及以上
+    LEVEL_1 = 1  # 一级预警：7名及以上
     LEVEL_2 = 4  # 二级预警：4-6名
     LEVEL_3 = 2  # 三级预警：2-3名
     LEVEL_4 = 0  # 四级预警：1名
@@ -352,7 +352,7 @@ class CallPlayDetectorSkill(BaseSkill):
         self.log(
             "info",
             f"手机使用检测分析: 玩手机={playphone_count}人，"
-            f"总违规={total_violations}人，预警等级={alert_level}"
+            f"总违规={playphone_count}人，预警等级={alert_level}"
         )
 
         return result

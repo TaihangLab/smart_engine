@@ -272,9 +272,9 @@ class GloveDetectorSkill(BaseSkill):
             # 按人数范围判断预警等级
             if non_compliant >= self.level_1_threshold:
                 alert_level = 1  # 严重
-            elif self.level_2_threshold <= non_compliant <= self.level_1_threshold:
+            elif self.level_2_threshold <= non_compliant < self.level_1_threshold:
                 alert_level = 2  # 中等
-            elif self.level_3_threshold < non_compliant <= self.level_2_threshold:
+            elif self.level_3_threshold < non_compliant < self.level_2_threshold:
                 alert_level = 3  # 轻微
             else:
                 alert_level = 4  # 极轻（如果你有这个等级）
