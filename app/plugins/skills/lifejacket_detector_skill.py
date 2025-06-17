@@ -318,9 +318,9 @@ class LifejacketDetectorSkill(BaseSkill):
         if alert_triggered:
             if no_vest_count >= self.level_1_threshold:
                 alert_level = 1  # 严重
-            elif self.level_2_threshold <= no_vest_count <= self.level_1_threshold:
+            elif self.level_2_threshold <= no_vest_count < self.level_1_threshold:
                 alert_level = 2  # 中等
-            elif self.level_3_threshold <= no_vest_count <= self.level_2_threshold:
+            elif self.level_3_threshold <= no_vest_count < self.level_2_threshold:
                 alert_level = 3  # 轻微
             else:
                 alert_level = 4  # 极轻

@@ -4,11 +4,19 @@
 import cv2
 import numpy as np
 from typing import Dict, List, Any, Tuple, Union, Optional
+from enum import IntEnum
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
 
 logger = logging.getLogger(__name__)
+
+class AlertThreshold(IntEnum):
+    """预警阈值枚举"""
+    LEVEL_1 = 7  # 一级预警：7名及以上
+    LEVEL_2 = 4  # 二级预警：4-6名
+    LEVEL_3 = 2  # 三级预警：2-3名
+    LEVEL_4 = 0  # 四级预警：1名
 
 
 class PSmokeDetectorSkill(BaseSkill):
@@ -32,10 +40,32 @@ class PSmokeDetectorSkill(BaseSkill):
             "iou_thres": 0.45,
             "max_det": 300,
             "input_size": [640, 640],
-            "enable_default_sort_tracking": True  # 默认启用SORT跟踪，用于人员行为分析
-        }
+            "enable_default_sort_tracking": True, # 默认启用SORT跟踪，用于人员行为分析
+            # 预警人数阈值配置
+            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
+            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
+            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
+            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+        },
+        "alert_definitions": [
+            {
+                "level": 1,
+                "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上人员吸烟时触发。"
+            },
+            {
+                "level": 2,
+                "description": f"当检测到{AlertThreshold.LEVEL_2}名人员吸烟时触发。"
+            },
+            {
+                "level": 3,
+                "description": f"当检测到{AlertThreshold.LEVEL_3}名人员吸烟时触发。"
+            },
+            {
+                "level": 4,
+                "description": "当检测到潜在安全隐患时触发。"
+            }
+        ]
     }
-
     def _initialize(self) -> None:
         """初始化技能"""
         # 获取配置参数
@@ -56,6 +86,11 @@ class PSmokeDetectorSkill(BaseSkill):
         self.model_name = self.required_models[0]
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
+        # 预警阈值配置
+        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
+        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
+        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
+        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
 
         self.log("info", f"初始化吸烟检测器: model={self.model_name}, classes={self.classes}")
 
@@ -281,11 +316,11 @@ class PSmokeDetectorSkill(BaseSkill):
 
         if alert_triggered:
             # 根据吸烟人数确定预警等级
-            if smoking_count >= 6:
+            if smoking_count >= self.level_1_threshold:
                 alert_level = 1  # 严重
-            elif 3 <= smoking_count <= 5:
+            elif self.level_2_threshold <= smoking_count < self.level_1_threshold:
                 alert_level = 2  # 中等
-            elif 1 <= smoking_count <= 2:
+            elif self.level_3_threshold <= smoking_count < self.level_2_threshold:
                 alert_level = 3  # 轻微
             else:
                 alert_level = 4  # 极轻
@@ -351,7 +386,7 @@ if __name__ == "__main__":
     # 测试图像检测
     # test_image = np.zeros((640, 640, 3), dtype=np.uint8)
     # cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
-    image_path = "D:/1.jpg"
+    image_path = "F:/smoking_958.jpg"
     image = cv2.imread(image_path)
     
     # 执行检测
