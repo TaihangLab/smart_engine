@@ -112,7 +112,6 @@ app/
 │   ├── skill_factory.py    # 技能工厂，负责创建技能对象
 │   └── skill_manager.py    # 技能管理器，负责管理技能生命周期
 └── main.py                 # 应用入口点
-├── install_fonts_linux.sh     # Linux中文字体自动安装脚本
 ├── requirements.txt            # Python依赖包列表
 └── README.md                   # 项目说明文档
 ```
@@ -322,7 +321,7 @@ app/
 #### 1. 技能特定自定义绘制
 - **自定义显示内容**：技能可以定义专门的检测结果绘制函数
 - **中文字体支持**：自动检测和加载系统中文字体，支持跨平台显示
-- **智能兜底机制**：字体不可用时自动切换到英文显示
+- **智能兜底机制**：字体不可用时自动切换到英文显示，确保功能可用性
 - **多平台兼容**：Windows、Linux、macOS中文字体自动适配
 
 ```python
@@ -480,40 +479,48 @@ gst-launch-1.0 --version
 
 ### 3. 中文字体安装（Linux系统推荐）
 
-为了在Linux系统上正确显示车牌识别等技能的中文信息，建议安装中文字体：
+为了在Linux系统上正确显示车牌识别等技能的中文信息，建议安装中文字体。如果不安装中文字体，系统会自动使用英文显示，功能完全正常。
 
-#### 自动安装脚本（推荐）
-```bash
-# 使用提供的自动安装脚本
-chmod +x install_fonts_linux.sh
-./install_fonts_linux.sh
-```
+#### 安装中文字体
 
-#### 手动安装中文字体
+**Ubuntu/Debian系统**：
 ```bash
-# Ubuntu/Debian系统
 sudo apt-get update
 sudo apt-get install -y fonts-wqy-microhei fonts-wqy-zenhei fonts-noto-cjk
 
-# CentOS/RHEL/Fedora系统
+# 刷新字体缓存
+sudo fc-cache -fv
+```
+
+**CentOS/RHEL/Fedora系统**：
+```bash
+# 使用yum
 sudo yum install -y wqy-microhei-fonts wqy-zenhei-fonts google-noto-cjk-fonts
+
 # 或使用dnf
 sudo dnf install -y wqy-microhei-fonts wqy-zenhei-fonts google-noto-cjk-fonts
 
 # 刷新字体缓存
 sudo fc-cache -fv
-
-# 验证字体安装
-fc-list :lang=zh
 ```
 
-#### 支持的字体
-- **文泉驿字体**：wqy-microhei、wqy-zenhei
-- **Noto CJK字体**：Google开源的中日韩字体
-- **AR PL字体**：台湾Arphic公司开源字体
-- **系统默认字体**：各发行版自带的中文字体
+**验证字体安装**：
+```bash
+# 列出已安装的中文字体
+fc-list :lang=zh
 
-> **注意**：如果没有安装中文字体，系统会自动使用英文显示，不影响功能使用。
+# 检查特定字体文件
+ls -la /usr/share/fonts/truetype/wqy/
+ls -la /usr/share/fonts/opentype/noto/
+```
+
+#### 推荐字体包
+- **文泉驿字体**：`fonts-wqy-microhei`、`fonts-wqy-zenhei` (Ubuntu/Debian)
+- **文泉驿字体**：`wqy-microhei-fonts`、`wqy-zenhei-fonts` (CentOS/RHEL)
+- **Noto CJK字体**：`fonts-noto-cjk`、`google-noto-cjk-fonts`
+- **AR PL字体**：`fonts-arphic-ukai`、`fonts-arphic-uming`
+
+> **注意**：如果没有安装中文字体，系统会自动fallback到英文显示，功能不受影响。
 
 ### 4. FFmpeg安装（RTSP推流功能需要）
 
@@ -1240,10 +1247,10 @@ server {
 
 8. **中文字体显示问题**
    - **Linux系统中文乱码**：
-     - 运行字体安装脚本：`./install_fonts_linux.sh`
-     - 手动安装中文字体包：`sudo apt-get install fonts-wqy-microhei`
+     - 安装中文字体包：`sudo apt-get install fonts-wqy-microhei fonts-wqy-zenhei`
      - 刷新字体缓存：`sudo fc-cache -fv`
      - 检查字体是否安装：`fc-list :lang=zh`
+     - 重启应用程序以加载新字体
    - **字体加载失败**：
      - 检查日志中的字体加载信息
      - 确认Pillow库已安装：`pip install Pillow`
