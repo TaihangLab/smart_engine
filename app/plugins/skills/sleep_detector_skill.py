@@ -11,7 +11,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class AlertThreshold(IntEnum):
+class AlertThreshold():
     """预警阈值枚举"""
     LEVEL_1 = 1  # 一级预警：1名及以上
     LEVEL_2 = 0  # 二级预警

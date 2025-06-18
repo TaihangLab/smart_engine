@@ -11,7 +11,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class AlertThreshold(IntEnum):
+class AlertThreshold():
     """预警阈值枚举"""
     HIGH_RISK = 1  # 高风险阈值设置
     MILD_RISK_R = 3  # 中风险高阈值设置

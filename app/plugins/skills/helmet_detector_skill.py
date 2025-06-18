@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
  #  Enum - 基础枚举（可以是任何类型的值）
  #  IntEnum - 整数枚举
 
-class AlertThreshold(IntEnum): 
+class AlertThreshold():
     """预警阈值枚举"""
     LEVEL_1 = 7  # 一级预警：7名及以上
     LEVEL_2 = 4  # 二级预警：4-6名
