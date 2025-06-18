@@ -281,4 +281,52 @@ class AITaskService:
             if task_data:
                 tasks.append(task_data)
         
-        return {"tasks": tasks, "total": len(tasks)} 
+        return {"tasks": tasks, "total": len(tasks)}
+
+    @staticmethod
+    def cleanup_invalid_tasks(db: Session) -> Dict[str, Any]:
+        """
+        手动清理所有关联无效摄像头的任务（包括禁用的任务）
+        
+        Args:
+            db: 数据库会话
+            
+        Returns:
+            Dict[str, Any]: 清理结果
+        """
+        logger.info("手动触发任务清理检查")
+        try:
+            from app.services.ai_task_executor import task_executor
+            
+            # 获取清理前的任务总数
+            all_tasks_before = AITaskService.get_all_tasks(db)
+            total_before = all_tasks_before.get("total", 0)
+            
+            # 执行清理
+            task_executor._cleanup_invalid_tasks(db)
+            
+            # 获取清理后的任务总数
+            all_tasks_after = AITaskService.get_all_tasks(db)
+            total_after = all_tasks_after.get("total", 0)
+            
+            deleted_count = total_before - total_after
+            
+            result = {
+                "success": True,
+                "checked_count": total_before,
+                "deleted_count": deleted_count,
+                "remaining_count": total_after,
+                "message": f"清理完成：检查了 {total_before} 个任务，删除了 {deleted_count} 个无效任务，剩余 {total_after} 个任务"
+            }
+            
+            logger.info(result["message"])
+            return result
+            
+        except Exception as e:
+            error_msg = f"手动清理任务失败: {str(e)}"
+            logger.error(error_msg, exc_info=True)
+            return {
+                "success": False,
+                "error": error_msg,
+                "message": "清理失败，请查看日志了解详情"
+            } 

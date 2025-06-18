@@ -4,12 +4,19 @@
 import cv2
 import numpy as np
 from typing import Dict, List, Any, Tuple, Union, Optional
+from enum import IntEnum
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
 
 logger = logging.getLogger(__name__)
 
+class AlertThreshold(IntEnum):
+    """预警阈值枚举"""
+    HIGH_RISK = 1  # 高风险阈值设置
+    MILD_RISK_R = 3  # 中风险高阈值设置
+    MILD_RISK_L = 1  # 中风险低阈值设置
+    NORMAL_RISK = 0
 
 class MinerDetectorSkill(BaseSkill):
     """煤矿工人行为检测技能
@@ -32,8 +39,32 @@ class MinerDetectorSkill(BaseSkill):
             "iou_thres": 0.45,
             "max_det": 300,
             "input_size": [640, 640],
-            "enable_default_sort_tracking": True  # 默认启用SORT跟踪，用于人员行为分析
-        }
+            "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
+            # 预警人数阈值配置
+            "HIGH_RISK_THRESHOLD": AlertThreshold.HIGH_RISK,
+            "MILD_RISK_R_THRESHOLD": AlertThreshold.MILD_RISK_R,
+            "MILD_RISK_L_THRESHOLD": AlertThreshold.MILD_RISK_L,
+            "NORMAL_RISK_THRESHOLD": AlertThreshold.NORMAL_RISK,
+
+        },
+        "alert_definitions": [
+            {
+                "level": 1,
+                "description": f"当检测到{AlertThreshold.HIGH_RISK}名及以上人员存在危险行为（如跌倒、攀爬）时触发。"
+            },
+            {
+                "level": 2,
+                "description": f"当检测到{AlertThreshold.MILD_RISK_R}名及以上人员存在可疑行为（如弯腰、靠墙）时触发。"
+            },
+            {
+                "level": 3,
+                "description": f"当检测到{AlertThreshold.MILD_RISK_L}名人员存在可疑行为（如弯腰、靠墙）时触发。"
+            },
+            {
+                "level": 4,
+                "description": "当检测到潜在安全隐患时触发。"
+            }
+        ]
     }
 
     def _initialize(self) -> None:
@@ -56,6 +87,12 @@ class MinerDetectorSkill(BaseSkill):
         self.model_name = self.required_models[0]
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
+
+        # 预警阈值配置
+        self.high_risk_threshold = params["HIGH_RISK_THRESHOLD"]
+        self.mild_risk_r_threshold = params["MILD_RISK_R_THRESHOLD"]
+        self.mild_risk_l_threshold = params["MILD_RISK_L_THRESHOLD"]
+        self.normal_risk_threshold = params["NORMAL_RISK_THRESHOLD"]
 
         self.log("info", f"初始化救生衣检测器: model={self.model_name}")
 
@@ -295,11 +332,11 @@ class MinerDetectorSkill(BaseSkill):
 
         if alert_triggered:
             # 风险等级按高风险人数优先判断
-            if high_risk_count >= 1:
+            if high_risk_count >= self.high_risk_threshold:
                 alert_level = 1  # 严重
-            elif mild_risk_count >= 3:
+            elif mild_risk_count >= self.mild_risk_r_threshold:
                 alert_level = 2  # 中等
-            elif mild_risk_count >= 1:
+            elif self.mild_risk_l_threshold <= mild_risk_count < self.mild_risk_r_threshold:
                 alert_level = 3  # 轻微
             else:
                 alert_level = 4  # 极轻
