@@ -283,7 +283,7 @@ class AdaptiveFrameReader:
     def _get_snapshot_frame(self) -> Optional[np.ndarray]:
         """通过WVP截图接口获取帧"""
         try:
-            device_type = self.device_info["type"]
+            device_type = self.device_info["dataType"]
             
             # 第一步：请求截图
             filename = None
