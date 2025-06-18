@@ -45,7 +45,17 @@ class ThreadedFrameReader:
             self.read_thread = threading.Thread(target=self._read_frames, daemon=True)
             self.read_thread.start()
             
-            logger.info(f"多线程帧读取器已启动: {self.stream_url}")
+            # 等待第一帧可用（最多等待3秒）
+            max_wait_time = 3.0
+            wait_start = time.time()
+            while self.latest_frame is None and (time.time() - wait_start) < max_wait_time:
+                time.sleep(0.1)
+            
+            if self.latest_frame is not None:
+                logger.info(f"多线程帧读取器已启动，首帧已就绪: {self.stream_url}")
+            else:
+                logger.warning(f"多线程帧读取器已启动，但首帧未就绪（{max_wait_time}s超时）: {self.stream_url}")
+            
             return True
             
         except Exception as e:
@@ -118,8 +128,6 @@ class AdaptiveFrameReader:
         
         # 初始化相关组件
         self.threaded_reader = None
-        self.device_info = None
-        self.channel_info = None
         self.stream_url = None
         
         # 性能统计
@@ -131,92 +139,37 @@ class AdaptiveFrameReader:
             "last_request_time": 0.0
         }
         
-        # 初始化设备信息
-        self._initialize_device_info()
-    
-    def _initialize_device_info(self):
-        """初始化设备和通道信息"""
-        try:
-            # 获取摄像头通道信息
-            channel_info = wvp_client.get_channel_one(self.camera_id)
-            if not channel_info:
-                raise ValueError(f"无法获取摄像头 {self.camera_id} 的通道信息")
-            
-            self.channel_info = channel_info
-            
-            # 根据通道类型提取设备信息
-            channel_type = channel_info.get("dataType")
-            
-            if channel_type == 1:  # 国标设备
-                self.device_info = {
-                    "type": "gb28181",
-                    "device_id": channel_info.get("gbDeviceId"),
-                     #在wvp中国标设备取截图，两个参数传入的均为device_id
-                }
-                logger.info(f"摄像头 {self.camera_id} 为国标设备: {self.device_info['device_id']}")
-                
-            elif channel_type == 2:  # 推流设备
-                self.device_info = {
-                    "type": "push",
-                    "app": channel_info.get("app"),
-                    "stream": channel_info.get("stream")
-                }
-                logger.info(f"摄像头 {self.camera_id} 为推流设备: {self.device_info['app']}/{self.device_info['stream']}")
-                
-            elif channel_type == 3:  # 代理设备
-                self.device_info = {
-                    "type": "proxy", 
-                    "app": channel_info.get("app"),
-                    "stream": channel_info.get("stream")
-                }
-                logger.info(f"摄像头 {self.camera_id} 为代理设备: {self.device_info['app']}/{self.device_info['stream']}")
-                
-            else:
-                raise ValueError(f"不支持的通道类型: {channel_type}")
-            
-            # 如果是持续连接模式，获取流地址
-            if self.mode == "persistent":
-                self._get_stream_url()
-                
-        except Exception as e:
-            logger.error(f"初始化摄像头 {self.camera_id} 设备信息失败: {str(e)}")
-            raise
-    
-    def _get_stream_url(self):
-        """获取流地址（用于持续连接模式）"""
-        try:
-            # 调用现有的播放接口获取流地址
-            play_info = wvp_client.play_channel(self.camera_id)
-            if not play_info:
-                raise ValueError("无法获取流播放信息")
-            
-            # 优先使用RTSP流
-            if play_info.get("rtsp"):
-                self.stream_url = play_info["rtsp"]
-            elif play_info.get("flv"):
-                self.stream_url = play_info["flv"]
-            elif play_info.get("hls"):
-                self.stream_url = play_info["hls"]
-            elif play_info.get("rtmp"):
-                self.stream_url = play_info["rtmp"]
-            else:
-                raise ValueError("无可用的流地址")
-                
-            logger.info(f"摄像头 {self.camera_id} 流地址: {self.stream_url}")
-            
-        except Exception as e:
-            logger.error(f"获取摄像头 {self.camera_id} 流地址失败: {str(e)}")
-            raise
+        # 持续连接模式无需在构造函数中初始化，在start()方法中按需获取即可
     
     def start(self) -> bool:
         """启动帧读取器"""
         try:
             if self.mode == "persistent":
-                # 持续连接模式：启动ThreadedFrameReader
-                if not self.stream_url:
-                    logger.error(f"摄像头 {self.camera_id} 无流地址，无法启动持续连接模式")
+                # 持续连接模式：获取流地址并启动ThreadedFrameReader
+                logger.info(f"摄像头 {self.camera_id} 获取流地址...")
+                
+                # 获取流播放信息
+                play_info = wvp_client.play_channel(self.camera_id)
+                if not play_info:
+                    logger.error(f"摄像头 {self.camera_id} 无法获取流播放信息")
                     return False
                 
+                # 选择最佳流地址（优先RTSP）
+                if play_info.get("rtsp"):
+                    self.stream_url = play_info["rtsp"]
+                elif play_info.get("flv"):
+                    self.stream_url = play_info["flv"]
+                elif play_info.get("hls"):
+                    self.stream_url = play_info["hls"]
+                elif play_info.get("rtmp"):
+                    self.stream_url = play_info["rtmp"]
+                else:
+                    logger.error(f"摄像头 {self.camera_id} 无可用的流地址")
+                    return False
+                
+                logger.info(f"摄像头 {self.camera_id} 流地址: {self.stream_url}")
+                
+                # 启动ThreadedFrameReader
                 self.threaded_reader = ThreadedFrameReader(self.stream_url)
                 if not self.threaded_reader.start():
                     logger.error(f"摄像头 {self.camera_id} ThreadedFrameReader启动失败")
@@ -281,27 +234,10 @@ class AdaptiveFrameReader:
                 self.stats["avg_request_time"] = total_time / self.stats["total_requests"]
     
     def _get_snapshot_frame(self) -> Optional[np.ndarray]:
-        """通过WVP截图接口获取帧"""
+        """通过WVP全局通道截图接口获取帧"""
         try:
-            device_type = self.device_info["dataType"]
-            
-            # 第一步：请求截图
-            filename = None
-            if device_type == "gb28181":
-                filename = wvp_client.request_device_snap(
-                    self.device_info["device_id"],
-                    self.device_info["device_id"] # 在wvp中国标设备取截图，两个参数传入的均为device_id
-                )
-            elif device_type == "push":
-                filename = wvp_client.request_push_snap(
-                    self.device_info["app"],
-                    self.device_info["stream"]
-                )
-            elif device_type == "proxy":
-                filename = wvp_client.request_proxy_snap(
-                    self.device_info["app"],
-                    self.device_info["stream"]
-                )
+            # 第一步：请求全局通道截图
+            filename = wvp_client.request_channel_snap(self.camera_id)
             
             if not filename:
                 logger.warning(f"摄像头 {self.camera_id} 截图请求失败")
@@ -317,25 +253,7 @@ class AdaptiveFrameReader:
             logger.debug(f"摄像头 {self.camera_id} 截图文件名: {filename}, 提取mark: {mark}")
             
             # 第三步：获取截图数据
-            image_data = None
-            if device_type == "gb28181":
-                image_data = wvp_client.get_device_snap(
-                    self.device_info["device_id"],
-                    self.device_info["device_id"], 
-                    mark
-                )
-            elif device_type == "push":
-                image_data = wvp_client.get_push_snap(
-                    self.device_info["app"],
-                    self.device_info["stream"],
-                    mark
-                )
-            elif device_type == "proxy":
-                image_data = wvp_client.get_proxy_snap(
-                    self.device_info["app"],
-                    self.device_info["stream"],
-                    mark
-                )
+            image_data = wvp_client.get_channel_snap(self.camera_id, mark)
             
             if not image_data:
                 logger.warning(f"摄像头 {self.camera_id} 获取截图数据失败，mark: {mark}")
@@ -444,7 +362,6 @@ class AdaptiveFrameReader:
             "mode": self.mode,
             "frame_interval": self.frame_interval,
             "connection_overhead_threshold": self.connection_overhead_threshold,
-            "device_info": self.device_info,
             "stats": {
                 **self.stats,
                 "success_rate": success_rate

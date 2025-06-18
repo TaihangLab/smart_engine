@@ -1247,5 +1247,82 @@ class WVPClient:
                 logger.error(f"响应内容: {e.response.text}")
             return None
 
+    @auto_relogin
+    def request_channel_snap(self, channel_id: int) -> Optional[str]:
+        """
+        请求全局通道截图并返回路径
+        :param channel_id: 全局通道ID
+        :return: 截图文件路径
+        """
+        url = f"{self.base_url}/api/common/channel/snap"
+        try:
+            logger.info(f"请求全局通道截图: channel_id={channel_id}")
+            
+            params = {"channelId": channel_id}
+            
+            response = self.session.get(url, params=params)
+            logger.info(f"请求全局通道截图响应状态: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"请求全局通道截图失败，状态码: {response.status_code}")
+                logger.error(f"响应内容: {response.text}")
+                response.raise_for_status()
+            
+            try:
+                data = response.json()
+                logger.info(f"请求全局通道截图响应码: {data.get('code')}")
+                
+                if data.get("code") != 0:
+                    logger.error(f"请求全局通道截图失败: {data.get('msg')}")
+                    return None
+                
+                filename = data.get("data")
+                logger.info(f"全局通道截图请求成功，文件路径: {filename}")
+                return filename
+                
+            except ValueError:
+                logger.error(f"请求全局通道截图响应不是有效JSON: {response.text}")
+                return None
+        except requests.exceptions.RequestException as e:
+            logger.error(f"请求全局通道截图时出错: {str(e)}")
+            if hasattr(e, 'response') and e.response is not None:
+                logger.error(f"响应内容: {e.response.text}")
+            return None
+
+    def get_channel_snap(self, channel_id: int, mark: Optional[str] = None) -> Optional[bytes]:
+        """
+        获取全局通道截图图片
+        :param channel_id: 全局通道ID
+        :param mark: 标识
+        :return: 图片字节数据
+        """
+        url = f"{self.base_url}/api/common/channel/getsnap"
+        try:
+            logger.info(f"获取全局通道截图: channel_id={channel_id}, mark={mark}")
+            
+            params = {"channelId": channel_id}
+            if mark:
+                params["mark"] = mark
+                
+            response = self.session.get(url, params=params)
+            logger.info(f"获取全局通道截图响应状态: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"获取全局通道截图失败，状态码: {response.status_code}")
+                return None
+            
+            # 检查Content-Type是否为图片
+            content_type = response.headers.get('Content-Type', '')
+            if not content_type.startswith('image/'):
+                logger.warning(f"响应Content-Type不是图片类型: {content_type}")
+                
+            image_data = response.content
+            logger.info(f"成功获取全局通道截图，数据大小: {len(image_data)} 字节")
+            return image_data
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"获取全局通道截图时出错: {str(e)}")
+            return None
+
 # 创建全局WVP客户端实例
 wvp_client = WVPClient() 

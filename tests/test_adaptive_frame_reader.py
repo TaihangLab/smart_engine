@@ -39,7 +39,7 @@ def test_adaptive_frame_reader():
         )
         
         print(f"  模式: {reader1.mode}")
-        print(f"  设备信息: {reader1.device_info}")
+        print(f"  连接开销阈值: {reader1.connection_overhead_threshold}秒")
         
         if reader1.start():
             print("  ✅ 启动成功")
@@ -78,7 +78,7 @@ def test_adaptive_frame_reader():
         )
         
         print(f"  模式: {reader2.mode}")
-        print(f"  设备信息: {reader2.device_info}")
+        print(f"  连接开销阈值: {reader2.connection_overhead_threshold}秒")
         
         if reader2.start():
             print("  ✅ 启动成功")
