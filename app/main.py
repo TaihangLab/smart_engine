@@ -50,6 +50,9 @@ logging.basicConfig(
 logging.getLogger('app.services.rabbitmq_client').setLevel(log_level)
 logging.getLogger('app.services.alert_service').setLevel(log_level)
 logging.getLogger('app.api.endpoints.alerts').setLevel(log_level)
+logging.getLogger('app.skills.skill_base').setLevel(log_level)
+logging.getLogger('app.plugins.skills').setLevel(log_level)
+logging.getLogger('app.services.adaptive_frame_reader').setLevel(log_level)
 
 logger = logging.getLogger(__name__)
 

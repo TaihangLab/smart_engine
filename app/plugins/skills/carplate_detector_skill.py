@@ -48,6 +48,9 @@ class PlateRecognitionSkill(BaseSkill):
             
         self.classes = self.config["params"].get("classes", ["plate"])
         self.char_map = self._load_characters(self.char_dict_path)
+        
+        # 初始化字体缓存
+        self._init_fonts()
 
         self.log("info", f"初始化车牌识别技能：检测模型={self.model_det}，识别模型={self.model_rec}")
 
@@ -70,14 +73,14 @@ class PlateRecognitionSkill(BaseSkill):
                 return SkillResult.error_result("图像无效或加载失败")
 
             detections = self.detect_plates(image)
-            self.log("info", f"检测到 {len(detections)} 个车牌")
+            self.log("debug", f"检测到 {len(detections)} 个车牌")
 
             for i, det in enumerate(detections):
                 crop_img = self.crop_plate(image, det["bbox"], expand_ratio=self.expand_ratio)
                 plate_text, plate_score = self.recognize_text(crop_img)
                 det["plate_text"] = plate_text
                 det["plate_score"] = plate_score
-                self.log("info", f"车牌{i+1}: {plate_text}, 置信度: {plate_score:.3f}, 位置: {det['bbox']}")
+                self.log("debug", f"车牌{i+1}: {plate_text}, 置信度: {plate_score:.3f}, 位置: {det['bbox']}")
 
             results = detections
             
@@ -85,16 +88,16 @@ class PlateRecognitionSkill(BaseSkill):
                 results = self.add_tracking_ids(detections)
 
             if self.is_fence_config_valid(fence_config):
-                self.log("info", f"应用电子围栏过滤: {fence_config}")
+                self.log("debug", f"应用电子围栏过滤: {fence_config}")
                 filtered_results = []
                 for detection in results:
                     point = self._get_detection_point(detection)
                     if point and self.is_point_inside_fence(point, fence_config):
                         filtered_results.append(detection)
                 results = filtered_results
-                self.log("info", f"围栏过滤后检测结果数量: {len(results)}")
+                self.log("debug", f"围栏过滤后检测结果数量: {len(results)}")
             elif fence_config:
-                self.log("info", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
+                self.log("debug", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
 
 
 
@@ -103,7 +106,7 @@ class PlateRecognitionSkill(BaseSkill):
                 "count": len(results)
             }
 
-            self.log("info", f"车牌识别完成，最终结果数量: {len(detections)}")
+            self.log("debug", f"车牌识别完成，最终结果数量: {len(results)}")
             return SkillResult.success_result(result_data)
 
         except Exception as e:
@@ -222,6 +225,79 @@ class PlateRecognitionSkill(BaseSkill):
         avg_score = float(np.mean(conf_list)) if conf_list else 0.0
         return text, avg_score
 
+    def _init_fonts(self):
+        """初始化字体缓存，只在技能初始化时执行一次"""
+        self.font_main = None
+        self.font_sub = None
+        self.use_chinese_display = False
+        
+        try:
+            # 多平台字体路径
+            font_paths = [
+                # Windows系统字体
+                "C:/Windows/Fonts/msyh.ttc",  # 微软雅黑
+                "C:/Windows/Fonts/simhei.ttf",  # 黑体
+                "C:/Windows/Fonts/simsun.ttc",  # 宋体
+                
+                # Linux系统字体 - 中文字体
+                "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # 文泉驿微米黑
+                "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",    # 文泉驿正黑
+                "/usr/share/fonts/truetype/arphic/ukai.ttc",       # AR PL UKai
+                "/usr/share/fonts/truetype/arphic/uming.ttc",      # AR PL UMing
+                "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Noto Sans CJK
+                "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",  # Droid Sans Fallback
+                "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Liberation Sans
+                
+                # Ubuntu/Debian 额外路径
+                "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+                "/usr/share/fonts/TTF/DejaVuSans.ttf",
+                
+                # CentOS/RHEL 路径
+                "/usr/share/fonts/chinese/TrueType/wqy-zenhei.ttc",
+                "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
+                
+                # macOS系统字体
+                "/System/Library/Fonts/Arial.ttf",
+                "/System/Library/Fonts/Helvetica.ttc",
+                "/Library/Fonts/Arial.ttf",
+            ]
+            
+            found_font_path = None
+            
+            for font_path in font_paths:
+                if os.path.exists(font_path):
+                    try:
+                        self.font_main = ImageFont.truetype(font_path, 24)  # 主文字字体
+                        self.font_sub = ImageFont.truetype(font_path, 18)   # 副文字字体
+                        found_font_path = font_path
+                        self.use_chinese_display = True
+                        self.log("info", f"字体初始化成功: {font_path}")
+                        break
+                    except Exception as font_error:
+                        self.log("debug", f"字体文件存在但加载失败: {font_path}, 错误: {font_error}")
+                        continue
+            
+            # 如果没有找到字体，尝试使用系统默认字体
+            if self.font_main is None:
+                self.log("warning", "未找到合适的字体文件，将使用英文显示")
+                try:
+                    # 尝试使用PIL的默认字体
+                    self.font_main = ImageFont.load_default()
+                    self.font_sub = ImageFont.load_default()
+                    self.use_chinese_display = False
+                    self.log("info", "使用PIL默认字体（英文显示）")
+                except Exception as default_error:
+                    self.log("warning", f"加载默认字体失败: {default_error}，将使用OpenCV文字渲染")
+                    self.font_main = None
+                    self.font_sub = None
+                    self.use_chinese_display = False
+                
+        except Exception as e:
+            self.log("error", f"字体初始化过程出现异常: {str(e)}")
+            self.font_main = None
+            self.font_sub = None
+            self.use_chinese_display = False
+
     def crop_plate(self, img: np.ndarray, bbox: List[int], expand_ratio: float = 0.08) -> np.ndarray:
         h, w = img.shape[:2]
         x1, y1, x2, y2 = bbox
@@ -254,76 +330,10 @@ class PlateRecognitionSkill(BaseSkill):
             text_color = (255, 255, 255)   # 白色文字
             confidence_color = (255, 255, 0)  # 黄色置信度文字
             
-            # 转换为PIL图像以支持中文绘制
-            pil_image = Image.fromarray(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
-            draw = ImageDraw.Draw(pil_image)
-            
-            # 尝试加载中文字体
-            try:
-                # 多平台字体路径
-                font_paths = [
-                    # Windows系统字体
-                    "C:/Windows/Fonts/msyh.ttc",  # 微软雅黑
-                    "C:/Windows/Fonts/simhei.ttf",  # 黑体
-                    "C:/Windows/Fonts/simsun.ttc",  # 宋体
-                    
-                    # Linux系统字体 - 中文字体
-                    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",  # 文泉驿微米黑
-                    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",    # 文泉驿正黑
-                    "/usr/share/fonts/truetype/arphic/ukai.ttc",       # AR PL UKai
-                    "/usr/share/fonts/truetype/arphic/uming.ttc",      # AR PL UMing
-                    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Noto Sans CJK
-                    "/usr/share/fonts/truetype/droid/DroidSansFallbackFull.ttf",  # Droid Sans Fallback
-                    "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # Liberation Sans
-                    
-                    # Ubuntu/Debian 额外路径
-                    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
-                    "/usr/share/fonts/TTF/DejaVuSans.ttf",
-                    
-                    # CentOS/RHEL 路径
-                    "/usr/share/fonts/chinese/TrueType/wqy-zenhei.ttc",
-                    "/usr/share/fonts/wqy-zenhei/wqy-zenhei.ttc",
-                    
-                    # macOS系统字体
-                    "/System/Library/Fonts/Arial.ttf",
-                    "/System/Library/Fonts/Helvetica.ttc",
-                    "/Library/Fonts/Arial.ttf",
-                ]
-                
-                font_main = None
-                font_sub = None
-                found_font_path = None
-                
-                for font_path in font_paths:
-                    if os.path.exists(font_path):
-                        try:
-                            font_main = ImageFont.truetype(font_path, 24)  # 主文字字体
-                            font_sub = ImageFont.truetype(font_path, 18)   # 副文字字体
-                            found_font_path = font_path
-                            self.log("info", f"成功加载字体: {font_path}")
-                            break
-                        except Exception as font_error:
-                            self.log("warning", f"字体文件存在但加载失败: {font_path}, 错误: {font_error}")
-                            continue
-                
-                # 如果没有找到字体，尝试使用系统默认字体
-                if font_main is None:
-                    self.log("warning", "未找到合适的字体文件，尝试使用默认字体")
-                    try:
-                        # 尝试使用PIL的默认字体，并设置一个合理的大小
-                        font_main = ImageFont.load_default()
-                        font_sub = ImageFont.load_default()
-                        self.log("info", "使用PIL默认字体")
-                    except Exception as default_error:
-                        self.log("error", f"加载默认字体也失败: {default_error}")
-                        # 最后的备选方案：创建一个简单的字体对象
-                        font_main = None
-                        font_sub = None
-                    
-            except Exception as e:
-                self.log("error", f"字体加载过程出现异常: {str(e)}")
-                font_main = None
-                font_sub = None
+            # 使用初始化时加载的字体
+            font_main = self.font_main
+            font_sub = self.font_sub
+            use_chinese_display = self.use_chinese_display
             
             for i, detection in enumerate(detections):
                 bbox = detection.get("bbox", [])
@@ -340,7 +350,7 @@ class PlateRecognitionSkill(BaseSkill):
                     # 准备显示文字
                     if plate_text:
                         # 主要显示车牌号码
-                        if font_main is not None:
+                        if use_chinese_display:
                             main_text = f"车牌: {plate_text}"
                             # 副标题显示置信度信息
                             sub_text = f"检测:{confidence:.2f} 识别:{plate_score:.2f}"
@@ -349,7 +359,7 @@ class PlateRecognitionSkill(BaseSkill):
                             main_text = f"Plate: {plate_text}"
                             sub_text = f"Det:{confidence:.2f} Rec:{plate_score:.2f}"
                     else:
-                        if font_main is not None:
+                        if use_chinese_display:
                             main_text = "车牌: 识别中..."
                             sub_text = f"置信度: {confidence:.2f}"
                         else:
@@ -360,23 +370,29 @@ class PlateRecognitionSkill(BaseSkill):
                     use_pil_draw = font_main is not None
                     
                     if use_pil_draw:
-                        # 使用PIL绘制中文
+                        # 使用PIL绘制中文，先创建临时draw对象来计算文字尺寸
                         try:
-                            main_bbox = draw.textbbox((0, 0), main_text, font=font_main)
-                            sub_bbox = draw.textbbox((0, 0), sub_text, font=font_sub)
+                            # 创建临时的PIL图像和draw对象来计算文字尺寸
+                            temp_img = Image.new('RGB', (100, 100), (0, 0, 0))
+                            temp_draw = ImageDraw.Draw(temp_img)
                             
-                            main_w = main_bbox[2] - main_bbox[0]
-                            main_h = main_bbox[3] - main_bbox[1]
-                            sub_w = sub_bbox[2] - sub_bbox[0]
-                            sub_h = sub_bbox[3] - sub_bbox[1]
-                        except:
-                            # 如果textbbox不可用，使用textsize（较老的PIL版本）
                             try:
-                                main_w, main_h = draw.textsize(main_text, font=font_main)
-                                sub_w, sub_h = draw.textsize(sub_text, font=font_sub)
+                                # 尝试使用textbbox（较新的PIL版本）
+                                main_bbox = temp_draw.textbbox((0, 0), main_text, font=font_main)
+                                sub_bbox = temp_draw.textbbox((0, 0), sub_text, font=font_sub)
+                                
+                                main_w = main_bbox[2] - main_bbox[0]
+                                main_h = main_bbox[3] - main_bbox[1]
+                                sub_w = sub_bbox[2] - sub_bbox[0]
+                                sub_h = sub_bbox[3] - sub_bbox[1]
                             except:
-                                # PIL方法都失败，改用OpenCV
-                                use_pil_draw = False
+                                # 如果textbbox不可用，使用textsize（较老的PIL版本）
+                                main_w, main_h = temp_draw.textsize(main_text, font=font_main)
+                                sub_w, sub_h = temp_draw.textsize(sub_text, font=font_sub)
+                        except Exception as pil_error:
+                            # PIL方法都失败，记录错误并改用OpenCV
+                            self.log("debug", f"PIL文字尺寸计算失败: {pil_error}")
+                            use_pil_draw = False
                     
                     if not use_pil_draw:
                         # 使用OpenCV绘制英文，计算文字尺寸
@@ -419,7 +435,7 @@ class PlateRecognitionSkill(BaseSkill):
                     # 根据字体可用性选择绘制方式
                     if use_pil_draw:
                         # 使用PIL绘制中文
-                        # 重新转换为PIL图像以绘制文字
+                        # 转换为PIL图像以绘制文字
                         pil_image = Image.fromarray(cv2.cvtColor(annotated_frame, cv2.COLOR_BGR2RGB))
                         draw = ImageDraw.Draw(pil_image)
                         

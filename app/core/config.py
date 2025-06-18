@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # 服务配置
     DEBUG: bool = Field(default=True, description="是否启用调试模式")
-    LOG_LEVEL: str = Field(default="DEBUG", description="日志级别")
+    LOG_LEVEL: str = Field(default="INFO", description="日志级别")
     
     # Triton服务器配置
     TRITON_URL: str = Field(default="172.18.1.1:8201", description="Triton服务器地址")
@@ -221,6 +221,9 @@ class Settings(BaseSettings):
     RTSP_STREAMING_QUALITY_CRF: int = Field(default=23, description="RTSP推流视频质量参数(CRF)")
     RTSP_STREAMING_MAX_BITRATE: str = Field(default="2M", description="RTSP推流最大码率")
     RTSP_STREAMING_BUFFER_SIZE: str = Field(default="4M", description="RTSP推流缓冲区大小")
+    
+    # 智能帧获取配置
+    ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD: float = Field(default=30.0, description="连接开销阈值（秒），超过此值使用按需截图模式")
 
     def get_sse_config(self) -> dict:
         """根据环境获取SSE配置"""

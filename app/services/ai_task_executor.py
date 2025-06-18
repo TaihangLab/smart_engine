@@ -26,78 +26,6 @@ from app.services.minio_client import minio_client
 
 logger = logging.getLogger(__name__)
 
-class ThreadedFrameReader:
-    """多线程帧读取器 - 用于获取最新帧"""
-    
-    def __init__(self, stream_url: str):
-        self.stream_url = stream_url
-        self.latest_frame = None
-        self.frame_lock = threading.Lock()
-        self.running = False
-        self.read_thread = None
-        self.cap = None
-        
-    def start(self) -> bool:
-        """启动帧读取线程"""
-        try:
-            self.cap = cv2.VideoCapture(self.stream_url)
-            if not self.cap.isOpened():
-                logger.error(f"无法打开视频流: {self.stream_url}")
-                return False
-                
-            # 设置缓冲区为1以减少延迟
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            self.running = True
-            self.read_thread = threading.Thread(target=self._read_frames, daemon=True)
-            self.read_thread.start()
-            
-            logger.info(f"多线程帧读取器已启动: {self.stream_url}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"启动多线程帧读取器失败: {str(e)}")
-            return False
-    
-    def _read_frames(self):
-        """帧读取线程函数"""
-        while self.running:
-            try:
-                if self.cap and self.cap.isOpened():
-                    ret, frame = self.cap.read()
-                    if ret:
-                        # 只保留最新帧，线程安全更新
-                        with self.frame_lock:
-                            self.latest_frame = frame.copy()
-                    else:
-                        # 读取失败，稍作延迟后继续
-                        time.sleep(0.1)
-                else:
-                    time.sleep(0.1)
-            except Exception as e:
-                logger.error(f"读取帧时出错: {str(e)}")
-                time.sleep(0.1)
-    
-    def get_latest_frame(self) -> Optional[np.ndarray]:
-        """获取最新帧"""
-        try:
-            with self.frame_lock:
-                if self.latest_frame is not None:
-                    return self.latest_frame.copy()
-                return None
-        except Exception as e:
-            logger.error(f"获取最新帧时出错: {str(e)}")
-            return None
-    
-    def stop(self):
-        """停止帧读取"""
-        self.running = False
-        if self.read_thread and self.read_thread.is_alive():
-            self.read_thread.join(timeout=5)
-        if self.cap:
-            self.cap.release()
-        logger.info("多线程帧读取器已停止")
-
 
 class OptimizedAsyncProcessor:
     """优化的异步帧处理器 - 减少拷贝，提升性能"""
@@ -307,10 +235,16 @@ class OptimizedAsyncProcessor:
                         
                     else:
                         consecutive_failures += 1
-                        # 推流失败时适当降低帧率
+                        # 推流失败时的处理策略
                         if consecutive_failures > 3:
                             adaptive_interval = min(adaptive_interval * 1.2, target_interval * 2)
-                            logger.warning(f"任务 {self.task_id} 推流连续失败，降低帧率")
+                            logger.warning(f"任务 {self.task_id} 推流连续失败({consecutive_failures}次)，降低帧率")
+                        
+                        # 如果连续失败次数过多，尝试重置重启计数
+                        if consecutive_failures > 10 and consecutive_failures % 20 == 0:
+                            logger.info(f"任务 {self.task_id} 推流连续失败{consecutive_failures}次，重置FFmpeg重启计数")
+                            if self.rtsp_streamer:
+                                self.rtsp_streamer.reset_restart_count()
                         
                         time.sleep(0.05)  # 短暂等待
                 else:
@@ -537,6 +471,12 @@ class FFmpegRTSPStreamer:
         self.process = None
         self.is_running = False
         
+        # 自动重启相关参数
+        self.restart_count = 0
+        self.max_restart_attempts = 5
+        self.last_restart_time = 0
+        self.restart_interval = 10  # 重启间隔（秒）
+        
     def start(self) -> bool:
         """启动FFmpeg推流进程"""
         try:
@@ -586,13 +526,24 @@ class FFmpegRTSPStreamer:
         """推送一帧数据"""
         try:
             if not self.is_running or not self.process:
-                return False
+                # 尝试自动重启
+                if self._should_restart():
+                    logger.info("尝试自动重启FFmpeg推流器")
+                    if self._restart():
+                        logger.info("FFmpeg推流器自动重启成功")
+                    else:
+                        return False
+                else:
+                    return False
             
             # 检查进程是否还在运行
             if self.process.poll() is not None:
-                logger.warning("FFmpeg进程已退出，尝试重启")
-                self.is_running = False
-                return False
+                logger.warning("FFmpeg进程已退出，尝试自动重启")
+                if self._should_restart() and self._restart():
+                    logger.info("FFmpeg进程重启成功")
+                else:
+                    self.is_running = False
+                    return False
             
             # 调整帧尺寸
             if frame.shape[1] != self.width or frame.shape[0] != self.height:
@@ -602,12 +553,18 @@ class FFmpegRTSPStreamer:
             self.process.stdin.write(frame.tobytes())
             self.process.stdin.flush()
             
+            # 推流成功，重置重启计数
+            self.restart_count = 0
             return True
             
         except BrokenPipeError:
-            logger.warning("FFmpeg推流管道断开")
-            self.is_running = False
-            return False
+            logger.warning("FFmpeg推流管道断开，尝试自动重启")
+            if self._should_restart() and self._restart():
+                logger.info("管道断开后重启成功，重新推送帧")
+                return self.push_frame(frame)  # 递归调用一次
+            else:
+                self.is_running = False
+                return False
         except Exception as e:
             logger.error(f"推送帧数据失败: {str(e)}")
             return False
@@ -638,6 +595,91 @@ class FFmpegRTSPStreamer:
                 
         except Exception as e:
             logger.error(f"停止FFmpeg推流器时出错: {str(e)}")
+    
+    def _should_restart(self) -> bool:
+        """判断是否应该尝试重启"""
+        current_time = time.time()
+        
+        # 检查重启次数限制
+        if self.restart_count >= self.max_restart_attempts:
+            logger.error(f"FFmpeg推流器重启次数已达上限({self.max_restart_attempts})，停止重启")
+            return False
+        
+        # 检查重启间隔
+        if current_time - self.last_restart_time < self.restart_interval:
+            logger.debug(f"距离上次重启时间不足{self.restart_interval}秒，暂不重启")
+            return False
+        
+        return True
+    
+    def _restart(self) -> bool:
+        """重启FFmpeg推流器"""
+        try:
+            # 先停止当前进程
+            self._force_stop()
+            
+            # 更新重启统计
+            self.restart_count += 1
+            self.last_restart_time = time.time()
+            
+            logger.info(f"正在重启FFmpeg推流器(第{self.restart_count}次): {self.rtsp_url}")
+            
+            # 重新启动
+            return self.start()
+            
+        except Exception as e:
+            logger.error(f"重启FFmpeg推流器失败: {str(e)}")
+            return False
+    
+    def _force_stop(self):
+        """强制停止FFmpeg进程"""
+        try:
+            if self.process:
+                self.is_running = False
+                
+                # 尝试优雅关闭
+                if self.process.stdin:
+                    try:
+                        self.process.stdin.close()
+                    except:
+                        pass
+                
+                # 等待进程结束
+                try:
+                    self.process.wait(timeout=2)
+                except subprocess.TimeoutExpired:
+                    # 强制终止
+                    self.process.terminate()
+                    try:
+                        self.process.wait(timeout=2)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                        self.process.wait()
+                
+                self.process = None
+                logger.debug("FFmpeg进程已强制停止")
+                
+        except Exception as e:
+            logger.error(f"强制停止FFmpeg进程时出错: {str(e)}")
+    
+    def reset_restart_count(self):
+        """重置重启计数（用于外部调用）"""
+        self.restart_count = 0
+        logger.info("FFmpeg推流器重启计数已重置")
+    
+    def get_status(self) -> dict:
+        """获取推流器状态信息"""
+        status = {
+            "is_running": self.is_running,
+            "process_alive": self.process is not None and self.process.poll() is None if self.process else False,
+            "restart_count": self.restart_count,
+            "max_restart_attempts": self.max_restart_attempts,
+            "last_restart_time": self.last_restart_time,
+            "rtsp_url": self.rtsp_url,
+            "fps": self.fps,
+            "resolution": f"{self.width}x{self.height}"
+        }
+        return status
 
 
 class AITaskExecutor:
@@ -866,8 +908,8 @@ class AITaskExecutor:
             # 创建新的数据库会话
             db = next(get_db())
             
-            # 获取视频流
-            stream_url, should_delete = self._get_stream_url(task.camera_id)
+            # 检查摄像头通道是否存在
+            _, should_delete = self._get_stream_url(task.camera_id)
             if should_delete:
                 logger.warning(f"摄像头 {task.camera_id} 通道不存在，将自动删除任务 {task.id}")
                 # 删除任务
@@ -881,9 +923,6 @@ class AITaskExecutor:
                 except Exception as e:
                     logger.error(f"删除任务 {task.id} 时出错: {str(e)}")
                 return
-            elif stream_url is None:
-                logger.error(f"获取任务 {task.id} 的视频流失败")
-                return
                 
             # 加载技能实例
             skill_instance = self._load_skill_for_task(task, db)
@@ -891,18 +930,23 @@ class AITaskExecutor:
                 logger.error(f"加载任务 {task.id} 的技能实例失败")
                 return
                 
-            # 尝试使用GStreamer打开视频流
-            cap = self._create_gstreamer_capture(stream_url)
-            frame_reader = None
-            use_gstreamer = cap.isOpened()
+            # 使用智能自适应帧读取器
+            from app.services.adaptive_frame_reader import AdaptiveFrameReader
+            from app.core.config import settings
             
-            if not use_gstreamer:
-                logger.warning(f"GStreamer失败，切换到多线程读取模式: {stream_url}")
-                # 使用多线程帧读取器作为fallback
-                frame_reader = ThreadedFrameReader(stream_url)
-                if not frame_reader.start():
-                    logger.error(f"多线程帧读取器也无法启动: {stream_url}")
-                    return
+            # 计算帧间隔
+            frame_interval = 1.0 / task.frame_rate if task.frame_rate > 0 else 1.0
+            
+            # 创建自适应帧读取器
+            frame_reader = AdaptiveFrameReader(
+                camera_id=task.camera_id,
+                frame_interval=frame_interval,
+                connection_overhead_threshold=settings.ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD
+            )
+            
+            if not frame_reader.start():
+                logger.error(f"无法启动自适应帧读取器，摄像头: {task.camera_id}")
+                return
             
             # 初始化优化的异步帧处理器
             frame_processor = OptimizedAsyncProcessor(task.id, max_queue_size=2)
@@ -929,7 +973,7 @@ class AITaskExecutor:
                 rtsp_url = f"{rtsp_base_url}/{skill_name}_{task.id}?sign={rtsp_sign}"
                 
                 # 获取视频流分辨率
-                stream_width, stream_height = self._get_video_resolution(cap if use_gstreamer else frame_reader)
+                stream_width, stream_height = frame_reader.get_resolution()
                 
                 # 获取推流帧率
                 # 使用任务帧率和全局默认帧率中的最大值
@@ -985,28 +1029,12 @@ class AITaskExecutor:
                     
                 last_frame_time = current_time
                 
-                # 根据模式读取帧
-                if use_gstreamer:
-                    # GStreamer模式：直接读取
-                    ret, frame = cap.read()
-                    if not ret:
-                        logger.warning(f"任务 {task.id} GStreamer读取失败，直接切换到多线程模式: {stream_url}")
-                        # 直接切换到多线程模式，不再尝试重连GStreamer
-                        cap.release()
-                        use_gstreamer = False
-                        frame_reader = ThreadedFrameReader(stream_url)
-                        if not frame_reader.start():
-                            logger.error(f"无法启动多线程帧读取器")
-                            break
-                        logger.info(f"任务 {task.id} 已成功切换到多线程帧读取模式")
-                        continue
-                else:
-                    # 多线程模式：获取最新帧
-                    frame = frame_reader.get_latest_frame()
-                    if frame is None:
-                        logger.warning(f"任务 {task.id} 多线程读取器无帧可用")
-                        time.sleep(0.1)
-                        continue
+                # 自适应模式：获取最新帧
+                frame = frame_reader.get_latest_frame()
+                if frame is None:
+                    logger.warning(f"任务 {task.id} 自适应读取器无帧可用")
+                    time.sleep(0.1)
+                    continue
                 
                 # 将原始帧投递到优化的异步处理器
                 # 注意：这里frame会被直接引用，不进行拷贝
@@ -1027,9 +1055,7 @@ class AITaskExecutor:
             frame_processor.stop()
                 
             # 释放资源
-            if use_gstreamer and cap:
-                cap.release()
-            elif frame_reader:
+            if frame_reader:
                 frame_reader.stop()
                 
             # 停止RTSP推流器
@@ -1043,31 +1069,21 @@ class AITaskExecutor:
         finally:
             db.close()
     
-    def _get_video_resolution(self, video_source) -> Tuple[int, int]:
+    def _get_video_resolution(self, frame_reader) -> Tuple[int, int]:
         """获取视频流的分辨率
         
         Args:
-            video_source: 可以是cv2.VideoCapture对象或ThreadedFrameReader对象
+            frame_reader: AdaptiveFrameReader对象
             
         Returns:
             Tuple[int, int]: (宽度, 高度)，失败时返回默认分辨率(1920, 1080)
         """
         try:
-            if isinstance(video_source, cv2.VideoCapture):
-                # GStreamer模式
-                if video_source.isOpened():
-                    width = int(video_source.get(cv2.CAP_PROP_FRAME_WIDTH))
-                    height = int(video_source.get(cv2.CAP_PROP_FRAME_HEIGHT))
-                    if width > 0 and height > 0:
-                        logger.info(f"从VideoCapture获取视频分辨率: {width}x{height}")
-                        return width, height
-            elif hasattr(video_source, 'get_latest_frame'):
-                # 多线程模式
-                frame = video_source.get_latest_frame()
-                if frame is not None:
-                    height, width = frame.shape[:2]
-                    logger.info(f"从ThreadedFrameReader获取视频分辨率: {width}x{height}")
-                    return width, height
+            if hasattr(frame_reader, 'get_resolution'):
+                # 自适应帧读取器模式
+                width, height = frame_reader.get_resolution()
+                logger.info(f"从AdaptiveFrameReader获取视频分辨率: {width}x{height}")
+                return width, height
             
             # 如果无法获取分辨率，返回默认值
             logger.warning("无法获取视频分辨率，使用默认分辨率: 1920x1080")
@@ -1077,67 +1093,7 @@ class AITaskExecutor:
             logger.error(f"获取视频分辨率时出错: {str(e)}")
             return 1920, 1080
 
-    def _create_gstreamer_capture(self, stream_url: str) -> cv2.VideoCapture:
-        """创建使用GStreamer的VideoCapture对象以获取最新帧
-        
-        Args:
-            stream_url: 视频流地址
-            
-        Returns:
-            配置了GStreamer pipeline的VideoCapture对象
-        """
-        try:
-            # 根据流类型构建不同的GStreamer pipeline
-            if stream_url.startswith('rtsp://'):
-                # RTSP流 - 设置较小的缓冲区以减少延迟
-                gst_pipeline = (
-                    f"rtspsrc location={stream_url} latency=0 buffer-mode=1 ! "
-                    "queue max-size-buffers=1 leaky=downstream ! "
-                    "rtph264depay ! h264parse ! avdec_h264 ! "
-                    "videoconvert ! appsink drop=true max-buffers=1"
-                )
-            elif stream_url.startswith('http://') and stream_url.endswith('.flv'):
-                # FLV流
-                gst_pipeline = (
-                    f"souphttpsrc location={stream_url} ! "
-                    "queue max-size-buffers=1 leaky=downstream ! "
-                    "flvdemux ! h264parse ! avdec_h264 ! "
-                    "videoconvert ! appsink drop=true max-buffers=1"
-                )
-            elif stream_url.startswith('http://') and '.m3u8' in stream_url:
-                # HLS流
-                gst_pipeline = (
-                    f"souphttpsrc location={stream_url} ! "
-                    "queue max-size-buffers=1 leaky=downstream ! "
-                    "hlsdemux ! h264parse ! avdec_h264 ! "
-                    "videoconvert ! appsink drop=true max-buffers=1"
-                )
-            else:
-                # 回退到标准OpenCV方法
-                logger.warning(f"不支持的流格式，使用标准OpenCV方法: {stream_url}")
-                return cv2.VideoCapture(stream_url)
-            
-            # 创建GStreamer VideoCapture
-            cap = cv2.VideoCapture(gst_pipeline, cv2.CAP_GSTREAMER)
-            
-            if cap.isOpened():
-                logger.info(f"成功创建GStreamer capture: {stream_url}")
-                # 设置缓冲区大小为1以获得最新帧
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            else:
-                logger.warning(f"GStreamer capture创建失败，回退到标准方法: {stream_url}")
-                cap = cv2.VideoCapture(stream_url)
-                if cap.isOpened():
-                    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            
-            return cap
-            
-        except Exception as e:
-            logger.error(f"创建GStreamer capture失败: {str(e)}，使用标准方法")
-            cap = cv2.VideoCapture(stream_url)
-            if cap.isOpened():
-                cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
-            return cap
+
     
 
     
