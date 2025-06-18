@@ -19,8 +19,8 @@
 - **SSE实时通信**：支持Server-Sent Events实时推送预警信息
 - **系统监控**：提供健康检查接口，监控系统和依赖服务状态
 - **目标跟踪**：集成SORT算法，支持多目标跟踪，避免重复计数
-- **高性能视频流处理**：支持GStreamer硬件加速视频处理，自动fallback到多线程模式
-- **实时帧获取**：优化的视频流处理，确保AI分析使用最新帧数据，减少延迟
+- **智能自适应帧读取**：基于连接开销智能选择连续流模式或按需截图模式，自动优化资源使用
+- **高性能视频流处理**：采用多线程视频处理，确保AI分析使用最新帧数据，减少延迟
 - **异步队列架构**：三层解耦设计（采集→检测→推流），支持独立的帧率控制和智能丢帧
 - **RTSP检测结果推流**：可选的FFmpeg RTSP推流功能，实时推送带检测框的视频流
 - **内存优化**：减少不必要的帧拷贝，智能检测框绘制，大幅降低内存使用
@@ -37,7 +37,7 @@
 - **实时通信**：Server-Sent Events (SSE)
 - **技能系统**：插件式架构，支持动态加载
 - **目标跟踪**：SORT (Simple Online and Realtime Tracking)
-- **视频流处理**：GStreamer（硬件加速）+ 多线程fallback机制
+- **视频流处理**：智能自适应帧读取 + 多线程视频读取架构
 - **异步队列**：Python Queue + 多线程架构
 - **图像处理**：OpenCV
 - **数值计算**：NumPy
@@ -93,6 +93,7 @@ app/
 │       ├── p.txt                           # 车牌字符字典
 │       └── README.md                       # 技能开发指南
 ├── services/               # 业务服务层
+│   ├── adaptive_frame_reader.py        # 智能自适应帧读取器
 │   ├── ai_task_executor.py             # AI任务执行器（核心调度引擎）
 │   ├── ai_task_service.py              # AI任务服务
 │   ├── alert_service.py                # 预警服务
@@ -112,6 +113,8 @@ app/
 │   ├── skill_factory.py    # 技能工厂，负责创建技能对象
 │   └── skill_manager.py    # 技能管理器，负责管理技能生命周期
 └── main.py                 # 应用入口点
+├── docs/                       # 技术文档目录
+│   └── adaptive_frame_reader.md # 自适应帧读取器技术文档
 ├── requirements.txt            # Python依赖包列表
 └── README.md                   # 项目说明文档
 ```
@@ -222,31 +225,51 @@ app/
 - **行为分析**：跟踪人员轨迹和状态变化
 - **统计分析**：准确统计进出人员数量
 
+### 智能自适应帧读取系统
+
+#### 1. 智能模式切换
+- **连接开销评估**：实时计算流连接建立时间，动态选择最优模式
+- **连续流模式**：适用于高频检测（连接开销 < 阈值），使用ThreadedFrameReader连续读取
+- **按需截图模式**：适用于低频检测（连接开销 ≥ 阈值），通过WVP API按需获取快照
+- **自动切换**：根据网络状况和检测频率自动在两种模式间切换
+
+#### 2. 按需截图优化
+- **预拍摄机制**：使用`request_device_snap`预先触发摄像头拍摄
+- **时间戳提取**：从返回文件名自动提取时间戳（如"live_plate_20250617093238.jpg"）
+- **精确获取**：使用提取的时间戳作为mark参数调用`get_device_snap`获取图片
+- **资源优化**：避免长时间保持不必要的视频流连接，节省带宽和系统资源
+
+#### 3. 连接开销阈值配置
+```bash
+# 环境变量配置
+ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD=30
+
+# 推荐设置
+# 本地网络：10-25秒
+# 局域网：25-50秒  
+# 互联网：40-60+秒
+```
+
+#### 4. 智能性能优化
+- **分辨率缓存**：自动获取并缓存视频流分辨率信息
+- **线程安全**：确保多线程环境下的数据一致性
+- **资源管理**：自动管理连接生命周期，避免资源泄漏
+- **错误恢复**：支持网络中断后的自动重连和模式切换
+
 ### 高性能视频流处理系统
 
-#### 1. GStreamer硬件加速
-- **RTSP流优化**：使用GStreamer pipeline进行低延迟视频处理
-  ```
-  rtspsrc location=rtsp://... latency=0 buffer-mode=1 ! 
-  queue max-size-buffers=1 leaky=downstream ! 
-  rtph264depay ! h264parse ! avdec_h264 ! 
-  videoconvert ! appsink drop=true max-buffers=1
-  ```
-- **多格式支持**：自动识别RTSP、FLV、HLS流并使用对应的GStreamer元素
-- **硬件解码**：利用GPU硬件加速进行视频解码（如可用）
-
-#### 2. 多线程Fallback机制
-- **智能切换**：GStreamer失败时自动切换到多线程读取模式
+#### 1. 多线程视频读取
 - **实时帧获取**：独立线程持续读取视频流，主线程获取最新帧
 - **线程安全**：使用锁机制确保帧数据的线程安全访问
 - **资源管理**：自动管理线程生命周期和资源释放
+- **缓冲区控制**：设置缓冲区大小为1，保证获取最新帧
 
-#### 3. 实时性优化
-- **缓冲区控制**：设置`max-buffers=1`和`leaky=downstream`丢弃旧帧
+#### 2. 实时性优化
 - **精确帧率控制**：动态计算睡眠时间，确保帧率精确度
-- **延迟最小化**：优化视频处理pipeline，减少端到端延迟
+- **延迟最小化**：优化视频处理流程，减少端到端延迟
+- **智能重连**：自动处理视频流断线重连
 
-#### 4. 异步队列架构
+#### 3. 异步队列架构
 - **三层解耦设计**：视频采集、目标检测、推流三个层次完全解耦
 - **独立帧率控制**：采集帧率、检测帧率、推流帧率可以独立配置
 - **智能队列管理**：最大队列长度限制，自动丢弃最旧帧，避免内存堆积
@@ -254,7 +277,7 @@ app/
 - **性能监控**：实时统计采集FPS、检测FPS、推流FPS和丢帧率
 - **自适应推流**：推流失败时自动降低帧率，成功时逐渐恢复
 
-#### 5. RTSP检测结果推流
+#### 4. RTSP检测结果推流
 - **可选推流功能**：支持将带检测框的视频流推送到RTSP服务器
 - **动态地址生成**：自动生成基于技能名和任务ID的推流地址
   ```
@@ -265,7 +288,7 @@ app/
 - **自适应推流**：根据网络状况动态调整推流质量和帧率
 - **智能资源管理**：只在启用推流时才绘制检测框，节省CPU资源
 
-#### 6. 通道智能管理
+#### 5. 通道智能管理
 - **自动通道检测**：任务执行前自动检查摄像头通道是否存在
 - **智能清理**：通道不存在时自动删除相关任务和调度作业
 - **流地址智能获取**：优先使用RTSP流，备选FLV、HLS、RTMP流
@@ -427,57 +450,7 @@ conda activate smart_engine
 pip install -r requirements.txt
 ```
 
-### 2. GStreamer安装（推荐）
-
-GStreamer提供硬件加速视频处理，显著提升性能。如果安装失败，系统会自动fallback到多线程模式。
-
-#### Windows 安装
-1. 从 [GStreamer官网](https://gstreamer.freedesktop.org/download/) 下载安装包：
-   - **MSVC 64位**（推荐）：
-     - [gstreamer-1.0-msvc-x86_64-1.26.2.msi](https://gstreamer.freedesktop.org/data/pkg/windows/1.26.2/msvc/gstreamer-1.0-msvc-x86_64-1.26.2.msi)
-     - [gstreamer-1.0-devel-msvc-x86_64-1.26.2.msi](https://gstreamer.freedesktop.org/data/pkg/windows/1.26.2/msvc/gstreamer-1.0-devel-msvc-x86_64-1.26.2.msi)
-   - **MinGW 64位**（可选）：
-     - [gstreamer-1.0-mingw-x86_64-1.26.2.msi](https://gstreamer.freedesktop.org/data/pkg/windows/1.26.2/mingw/gstreamer-1.0-mingw-x86_64-1.26.2.msi)
-     - [gstreamer-1.0-devel-mingw-x86_64-1.26.2.msi](https://gstreamer.freedesktop.org/data/pkg/windows/1.26.2/mingw/gstreamer-1.0-devel-mingw-x86_64-1.26.2.msi)
-
-2. 安装步骤：
-   ```bash
-   # 1. 先关闭Visual Studio（如果在使用）
-   # 2. 依次安装runtime和development包
-   # 3. 添加环境变量到PATH
-   # MSVC版本: C:\gstreamer\1.0\msvc_x86_64\bin
-   # MinGW版本: C:\gstreamer\1.0\mingw_x86_64\bin
-   ```
-
-3. 验证安装：
-   ```bash
-   gst-launch-1.0 --version
-   python -c "import cv2; print('GStreamer support:', 'GStreamer' in cv2.getBuildInformation())"
-   ```
-
-#### Linux 安装
-```bash
-# Ubuntu/Debian
-sudo apt-get update
-sudo apt-get install gstreamer1.0-tools gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly gstreamer1.0-libav
-
-# CentOS/RHEL
-sudo yum install gstreamer1 gstreamer1-plugins-base gstreamer1-plugins-good gstreamer1-plugins-bad-free gstreamer1-plugins-ugly-free
-
-# 验证
-gst-launch-1.0 --version
-```
-
-#### macOS 安装
-```bash
-# 使用Homebrew
-brew install gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad gst-plugins-ugly gst-libav
-
-# 验证
-gst-launch-1.0 --version
-```
-
-### 3. 中文字体安装（Linux系统推荐）
+### 2. 中文字体安装（Linux系统推荐）
 
 为了在Linux系统上正确显示车牌识别等技能的中文信息，建议安装中文字体。如果不安装中文字体，系统会自动使用英文显示，功能完全正常。
 
@@ -522,7 +495,7 @@ ls -la /usr/share/fonts/opentype/noto/
 
 > **注意**：如果没有安装中文字体，系统会自动fallback到英文显示，功能不受影响。
 
-### 4. FFmpeg安装（RTSP推流功能需要）
+### 3. FFmpeg安装（RTSP推流功能需要）
 
 如果需要使用RTSP推流功能，需要安装FFmpeg：
 
@@ -557,7 +530,7 @@ brew install ffmpeg
 ffmpeg -version
 ```
 
-### 5. 环境变量配置
+### 4. 环境变量配置
 
 创建`.env`文件并配置以下变量：
 
@@ -603,6 +576,9 @@ WVP_PASSWORD=admin
 STARTUP_RECOVERY_ENABLED=true
 STARTUP_RECOVERY_DELAY_SECONDS=30
 
+# 智能自适应帧读取配置
+ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD=30
+
 # RTSP推流配置
 RTSP_STREAMING_ENABLED=false
 RTSP_STREAMING_BASE_URL=rtsp://192.168.1.107/detection
@@ -612,7 +588,7 @@ RTSP_STREAMING_MAX_FPS=30.0
 RTSP_STREAMING_MIN_FPS=1.0
 ```
 
-### 6. 数据库初始化
+### 5. 数据库初始化
 
 ```bash
 python -c "
@@ -838,6 +814,32 @@ class MyCustomSkill(BaseSkill):
   }
 }
 ```
+
+### 低频检测任务（自适应按需截图模式）
+
+**低频人员计数任务配置**：
+```json
+{
+  "name": "门禁人员计数",
+  "description": "低频检测门禁区域人员，自动使用按需截图模式",
+  "camera_id": 7,
+  "skill_class_id": 5,
+  "status": true,
+  "alert_level": 0,
+  "frame_rate": 0.2,
+  "running_period": {
+    "enabled": true,
+    "periods": [
+      {"start": "06:00", "end": "22:00"}
+    ]
+  }
+}
+```
+
+> **说明**：
+> - `frame_rate: 0.2`表示每5秒检测一次（低频）
+> - 系统会自动评估连接开销，选择按需截图模式
+> - 这种模式特别适合门禁、停车场等低频检测场景
 
 ### 车牌识别任务（支持中文显示）
 
@@ -1188,7 +1190,8 @@ server {
 - MinIO上传成功率
 - RabbitMQ消息队列状态
 - 目标跟踪性能指标
-- GStreamer pipeline状态和性能
+- 自适应帧读取器模式切换状态
+- 连接开销和性能统计
 - 多线程视频读取器状态
 - 视频流处理延迟和帧率
 
@@ -1222,14 +1225,15 @@ server {
    - 检查目标检测质量
 
 6. **视频流处理问题**
-   - **GStreamer相关**：
-     - 检查GStreamer是否正确安装和配置
-     - 确认环境变量PATH包含GStreamer路径
-     - 验证OpenCV是否支持GStreamer
+   - **自适应帧读取**：
+     - 检查连接开销阈值设置：`ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD`
+     - 查看日志中的模式切换信息："选择连续流模式" vs "选择按需截图模式"
+     - 验证WVP API的`request_device_snap`和`get_device_snap`接口可用性
+     - 检查网络延迟和连接稳定性
    - **多线程模式**：
-     - 系统会自动fallback到多线程模式
      - 检查线程资源是否充足
      - 确认视频流格式兼容性
+     - 验证视频流地址是否可访问
 
 7. **性能和内存问题**
    - **高内存占用**：
@@ -1311,8 +1315,8 @@ server {
 - ✨ 枚举配置系统
 
 #### ⚡ 性能优化
-- ✨ **GStreamer硬件加速视频处理**
-- ✨ **多线程fallback视频读取机制**
+- ✨ **智能自适应帧读取系统（基于连接开销智能选择最优模式）**
+- ✨ **多线程视频读取机制**
 - ✨ **实时帧获取和延迟优化**
 - ✨ **异步队列架构（采集→检测→推流三层解耦）**
 - ✨ **智能内存管理（减少95%不必要的帧拷贝）**
