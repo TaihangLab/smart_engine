@@ -24,48 +24,59 @@ class PlimitDetectorSkill(BaseSkill):
     使用YOLO模型检测人员头部和身体，监控区域人员数量是否超过限制，基于triton_client全局单例
     """
 
-    # 默认配置
+    # 默认配置基础（先不写 alert_definitions）
     DEFAULT_CONFIG = {
-        "type": "detection",  # 技能类型：检测类
-        "name": "plimit_detector",  # 技能唯一标识符
-        "name_zh": "人员超限检测",  # 技能中文名称
-        "version": "1.0",  # 技能版本
-        "description": "使用YOLO模型检测区域人员数量是否超过限制，支持头部和人员检测",  # 技能描述
-        "status": True,  # 技能状态（是否启用）
-        "required_models": ["yolo11_crowdhuman"],  # 所需模型
+        "type": "detection",
+        "name": "plimit_detector",
+        "name_zh": "人员超限检测",
+        "version": "1.0",
+        "description": "使用YOLO模型检测区域人员数量是否超过限制，支持头部和人员检测",
+        "status": True,
+        "required_models": ["yolo11_crowdhuman"],
         "params": {
             "classes": ["head", "person"],
             "conf_thres": 0.5,
             "iou_thres": 0.45,
             "max_det": 300,
             "input_size": [640, 640],
-            "person_limit": 10,  # 默认人员上限：10人
-            "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
-            # 预警人数阈值配置
+            "person_limit": 35,
+            "enable_default_sort_tracking": True,
             "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
             "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
             "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
             "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
         },
-        "alert_definitions": [
+        "alert_definitions": []  # 占位，稍后由 init_alert_definitions() 动态生成
+    }
+
+    # 动态初始化警报定义
+    @classmethod
+    def init_alert_definitions(cls):
+        params = cls.DEFAULT_CONFIG["params"]
+        person_limit = params["person_limit"]
+
+        cls.DEFAULT_CONFIG["alert_definitions"] = [
             {
                 "level": 1,
-                "description": f"当检测到{AlertThreshold.LEVEL_1}及以上人员超限时触发。"
+                "description": f"当检测到 LEVEL_1 × person_limit = {params['LEVEL_1_THRESHOLD'] * person_limit} 及以上人员超限时触发。"
             },
             {
                 "level": 2,
-                "description": f"当检测到{AlertThreshold.LEVEL_2}人员超限时触发。"
+                "description": f"当检测到 LEVEL_2 × person_limit = {params['LEVEL_2_THRESHOLD'] * person_limit} 及以上人员超限时触发。"
             },
             {
                 "level": 3,
-                "description": f"当检测到{AlertThreshold.LEVEL_3}人员超限时触发。"
+                "description": f"当检测到 LEVEL_3 × person_limit = {params['LEVEL_3_THRESHOLD'] * person_limit} 及以上人员超限时触发。"
             },
             {
                 "level": 4,
-                "description": "当检测到潜在安全隐患时触发。"
+                "description": f"当检测到 LEVEL_4 × person_limit = {params['LEVEL_3_THRESHOLD'] * person_limit} 及以上人员超限时触发。"
             }
         ]
-    }
+
+        # 调用一次初始化
+        PlimitDetectorSkill.init_alert_definitions()
+
 
     def _initialize(self) -> None:
         """初始化技能"""
@@ -434,13 +445,13 @@ if __name__ == "__main__":
     # 测试图像检测
     # test_image = np.zeros((640, 640, 3), dtype=np.uint8)
     # cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
-    image_path = "D:/1.jpg"
+    image_path = "F:/limit.jpg"
     image = cv2.imread(image_path)
     
     # 测试自定义限制
     test_input = {
         "image": image,
-        "person_limit": 15  # 自定义人员限制为15人
+        "person_limit": 30  # 自定义人员限制为15人
     }
     
     # 执行检测

@@ -14,9 +14,6 @@ logger = logging.getLogger(__name__)
 class AlertThreshold():
     """预警阈值枚举"""
     LEVEL_1 = 1  # 一级预警：1名及以上
-    LEVEL_2 = 0  # 二级预警
-    LEVEL_3 = 0  # 三级预警
-    LEVEL_4 = 0  # 四级预警
 
 class SleepDetectorSkill(BaseSkill):
     """睡岗检测技能
@@ -41,27 +38,13 @@ class SleepDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": False, # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
-            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
-            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
-            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1
+
         },
         "alert_definitions": [
             {
                 "level": 1,
                 "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上人员睡觉时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到{AlertThreshold.LEVEL_2}名人员睡觉时触发。"
-            },
-            {
-                "level": 3,
-                "description": f"当检测到{AlertThreshold.LEVEL_3}名人员睡觉时触发。"
-            },
-            {
-                "level": 4,
-                "description": "当检测到潜在安全隐患时触发。"
             }
         ]
     }
@@ -88,9 +71,6 @@ class SleepDetectorSkill(BaseSkill):
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
         self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
-        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
-        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
-        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
 
         self.log("info", f"初始化睡岗检测器: model={self.model_name}, classes={self.classes}")
 
@@ -319,7 +299,7 @@ class SleepDetectorSkill(BaseSkill):
                 alert_level = 1  # 严重
 
 
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
+            level_names = {1: "严重"}
             severity = level_names.get(alert_level, "严重")
 
             alert_name = "人员睡岗预警"

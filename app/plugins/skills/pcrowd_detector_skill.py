@@ -16,7 +16,7 @@ class AlertThreshold():
     LEVEL_1 = 20  # 一级预警：7名及以上
     LEVEL_2 = 15  # 二级预警：4-6名
     LEVEL_3 = 6  # 三级预警：2-3名
-    LEVEL_4 = 0  # 四级预警：1名
+    LEVEL_4 = 1  # 四级预警：1名
 
 class CrowdDetectorSkill(BaseSkill):
     """人员聚集检测技能
@@ -49,19 +49,19 @@ class CrowdDetectorSkill(BaseSkill):
         "alert_definitions": [
             {
                 "level": 1,
-                "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上人员聚集时触发。"
+                "description": f"当检测到LEVEL_1:{AlertThreshold.LEVEL_1}名及以上人员聚集时触发。"
             },
             {
                 "level": 2,
-                "description": f"当检测到{AlertThreshold.LEVEL_2}名人员聚集时触发。"
+                "description": f"当检测到LEVEL_2:{AlertThreshold.LEVEL_2}名人员聚集时触发。"
             },
             {
                 "level": 3,
-                "description": f"当检测到{AlertThreshold.LEVEL_3}名人员聚集时触发。"
+                "description": f"当检测到LEVEL_3:{AlertThreshold.LEVEL_3}名人员聚集时触发。"
             },
             {
                 "level": 4,
-                "description": "当检测到潜在安全隐患时触发。"
+                "description": f"当检测到LEVEL_4:{AlertThreshold.LEVEL_4}名及以上人员聚集时触发。"
             }
         ]
     }
