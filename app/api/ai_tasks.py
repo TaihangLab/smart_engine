@@ -40,6 +40,11 @@ class TaskCreate(TaskBase):
             "input_size": [640, 640]
         }
     })
+    config: Optional[Dict[str, Any]] = Field(None, description="任务配置", example={
+        "rtsp_streaming": {
+            "enabled": True
+        }
+    })
 
 class TaskUpdate(BaseModel):
     """更新AI任务请求模型"""
@@ -59,6 +64,11 @@ class TaskUpdate(BaseModel):
             "input_size": [800, 800]
         }
     })
+    config: Optional[Dict[str, Any]] = Field(None, description="任务配置", example={
+        "rtsp_streaming": {
+            "enabled": False
+        }
+    })
 
 class TaskResponse(TaskBase):
     """AI任务响应模型"""
@@ -66,6 +76,7 @@ class TaskResponse(TaskBase):
     camera_id: int = Field(..., description="摄像头ID", example=1)
     skill_class_id: int = Field(..., description="技能类ID", example=1)
     skill_config: Optional[Dict[str, Any]] = Field(None, description="技能配置")
+    config: Optional[Dict[str, Any]] = Field(None, description="任务配置")
     created_at: Optional[str] = Field(None, description="创建时间", example="2023-10-01 14:30:00")
     updated_at: Optional[str] = Field(None, description="更新时间", example="2023-10-02 15:40:00")
 
@@ -390,6 +401,7 @@ def update_task(
         
         # 将Pydantic模型转换为字典，排除未设置的字段
         task_dict = task_data.model_dump(exclude_unset=True)
+
         
         # 更新任务
         updated = AITaskService.update_task(task_id, task_dict, db)
