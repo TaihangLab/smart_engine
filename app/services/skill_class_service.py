@@ -179,16 +179,20 @@ class SkillClassService:
                 "model_info": model_info,
                 "ai_tasks": tasks_with_devices,  # 使用该技能类的AI任务列表
                 "task_count": len(tasks_with_devices),  # AI任务数量
-                "total_device_count": len(total_devices)
+                "total_device_count": len(total_devices),
             }
         else:
             # 返回简要信息
-            # 只保留default_config中的params字段
+            # 只保留default_config中的params和alert_definitions字段
             default_config = skill_class.default_config
             params_only_config = None
             
-            if default_config and isinstance(default_config, dict) and 'params' in default_config:
-                params_only_config = {'params': default_config['params']}
+            if default_config and isinstance(default_config, dict):
+                params_only_config = {}
+                if 'params' in default_config:
+                    params_only_config['params'] = default_config['params']
+                if 'alert_definitions' in default_config:
+                    params_only_config['alert_definitions'] = default_config['alert_definitions']
             
             skill_class_dict = {
                 "id": skill_class.id,

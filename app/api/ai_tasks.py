@@ -117,8 +117,15 @@ class SkillClassDetail(BaseModel):
             "iou_thres": 0.45,
             "max_det": 300,
             "input_size": [640, 640]
-        }
+        },
+        "alert_definitions": [
+            {
+                "level": 1,
+                "description": "当检测到1名及以上人员未佩戴安全帽时触发。"
+            }
+        ]
     })
+    
 
 class SkillClassListResponse(BaseModel):
     """技能类列表响应模型"""
