@@ -13,10 +13,10 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 7  # 一级预警：7名及以上
-    LEVEL_2 = 4  # 二级预警：4-6名
-    LEVEL_3 = 2  # 三级预警：2-3名
-    LEVEL_4 = 0  # 四级预警：1名
+    LEVEL_1 = 7  # 
+    LEVEL_2 = 4  # 
+    LEVEL_3 = 2  # 
+    LEVEL_4 = 1  # 
 
 class GloveDetectorSkill(BaseSkill):
     DEFAULT_CONFIG = {
@@ -43,19 +43,19 @@ class GloveDetectorSkill(BaseSkill):
         "alert_definitions": [
             {
                 "level": 1,
-                "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上工人未佩戴绝缘手套时触发。"
+                "description": f"当检测到LEVEL_1: {AlertThreshold.LEVEL_1}名及以上工人未佩戴绝缘手套时触发。"
             },
             {
                 "level": 2,
-                "description": f"当检测到{AlertThreshold.LEVEL_2}名工人未佩戴绝缘手套时触发。"
+                "description": f"当检测到LEVEL_2: {AlertThreshold.LEVEL_2}名工人未佩戴绝缘手套时触发。"
             },
             {
                 "level": 3,
-                "description": f"当检测到{AlertThreshold.LEVEL_3}名工人未佩戴绝缘手套时触发。"
+                "description": f"当检测到LEVEL_3: {AlertThreshold.LEVEL_3}名工人未佩戴绝缘手套时触发。"
             },
             {
                 "level": 4,
-                "description": "当检测到潜在安全隐患时触发。"
+                "description": f"当检测到LEVEL_4: {AlertThreshold.LEVEL_4}名工人未佩戴绝缘手套时触发。"
             }
         ]
     }

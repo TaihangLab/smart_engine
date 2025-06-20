@@ -14,9 +14,7 @@ logger = logging.getLogger(__name__)
 class AlertThreshold():
     """预警阈值枚举"""
     HIGH_RISK = 1  # 高风险阈值设置
-    MILD_RISK_R = 3  # 中风险高阈值设置
-    MILD_RISK_L = 1  # 中风险低阈值设置
-    NORMAL_RISK = 0
+    MILD_RISK = 1  # 中风险阈值设置
 
 class MinerDetectorSkill(BaseSkill):
     """煤矿工人行为检测技能
@@ -42,28 +40,19 @@ class MinerDetectorSkill(BaseSkill):
             "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
             "HIGH_RISK_THRESHOLD": AlertThreshold.HIGH_RISK,
-            "MILD_RISK_R_THRESHOLD": AlertThreshold.MILD_RISK_R,
-            "MILD_RISK_L_THRESHOLD": AlertThreshold.MILD_RISK_L,
-            "NORMAL_RISK_THRESHOLD": AlertThreshold.NORMAL_RISK,
+            "MILD_RISK_THRESHOLD": AlertThreshold.MILD_RISK,
 
         },
         "alert_definitions": [
             {
                 "level": 1,
-                "description": f"当检测到{AlertThreshold.HIGH_RISK}名及以上人员存在危险行为（如跌倒、攀爬）时触发。"
+                "description": f"当检测到HIGH_RISK:{AlertThreshold.HIGH_RISK}名及以上人员存在危险行为（如跌倒、攀爬）时触发。"
             },
             {
                 "level": 2,
-                "description": f"当检测到{AlertThreshold.MILD_RISK_R}名及以上人员存在可疑行为（如弯腰、靠墙）时触发。"
+                "description": f"当检测到MILD_RISK:{AlertThreshold.MILD_RISK}名及以上人员存在可疑行为（如弯腰、靠墙）时触发。"
             },
-            {
-                "level": 3,
-                "description": f"当检测到{AlertThreshold.MILD_RISK_L}名人员存在可疑行为（如弯腰、靠墙）时触发。"
-            },
-            {
-                "level": 4,
-                "description": "当检测到潜在安全隐患时触发。"
-            }
+
         ]
     }
 
@@ -90,9 +79,8 @@ class MinerDetectorSkill(BaseSkill):
 
         # 预警阈值配置
         self.high_risk_threshold = params["HIGH_RISK_THRESHOLD"]
-        self.mild_risk_r_threshold = params["MILD_RISK_R_THRESHOLD"]
-        self.mild_risk_l_threshold = params["MILD_RISK_L_THRESHOLD"]
-        self.normal_risk_threshold = params["NORMAL_RISK_THRESHOLD"]
+        self.mild_risk_threshold = params["MILD_RISK_THRESHOLD"]
+
 
         self.log("info", f"初始化救生衣检测器: model={self.model_name}")
 
@@ -334,14 +322,12 @@ class MinerDetectorSkill(BaseSkill):
             # 风险等级按高风险人数优先判断
             if high_risk_count >= self.high_risk_threshold:
                 alert_level = 1  # 严重
-            elif mild_risk_count >= self.mild_risk_r_threshold:
+            elif mild_risk_count >= self.mild_risk_threshold:
                 alert_level = 2  # 中等
-            elif self.mild_risk_l_threshold <= mild_risk_count < self.mild_risk_r_threshold:
-                alert_level = 3  # 轻微
             else:
-                alert_level = 4  # 极轻
+                alert_level = 0  # 不构成风险
 
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
+            level_names = {1: "严重", 2: "中等"}
             severity = level_names.get(alert_level, "严重")
 
             alert_name = "煤矿工人异常行为"
@@ -416,7 +402,7 @@ if __name__ == "__main__":
     # # 测试图像检测
     # test_image = np.zeros((640, 640, 3), dtype=np.uint8)
     # cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
-    image_path = "F:/miner.jpg"
+    image_path = "F:/0001475.jpg"
     image = cv2.imread(image_path)
     # 执行检测
     result = detector.process(image)
