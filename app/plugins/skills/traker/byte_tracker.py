@@ -1,13 +1,8 @@
 import numpy as np
 from collections import deque
-import os
-import os.path as osp
-import copy
-import torch
-import torch.nn.functional as F
 
 from .kalman_filter import KalmanFilter
-import matching
+from . import matching
 from .basetrack import BaseTrack, TrackState
 
 class STrack(BaseTrack):
@@ -15,7 +10,7 @@ class STrack(BaseTrack):
     def __init__(self, tlwh, score):
 
         # wait activate
-        self._tlwh = np.asarray(tlwh, dtype=np.float)
+        self._tlwh = np.asarray(tlwh, dtype=np.float32)
         self.kalman_filter = None
         self.mean, self.covariance = None, None
         self.is_activated = False
@@ -171,7 +166,7 @@ class BYTETracker(object):
             scores = output_results[:, 4] * output_results[:, 5]
             bboxes = output_results[:, :4]  # x1y1x2y2
         img_h, img_w = img_info[0], img_info[1]
-        scale = min(img_size[0] / float(img_h), img_size[1] / float(img_w))
+        scale = min(img_size[0] / np.float32(img_h), img_size[1] / np.float32(img_w))
         bboxes /= scale
 
         remain_inds = scores > self.args.track_thresh

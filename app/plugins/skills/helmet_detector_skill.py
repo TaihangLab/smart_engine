@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
  #  Enum - 基础枚举（可以是任何类型的值）
  #  IntEnum - 整数枚举
 
-class AlertThreshold(IntEnum): 
+class AlertThreshold(): 
     """预警阈值枚举"""
     LEVEL_1 = 7  # 一级预警：7名及以上
     LEVEL_2 = 4  # 二级预警：4-6名
@@ -218,7 +218,7 @@ class HelmetDetectorSkill(BaseSkill):
         """
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (self.input_width, self.input_height))
-        img = img.astype(np.float32) / 255.0
+        img = img.astype(np.float32) / np.float32(255.0)
         return np.expand_dims(img.transpose(2, 0, 1), axis=0)
     
     def postprocess(self, outputs, original_img):

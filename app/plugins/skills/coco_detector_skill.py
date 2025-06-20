@@ -189,7 +189,7 @@ class CocoDetectorSkill(BaseSkill):
         img = cv2.resize(img, (self.input_width, self.input_height))
 
         # 归一化到[0,1]
-        img = img.astype(np.float32) / 255.0
+        img = img.astype(np.float32) / np.float32(255.0)
 
         # 调整为NCHW格式 (1, 3, height, width)
         return np.expand_dims(img.transpose(2, 0, 1), axis=0)

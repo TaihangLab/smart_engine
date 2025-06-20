@@ -51,6 +51,7 @@ class PStopDetectorSkill(BaseSkill):
     }
 
     def _initialize(self) -> None:
+        """初始化技能"""
         params = self.config.get("params")
         self.classes = params.get("classes")
         self.class_names = {i: class_name for i, class_name in enumerate(self.classes)}
@@ -64,12 +65,15 @@ class PStopDetectorSkill(BaseSkill):
         self.enable_tracking = params.get("enable_tracking", True)
 
         # BYTETracker初始化
-        tracker_args = TrackerArgs(track_thresh=self.conf_thres, track_buffer=30, match_thresh=0.8, mot20=False)
-        self.tracker = BYTETracker(tracker_args, frame_rate=30)
+        if self.enable_tracking:
+            tracker_args = TrackerArgs(track_thresh=self.conf_thres, track_buffer=30, match_thresh=0.8, mot20=False)
+            self.tracker = BYTETracker(tracker_args, frame_rate=30)
+        
         self.track_id_last_seen = {}  # track_id: last_seen_frame
         self.track_id_first_seen = {}  # track_id: first_seen_frame
         self.frame_id = 0
-        self.log("info", f"初始化人员停留检测器: model={self.model_name}, classes={self.classes}, dwell_time_thresh={self.dwell_time_thresh}")
+        
+        self.log("info", f"人员停留检测器初始化完成: 模型={self.model_name}, 停留阈值={self.dwell_time_thresh}帧")
 
     def get_required_models(self) -> List[str]:
         return self.required_models
@@ -125,24 +129,30 @@ class PStopDetectorSkill(BaseSkill):
                         x1, y1, x2, y2 = det["bbox"]
                         score = det["confidence"]
                         dets.append([x1, y1, x2, y2, score])
+                
                 if len(dets) > 0:
                     dets_np = np.array(dets, dtype=np.float32)
                 else:
                     dets_np = np.zeros((0, 5), dtype=np.float32)
+                
                 img_info = (image.shape[0], image.shape[1])
                 img_size = (self.input_height, self.input_width)
                 tracks = self.tracker.update(dets_np, img_info, img_size)
+                
                 for track in tracks:
                     tlwh = track.tlwh
                     x1, y1, w, h = tlwh
                     x2, y2 = x1 + w, y1 + h
                     track_id = int(track.track_id)
                     bbox = [int(x1), int(y1), int(x2), int(y2)]
+                    
                     # 更新track_id出现时间
                     if track_id not in self.track_id_first_seen:
                         self.track_id_first_seen[track_id] = self.frame_id
+                    
                     self.track_id_last_seen[track_id] = self.frame_id
                     dwell_time = self.frame_id - self.track_id_first_seen[track_id]
+                    
                     tracked_results.append({
                         "bbox": bbox,
                         "confidence": float(track.score),
@@ -151,6 +161,7 @@ class PStopDetectorSkill(BaseSkill):
                         "track_id": track_id,
                         "dwell_time": dwell_time
                     })
+                    
                     # 停留事件判定
                     if dwell_time >= self.dwell_time_thresh:
                         dwell_events.append({
@@ -158,8 +169,17 @@ class PStopDetectorSkill(BaseSkill):
                             "bbox": bbox,
                             "dwell_time": dwell_time
                         })
+                
+                # 记录检测结果和跟踪ID
+                track_ids = [det["track_id"] for det in tracked_results]
+                self.log("info", f"帧{self.frame_id}: 检测到{len(detections)}人，跟踪{len(tracked_results)}人，跟踪ID: {track_ids}")
+                
+                if dwell_events:
+                    dwell_ids = [event["track_id"] for event in dwell_events]
+                    self.log("warning", f"停留事件: 跟踪ID {dwell_ids} 停留时间超过阈值")
             else:
                 tracked_results = detections
+                self.log("info", f"帧{self.frame_id}: 检测到{len(detections)}人")
 
             # 3. 电子围栏过滤（如有）
             if self.is_fence_config_valid(fence_config):
@@ -177,24 +197,31 @@ class PStopDetectorSkill(BaseSkill):
                 "dwell_events": dwell_events
             }
             return SkillResult.success_result(result_data)
+            
         except Exception as e:
+            self.log("error", f"处理失败: {str(e)}")
             logger.exception(f"处理失败: {str(e)}")
             return SkillResult.error_result(f"处理失败: {str(e)}")
 
     def preprocess(self, img):
+        """预处理图像"""
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (self.input_width, self.input_height))
-        img = img.astype(np.float32) / 255.0
+        img = img.astype(np.float32) / np.float32(255.0)
         return np.expand_dims(img.transpose(2, 0, 1), axis=0)
 
     def postprocess(self, outputs, original_img):
+        """后处理模型输出"""
         height, width = original_img.shape[:2]
         detections = outputs["output0"]
+        
         detections = np.squeeze(detections, axis=0)
         detections = np.transpose(detections, (1, 0))
+        
         boxes, scores, class_ids = [], [], []
         x_factor = width / self.input_width
         y_factor = height / self.input_height
+        
         for i in range(detections.shape[0]):
             classes_scores = detections[i][4:]
             max_score = np.amax(classes_scores)
@@ -212,6 +239,7 @@ class PStopDetectorSkill(BaseSkill):
                 boxes.append([left, top, width_box, height_box])
                 scores.append(max_score)
                 class_ids.append(class_id)
+        
         results = []
         unique_class_ids = set(class_ids)
         for class_id in unique_class_ids:
@@ -229,9 +257,11 @@ class PStopDetectorSkill(BaseSkill):
                     "class_id": int(class_id),
                     "class_name": self.class_names.get(int(class_id), "unknown")
                 })
+        
         return results
 
     def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
+        """获取检测对象的关键点（用于围栏判断）"""
         bbox = detection.get("bbox", [])
         if len(bbox) >= 4:
             center_x = (bbox[0] + bbox[2]) / 2
@@ -277,34 +307,33 @@ if __name__ == "__main__":
         frame_id += 1
         if frame_id % frame_interval != 1:
             continue  # 跳帧，保证30fps
+            
         result = skill.process(frame)
         if not result.success:
-            print(f"帧{frame_id}: 检测失败: {result.error_message}")
             continue
+            
         detections = result.data["detections"]
         dwell_events = result.data["dwell_events"]
-        print(f"帧{frame_id}: 检测到{len(detections)}人，停留事件{len(dwell_events)}")
+        
         for det in detections:
             bbox = det["bbox"]
             track_id = det.get("track_id", -1)
             dwell_time = det.get("dwell_time", 0)
-            print(f"  track_id={track_id}, bbox={bbox}, dwell_time={dwell_time}")
+            
             # 可视化
             cv2.rectangle(frame, (bbox[0], bbox[1]), (bbox[2], bbox[3]), (0,255,0), 2)
             cv2.putText(frame, f"ID:{track_id} T:{dwell_time}", (bbox[0], bbox[1]-10), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0,255,0), 2)
+            
         for event in dwell_events:
             bbox = event["bbox"]
             track_id = event["track_id"]
             dwell_time = event["dwell_time"]
             cv2.putText(frame, f"Dwell! ID:{track_id} T:{dwell_time}", (bbox[0], bbox[1]+30), cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0,0,255), 2)
+            
         if args.output and output_writer:
             output_writer.write(frame)
-        # 可选：显示窗口
-        # cv2.imshow("detection", frame)
-        # if cv2.waitKey(1) & 0xFF == ord('q'):
-        #     break
+            
     cap.release()
     if output_writer:
         output_writer.release()
-    print("测试完成！")
 
