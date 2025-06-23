@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: Path = STATIC_DIR / "uploads"
     
     # 数据库配置
-    MYSQL_SERVER: str = Field(default="192.168.1.107", description="MySQL服务器地址")
+    MYSQL_SERVER: str = Field(default="127.0.0.1", description="MySQL服务器地址")
     MYSQL_USER: str = Field(default="root", description="MySQL用户名")
     MYSQL_PASSWORD: str = Field(default="root", description="MySQL密码")
     MYSQL_DB: str = Field(default="smart_vision", description="MySQL数据库名")
