@@ -19,7 +19,7 @@ class Settings(BaseSettings):
     
     # 服务配置
     DEBUG: bool = Field(default=True, description="是否启用调试模式")
-    LOG_LEVEL: str = Field(default="INFO", description="日志级别")
+    LOG_LEVEL: str = Field(default="DEBUG", description="日志级别")
     
     # Triton服务器配置
     TRITON_URL: str = Field(default="172.18.1.1:8201", description="Triton服务器地址")
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: Path = STATIC_DIR / "uploads"
     
     # 数据库配置
-    MYSQL_SERVER: str = Field(default="192.168.1.107", description="MySQL服务器地址")
+    MYSQL_SERVER: str = Field(default="127.0.0.1", description="MySQL服务器地址")
     MYSQL_USER: str = Field(default="root", description="MySQL用户名")
     MYSQL_PASSWORD: str = Field(default="root", description="MySQL密码")
     MYSQL_DB: str = Field(default="smart_vision", description="MySQL数据库名")
@@ -224,6 +224,36 @@ class Settings(BaseSettings):
     
     # 智能帧获取配置
     ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD: float = Field(default=30.0, description="连接开销阈值（秒），超过此值使用按需截图模式")
+    
+    # 预警合并配置
+    ALERT_MERGE_ENABLED: bool = Field(default=True, description="是否启用预警合并功能")
+    ALERT_MERGE_WINDOW_SECONDS: float = Field(default=4.0, description="预警合并时间窗口（秒）")
+    ALERT_MERGE_MAX_DURATION_SECONDS: float = Field(default=15.0, description="预警合并最大持续时间（秒）")
+    ALERT_MERGE_MIN_DELAY_SECONDS: float = Field(default=2.0, description="预警合并最小延迟（秒）")
+    ALERT_MERGE_MAX_DELAY_SECONDS: float = Field(default=10.0, description="预警合并最大延迟（秒）")
+    ALERT_MERGE_IMMEDIATE_LEVELS: str = Field(default="1", description="立即发送的预警等级（逗号分隔，如'1,2'）")
+    ALERT_MERGE_QUICK_SEND_THRESHOLD: int = Field(default=3, description="快速发送阈值（预警数量）")
+    ALERT_MERGE_EMERGENCY_DELAY_SECONDS: float = Field(default=1.0, description="紧急预警最大延迟（秒）")
+    
+    # 高级合并策略配置
+    ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS: float = Field(default=30.0, description="1-2级预警最大合并持续时间（秒）")
+    ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS: float = Field(default=15.0, description="3-4级预警最大合并持续时间（秒）")
+    ALERT_MERGE_ADAPTIVE_WINDOW: bool = Field(default=True, description="是否启用自适应合并窗口")
+    
+    # 预警视频录制配置
+    ALERT_VIDEO_ENABLED: bool = Field(default=True, description="是否启用预警视频录制")
+    ALERT_VIDEO_BUFFER_DURATION_SECONDS: float = Field(default=120.0, description="视频缓冲区时长（秒）")
+    ALERT_VIDEO_PRE_BUFFER_SECONDS: float = Field(default=2.0, description="预警前视频缓冲时间（秒）")
+    ALERT_VIDEO_POST_BUFFER_SECONDS: float = Field(default=2.0, description="预警后视频缓冲时间（秒）")
+    ALERT_VIDEO_FPS: float = Field(default=10.0, description="预警视频帧率")
+    ALERT_VIDEO_QUALITY: int = Field(default=75, description="预警视频质量（JPEG压缩质量 0-100）")
+    ALERT_VIDEO_ENCODING_TIMEOUT_SECONDS: int = Field(default=45, description="视频编码超时时间（秒）")
+    ALERT_VIDEO_WIDTH: int = Field(default=1280, description="预警视频宽度（像素）")
+    ALERT_VIDEO_HEIGHT: int = Field(default=720, description="预警视频高度（像素）")
+    
+    # 针对高优先级预警的视频配置
+    ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警前缓冲时间（秒）")
+    ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警后缓冲时间（秒）")
 
     def get_sse_config(self) -> dict:
         """根据环境获取SSE配置"""
