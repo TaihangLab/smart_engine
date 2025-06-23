@@ -41,7 +41,7 @@ class BeltDetectorSkill(BaseSkill):
             "iou_thres": 0.45,
             "max_det": 300,
             "input_size": [640, 640],
-            "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员安全带佩戴分析
+            "enable_default_sort_tracking": False,  # 默认启用SORT跟踪，用于人员安全带佩戴分析
             # 预警人数阈值配置
             "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
             "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,

@@ -348,22 +348,41 @@ class PlateRecognitionSkill(BaseSkill):
                     cv2.rectangle(annotated_frame, (int(x1), int(y1)), (int(x2), int(y2)), box_color, 2)
                     
                     # 准备显示文字
+                    # 检查是否有跟踪ID
+                    track_id = detection.get("track_id")
+                    class_track_id = detection.get("class_track_id")
+                    
+                    # 优先使用track_id，如果没有则使用class_track_id
+                    display_track_id = track_id if track_id is not None else class_track_id
+                    
                     if plate_text:
-                        # 主要显示车牌号码
+                        # 主要显示车牌号码，如果有跟踪ID就在前面显示
                         if use_chinese_display:
-                            main_text = f"车牌: {plate_text}"
+                            if display_track_id is not None:
+                                main_text = f"[ID:{display_track_id}] 车牌: {plate_text}"
+                            else:
+                                main_text = f"车牌: {plate_text}"
                             # 副标题显示置信度信息
                             sub_text = f"检测:{confidence:.2f} 识别:{plate_score:.2f}"
                         else:
                             # 如果没有中文字体，使用英文
-                            main_text = f"Plate: {plate_text}"
+                            if display_track_id is not None:
+                                main_text = f"[ID:{display_track_id}] Plate: {plate_text}"
+                            else:
+                                main_text = f"Plate: {plate_text}"
                             sub_text = f"Det:{confidence:.2f} Rec:{plate_score:.2f}"
                     else:
                         if use_chinese_display:
-                            main_text = "车牌: 识别中..."
+                            if display_track_id is not None:
+                                main_text = f"[ID:{display_track_id}] 车牌: 识别中..."
+                            else:
+                                main_text = "车牌: 识别中..."
                             sub_text = f"置信度: {confidence:.2f}"
                         else:
-                            main_text = "Plate: Processing..."
+                            if display_track_id is not None:
+                                main_text = f"[ID:{display_track_id}] Plate: Processing..."
+                            else:
+                                main_text = "Plate: Processing..."
                             sub_text = f"Conf: {confidence:.2f}"
                     
                     # 获取文字尺寸和确定绘制方式

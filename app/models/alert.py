@@ -292,7 +292,7 @@ class AlertResponse(BaseModel):
                         from app.core.config import settings
 
                         # 构建MinIO路径前缀，确保以斜杠结尾
-                        minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{obj.task_id}/{obj.camera_id}/"
+                        minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{obj.task_id}/"
                         
                         # 调用minio_client实例的get_presigned_url方法
                         url = minio_client.get_presigned_url(
@@ -314,7 +314,7 @@ class AlertResponse(BaseModel):
                         from app.core.config import settings
 
                         # 构建MinIO路径前缀，确保以斜杠结尾
-                        minio_prefix = f"{settings.MINIO_ALERT_VIDEO_PREFIX}{obj.task_id}/{obj.camera_id}/"
+                        minio_prefix = f"{settings.MINIO_ALERT_VIDEO_PREFIX}{obj.task_id}/"
                         
                         # 调用minio_client实例的get_presigned_url方法
                         url = minio_client.get_presigned_url(

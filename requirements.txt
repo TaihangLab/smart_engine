@@ -19,3 +19,7 @@ google==3.0.0
 protobuf==5.29.4
 pymysql==1.1.1
 python-multipart==0.0.19
+scipy==1.16.0
+scikit-image==0.25.2
+lap==0.5.12
+filterpy==1.4.5

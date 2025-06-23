@@ -23,6 +23,7 @@ from app.models.ai_task import AITask
 from app.db.session import get_db
 from app.services.camera_service import CameraService
 from app.services.minio_client import minio_client
+from app.services.alert_merge_manager import alert_merge_manager
 
 logger = logging.getLogger(__name__)
 
@@ -93,7 +94,7 @@ class OptimizedAsyncProcessor:
         logger.info(f"任务 {self.task_id} 异步帧处理器已启动")
         
     def put_raw_frame(self, frame: np.ndarray) -> bool:
-        """优化的帧投递 - 减少内存拷贝"""
+        """优化的帧投递 - 减少内存拷贝，同时添加到视频缓冲区"""
         try:
             current_time = time.time()
             
@@ -120,6 +121,30 @@ class OptimizedAsyncProcessor:
             with self.result_lock:
                 self.latest_raw_frame = frame
                 self.frame_timestamp = current_time
+            
+            # 🎬 添加帧到预警视频缓冲区（用于生成预警视频）
+            try:
+                if frame is not None and frame.size > 0:
+                    height, width = frame.shape[:2]
+                    
+                    # 先缩放到目标分辨率以减少存储压力
+                    from app.core.config import settings
+                    target_width = getattr(settings, 'ALERT_VIDEO_WIDTH', 1280)
+                    target_height = getattr(settings, 'ALERT_VIDEO_HEIGHT', 720)
+                    video_quality = getattr(settings, 'ALERT_VIDEO_QUALITY', 75)
+                    
+                    if width != target_width or height != target_height:
+                        frame = cv2.resize(frame, (target_width, target_height))
+                        width, height = target_width, target_height
+                    
+                    # 编码为低质量JPEG字节数据用于视频缓冲
+                    success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, video_quality])
+                    if success:
+                        frame_bytes = encoded.tobytes()
+                        alert_merge_manager.add_frame_to_buffer(self.task_id, frame_bytes, width, height)
+            except Exception as e:
+                # 视频缓冲失败不影响主流程
+                logger.debug(f"添加帧到视频缓冲区失败: {str(e)}")
             
             return True
             
@@ -897,6 +922,13 @@ class AITaskExecutor:
             # 清理停止事件
             if task_id in self.stop_event:
                 del self.stop_event[task_id]
+                
+            # 🧹 清理预警合并管理器中的任务资源
+            try:
+                alert_merge_manager.cleanup_task_resources(task_id)
+                logger.info(f"已清理任务 {task_id} 的预警合并资源")
+            except Exception as e:
+                logger.error(f"清理任务 {task_id} 预警合并资源失败: {str(e)}")
         else:
             logger.warning(f"任务 {task_id} 不在运行状态")
     
@@ -1323,7 +1355,7 @@ class AITaskExecutor:
             logger.error(f"预警生成异常: {str(e)}")
     
     def _generate_alert_async(self, task: AITask, alert_data: Dict, frame: np.ndarray, level: int) -> Optional[Dict]:
-        """异步生成预警（在独立线程中执行）
+        """异步生成预警（在独立线程中执行） - 集成预警合并机制
         
         Args:
             task: AI任务对象
@@ -1337,12 +1369,12 @@ class AITaskExecutor:
         # 创建新的数据库会话（因为在新线程中）
         db = next(get_db())
         try:
-            return self._generate_alert(task, alert_data, frame, db, level)
+            return self._generate_alert_with_merge(task, alert_data, frame, db, level)
         finally:
             db.close()
     
-    def _generate_alert(self, task: AITask, alert_data, frame, db: Session, level: int):
-        """生成报警
+    def _generate_alert_with_merge(self, task: AITask, alert_data, frame, db: Session, level: int):
+        """生成预警并发送到合并管理器
         
         Args:
             task: AI任务对象
@@ -1401,7 +1433,7 @@ class AITaskExecutor:
                 from app.core.config import settings
                 
                 # 构建MinIO路径，简单拼接即可
-                minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{task.id}/{task.camera_id}"
+                minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{task.id}"
                 
                 minio_frame_object_name = minio_client.upload_bytes(
                     data=image_data,
@@ -1448,21 +1480,48 @@ class AITaskExecutor:
                 "result": formatted_results,
             }
             
-            # 🔧 修复架构问题：发送到RabbitMQ而不是直接存数据库
-            # 这样能确保：
-            # 1. 统一的处理流程 - 所有报警都通过RabbitMQ
-            # 2. 自动前端广播 - handle_alert_message()会自动广播给前端
-            # 3. 可靠性保证 - 享受RabbitMQ的重试、死信队列等特性
-            # 4. 架构一致性 - 与测试报警使用相同的路径
-            success = rabbitmq_client.publish_alert(complete_alert)
+            # 🚀 使用预警合并管理器处理预警
+            # 集成预警合并机制，包含：
+            # 1. 预警去重和合并 - 避免重复预警
+            # 2. 预警视频录制 - 包含预警前后视频片段
+            # 3. 预警图片列表 - 合并相同预警的所有截图
+            # 4. 智能延时发送 - 等待合并窗口结束
+            
+            # 准备原始帧数据（用于视频录制）
+            frame_bytes = None
+            try:
+                if frame is not None:
+                    # 先缩放到目标分辨率以减少存储压力
+                    height, width = frame.shape[:2]
+                    from app.core.config import settings
+                    target_width = getattr(settings, 'ALERT_VIDEO_WIDTH', 1280)
+                    target_height = getattr(settings, 'ALERT_VIDEO_HEIGHT', 720)
+                    video_quality = getattr(settings, 'ALERT_VIDEO_QUALITY', 75)
+                    
+                    if width != target_width or height != target_height:
+                        frame = cv2.resize(frame, (target_width, target_height))
+                    
+                    # 编码为低质量JPEG字节数据
+                    success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, video_quality])
+                    if success:
+                        frame_bytes = encoded.tobytes()
+            except Exception as e:
+                logger.warning(f"编码原始帧失败: {str(e)}")
+                
+            # 发送到预警合并管理器
+            success = alert_merge_manager.add_alert(
+                alert_data=complete_alert,
+                image_object_name=minio_frame_object_name,
+                frame_bytes=frame_bytes
+            )
             
             if success:
-                logger.info(f"✅ 已发送预警消息到RabbitMQ: task_id={task.id}, camera_id={task.camera_id}, level={level}")
+                logger.info(f"✅ 预警已添加到合并管理器: task_id={task.id}, camera_id={task.camera_id}, level={level}")
                 logger.info(f"预警详情: {alert_info['name']} - {alert_info['description']}")
                 logger.info(f"MinIO截图对象名: {minio_frame_object_name}")
                 return complete_alert
             else:
-                logger.error(f"❌ 发送预警消息到RabbitMQ失败: task_id={task.id}")
+                logger.error(f"❌ 添加预警到合并管理器失败: task_id={task.id}")
                 return None
             
         except Exception as e:
