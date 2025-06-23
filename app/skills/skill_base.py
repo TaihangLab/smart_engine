@@ -124,7 +124,7 @@ class BaseSkill(ABC):
             from app.services.tracker_service import TrackerService
             self.tracker = TrackerService(
                 max_age=30, 
-                min_hits=3, 
+                min_hits=1, 
                 iou_threshold=0.3
             )
         except ImportError:

@@ -8,13 +8,15 @@
 - **技能管理**：支持创建和管理视觉AI技能，插件式架构，支持热加载
 - **AI任务管理**：支持创建AI分析任务，直接使用技能类+自定义配置的灵活模式
 - **智能任务调度**：基于APScheduler的精确时段调度，支持多时段配置和自动恢复
+- **🆕 智能预警合并系统**：基于MD5去重的预警合并机制，支持分级延时发送和预警视频录制
+- **🆕 分级视频录制**：根据预警等级自动生成不同长度的预警视频，1级预警支持异步处理
 - **实时预警系统**：支持4级预警体系（1级最高，4级最低），实时生成预警信息和截图
 - **电子围栏**：支持多边形区域定义，智能过滤围栏内外的检测结果
 - **模型管理**：支持管理Triton推理服务器上的模型，自动同步模型到数据库
 - **技能模块化**：采用插件式技能架构，可以轻松扩展新的视觉分析能力
 - **技能热加载**：支持动态加载技能插件，无需重启系统
 - **异步预警处理**：预警生成采用异步机制，不阻塞视频处理主流程
-- **MinIO存储**：预警图片自动上传至MinIO，支持按任务和摄像头ID分类存储
+- **MinIO存储**：预警图片和视频自动上传至MinIO，支持按任务ID分类存储
 - **RabbitMQ消息队列**：支持预警消息队列处理和补偿机制
 - **SSE实时通信**：支持Server-Sent Events实时推送预警信息
 - **系统监控**：提供健康检查接口，监控系统和依赖服务状态
@@ -39,6 +41,8 @@
 - **目标跟踪**：SORT (Simple Online and Realtime Tracking)
 - **视频流处理**：智能自适应帧读取 + 多线程视频读取架构
 - **异步队列**：Python Queue + 多线程架构
+- **🆕 预警合并**：基于时间窗口和MD5去重的智能合并算法
+- **🆕 视频编码**：OpenCV + FFmpeg，支持H.264/MP4格式
 - **图像处理**：OpenCV
 - **数值计算**：NumPy
 - **性能监控**：内置统计模块
@@ -62,10 +66,9 @@ app/
 ├── db/                     # 数据库相关代码
 │   ├── base.py             # 数据库基础配置
 │   ├── session.py          # 数据库会话管理
-│   ├── camera_dao.py       # 摄像头数据访问对象
+│   ├── ai_task_dao.py      # AI任务数据访问对象
 │   ├── model_dao.py        # 模型数据访问对象
-│   ├── skill_class_dao.py  # 技能类数据访问对象
-│   └── skill_instance_dao.py # 技能实例数据访问对象
+│   └── skill_class_dao.py  # 技能类数据访问对象
 ├── models/                 # 数据模型定义
 │   ├── ai_task.py          # AI任务模型
 │   ├── alert.py            # 预警模型
@@ -98,6 +101,7 @@ app/
 │   ├── ai_task_service.py              # AI任务服务
 │   ├── alert_service.py                # 预警服务
 │   ├── alert_compensation_service.py   # 预警补偿服务
+│   ├── 🆕 alert_merge_manager.py       # 预警合并管理器（核心新增）
 │   ├── camera_service.py               # 摄像头服务
 │   ├── minio_client.py                 # MinIO客户端
 │   ├── rabbitmq_client.py              # RabbitMQ客户端
@@ -114,12 +118,106 @@ app/
 │   └── skill_manager.py    # 技能管理器，负责管理技能生命周期
 └── main.py                 # 应用入口点
 ├── docs/                       # 技术文档目录
-│   └── adaptive_frame_reader.md # 自适应帧读取器技术文档
+│   ├── adaptive_frame_reader.md            # 自适应帧读取器技术文档
+│   ├── 🆕 alert_merge_duration_config.md   # 预警合并持续时间配置文档
+│   ├── 🆕 alert_merge_realtime_config.md   # 预警合并实时配置文档
+│   └── 🆕 alert_video_examples.md          # 预警视频示例文档
 ├── requirements.txt            # Python依赖包列表
 └── README.md                   # 项目说明文档
 ```
 
 ## 核心功能详解
+
+### 🆕 智能预警合并系统
+
+系统采用先进的预警合并算法，有效减少预警噪音，提高处理效率：
+
+#### 1. 预警去重机制
+- **MD5唯一键**：基于任务ID、摄像头ID、技能类型、预警等级生成唯一标识
+- **智能合并窗口**：相同预警在4秒内自动合并（可配置：`ALERT_MERGE_WINDOW_SECONDS`）
+- **时序信息保留**：记录首次和最后预警时间，提供完整的事件时序
+
+#### 2. 分级延时发送策略
+- **1级预警**：立即发送（0秒延迟），确保紧急事件最快响应
+- **2级预警**：最大3秒延迟，平衡实时性和合并效果
+- **3-4级预警**：最大5秒延迟，充分合并常规预警
+
+#### 3. 分级合并持续时间
+- **1-2级关键预警**：最长合并30秒（`ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS`）
+- **3-4级普通预警**：最长合并15秒（`ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS`）
+- **自适应窗口**：根据预警频率动态调整合并策略
+
+#### 4. 预警合并配置参数
+```python
+# 基础合并配置
+ALERT_MERGE_ENABLED = True                    # 是否启用预警合并
+ALERT_MERGE_WINDOW_SECONDS = 4.0             # 合并时间窗口
+ALERT_MERGE_IMMEDIATE_LEVELS = "1"            # 立即发送的预警等级
+
+# 分级持续时间配置
+ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS = 30.0   # 1-2级最大持续时间
+ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS = 15.0     # 3-4级最大持续时间
+
+# 延时策略配置
+ALERT_MERGE_EMERGENCY_DELAY_SECONDS = 1.0    # 紧急预警延迟
+ALERT_MERGE_QUICK_SEND_THRESHOLD = 3         # 快速发送阈值
+```
+
+### 🆕 分级视频录制系统
+
+系统根据预警等级自动生成不同规格的预警视频：
+
+#### 1. 分级视频缓冲策略
+- **1-2级关键预警**：前5秒 + 后5秒缓冲，总时长最长40秒
+- **3-4级普通预警**：前3秒 + 后3秒缓冲，总时长最长21秒
+- **视频质量**：1280x720分辨率，H.264编码，75%JPEG质量
+
+#### 2. 视频生成模式
+
+**同步模式（2-4级预警）**：
+- 等待合并窗口结束
+- 生成完整视频后发送预警
+- 视频地址为实际可访问的MinIO链接
+
+**异步模式（1级预警）**：
+- 立即发送预警（0秒延迟）
+- 预分配MinIO视频地址
+- 后台异步生成视频（通常3秒内完成）
+- 支持前端轮询或SSE通知视频就绪状态
+
+#### 3. 视频录制配置参数
+```python
+# 基础视频配置
+ALERT_VIDEO_ENABLED = True                   # 是否启用视频录制
+ALERT_VIDEO_BUFFER_DURATION_SECONDS = 120.0 # 视频缓冲区时长
+ALERT_VIDEO_FPS = 10.0                       # 视频帧率
+ALERT_VIDEO_WIDTH = 1280                     # 视频宽度
+ALERT_VIDEO_HEIGHT = 720                     # 视频高度
+
+# 普通预警视频配置
+ALERT_VIDEO_PRE_BUFFER_SECONDS = 3.0         # 预警前缓冲时间
+ALERT_VIDEO_POST_BUFFER_SECONDS = 3.0        # 预警后缓冲时间
+
+# 关键预警视频配置
+ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS = 5.0   # 1-2级预警前缓冲
+ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS = 5.0  # 1-2级预警后缓冲
+```
+
+#### 4. 视频存储路径规则
+```
+MinIO存储结构：
+alert-videos/{task_id}/alert_video_{task_id}_{timestamp}.mp4
+
+示例：
+alert-videos/123/alert_video_123_20250101_120000.mp4
+```
+
+### 🆕 预警视频时长总结
+
+| 预警等级 | 最短视频时长 | 最长视频时长 | 说明 |
+|---------|-------------|-------------|------|
+| **1-2级关键预警** | 10秒 | 40秒 | 前5秒+事件+后5秒，支持异步处理 |
+| **3-4级普通预警** | 6秒 | 21秒 | 前3秒+事件+后3秒，同步处理 |
 
 ### AI任务自动调度系统
 
@@ -170,7 +268,7 @@ app/
 - 自动在预警图片上绘制检测框和标签
 - 不同检测类别使用不同颜色标识（动态分配颜色）
 - 显示置信度和类别名称
-- 图片按 `任务ID/摄像头ID` 结构存储到MinIO
+- 图片按 `任务ID` 结构存储到MinIO
 
 #### 4. 异步预警处理架构
 - 预警生成采用线程池异步处理

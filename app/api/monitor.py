@@ -9,6 +9,8 @@ from app.db.session import get_db
 from app.models.alert import AlertResponse
 from app.services.alert_service import alert_service
 from app.services.wvp_client import wvp_client
+from app.services.ai_task_executor import task_executor
+from app.services.alert_merge_manager import alert_merge_manager
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +29,7 @@ class PreAlertInfo(BaseModel):
 # 扩展的报警响应模型
 class AlertDetailResponse(AlertResponse):
     pre_alert_info: Optional[PreAlertInfo] = None
+
 @router.get("/alerts/{alert_id}", response_model=AlertDetailResponse)
 def get_alert_detail(
     alert_id: str = Path(..., description="预警ID"),
@@ -87,4 +90,34 @@ def get_channel_live_stream(
     
     logger.info(f"成功获取通道实时流地址: channel_id={channel_id}, stream_id={stream_info.get('streamId', 'unknown')}")
     # 直接返回原始结果，不进行重组
-    return stream_info 
+    return stream_info
+
+@router.get("/executor-status", response_model=Dict[str, Any])
+async def get_executor_status():
+    """获取AI任务执行器状态"""
+    return {
+        "running_tasks": list(task_executor.running_tasks.keys()),
+        "task_count": len(task_executor.running_tasks),
+        "scheduler_running": task_executor.scheduler.running,
+        "scheduled_jobs": len(task_executor.scheduler.get_jobs())
+    }
+
+@router.get("/alert-merge-status", response_model=Dict[str, Any])
+async def get_alert_merge_status():
+    """获取预警合并管理器状态"""
+    return alert_merge_manager.get_status()
+
+@router.get("/task-performance/{task_id}", response_model=Dict[str, Any])
+async def get_task_performance(task_id: int):
+    """获取任务性能报告"""
+    # 检查任务是否在运行
+    if task_id not in task_executor.running_tasks:
+        return {"error": f"任务 {task_id} 未在运行"}
+    
+    # 这里可以扩展获取具体任务的性能数据
+    # 例如从OptimizedAsyncProcessor获取性能报告
+    return {
+        "task_id": task_id,
+        "status": "running",
+        "message": "任务性能详细报告功能待实现"
+    } 
