@@ -4,5 +4,13 @@ from app.models.model import Model
 from app.models.ai_task import AITask
 from app.models.alert import Alert, AlertCreate, AlertResponse
 
+# 🎯 导入零配置补偿机制相关模型
+from app.models.compensation import (
+    AlertPublishLog, AlertNotificationLog, CompensationTaskLog,
+    PublishStatus, NotificationStatus, NotificationChannel, CompensationTaskType,
+    AlertPublishLogCreate, AlertNotificationLogCreate, CompensationTaskLogCreate, 
+    CompensationStats
+)
+
 # 为避免循环导入问题，这里显式地设置所有相关关系
 # 可以在这里注册所有模型，以便在应用启动时能正确加载 
