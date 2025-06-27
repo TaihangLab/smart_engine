@@ -23,3 +23,10 @@ scipy==1.16.0
 scikit-image==0.25.2
 lap==0.5.12
 filterpy==1.4.5
+langchain==0.3.26
+langchain-openai==0.3.25
+# langchain-anthropic==0.2.5
+# langchain-google-genai==2.0.5
+# langchain-community==0.3.10
+langchain-core==0.3.66
+redis==5.2.1
