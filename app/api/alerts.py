@@ -423,8 +423,8 @@ def send_test_alert(
         
         logger.info("正在调用AI任务执行器生成测试报警...")
         
-        # 调用AI任务执行器的_generate_alert方法
-        result = task_executor._generate_alert(
+        # 调用AI任务执行器的_generate_alert_with_merge方法
+        result = task_executor._generate_alert_with_merge(
             task=mock_task,
             alert_data=mock_alert_data,
             frame=mock_frame,
