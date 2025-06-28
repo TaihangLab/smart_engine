@@ -122,7 +122,7 @@ class MinioClient:
             prefix: 对象前缀，默认为空
             
         Returns:
-            str: 对象的存储路径
+            str: 对象名称（不包含前缀）
         """
         try:
             # 如果提供了前缀，确保它以 / 结尾
@@ -143,7 +143,7 @@ class MinioClient:
             )
             
             logger.info(f"数据上传成功: {full_object_name}")
-            return full_object_name
+            return object_name  # 只返回文件名，不包含前缀
         except S3Error as err:
             logger.error(f"数据上传失败: {err}")
             raise HTTPException(status_code=500, detail=f"数据上传失败: {str(err)}")
