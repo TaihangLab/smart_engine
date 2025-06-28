@@ -205,7 +205,7 @@ class MinerDetectorSkill(BaseSkill):
         """
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = cv2.resize(img, (self.input_width, self.input_height))
-        img = img.astype(np.float32) / 255.0
+        img = img.astype(np.float32) / np.float32(255.0)
         return np.expand_dims(img.transpose(2, 0, 1), axis=0)
 
     def postprocess(self, outputs, original_img):

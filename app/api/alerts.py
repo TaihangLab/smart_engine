@@ -264,6 +264,107 @@ async def get_realtime_alerts(
     
     return response_data
 
+@router.get("/sse/status", description="获取SSE连接状态")
+def get_sse_status():
+    """
+    获取SSE连接状态信息
+    """
+    try:
+        logger.info("收到获取SSE状态请求")
+
+        # 获取连接管理器状态
+        from app.services.sse_connection_manager import sse_manager
+
+        status_info = {
+            "success": True,
+            "sse_enabled": True,
+            "total_connections": len(connected_clients),
+            "manager_status": {
+                "is_running": sse_manager.is_running if hasattr(sse_manager, 'is_running') else True,
+                "start_time": getattr(sse_manager, 'start_time', None),
+                "total_messages_sent": getattr(sse_manager, 'total_messages_sent', 0),
+                "active_connections": getattr(sse_manager, 'active_connections', len(connected_clients))
+            },
+            "performance": {
+                "queue_size_limit": getattr(sse_manager, 'queue_size_limit', 1000),
+                "send_timeout": getattr(sse_manager, 'send_timeout', 2.0),
+                "batch_size": getattr(sse_manager, 'batch_size', 10)
+            }
+        }
+
+        return status_info
+    except Exception as e:
+        logger.error(f"获取SSE状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取SSE状态失败: {str(e)}")
+
+@router.get("/statistics", description="获取报警统计信息")
+async def get_alert_statistics(
+    db: Session = Depends(get_db),
+    days: int = Query(7, ge=1, le=365, description="统计天数"),
+):
+    """
+    获取报警统计信息
+    """
+    try:
+        logger.info(f"收到获取报警统计请求，统计天数: {days}")
+
+        # 计算时间范围
+        from datetime import datetime, timedelta
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+
+        # 获取统计数据
+        stats = await alert_service.get_alert_statistics(
+            db=db,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        return {
+            "success": True,
+            "time_range": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "days": days
+            },
+            "statistics": stats
+        }
+    except Exception as e:
+        logger.error(f"获取报警统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取报警统计失败: {str(e)}")
+
+@router.get("/connected")
+def get_connected_clients():
+    """
+    获取当前连接的SSE客户端信息
+    """
+    try:
+        logger.info("收到获取连接客户端信息请求")
+        clients_info = []
+
+        # connected_clients 是一个set，包含客户端队列对象
+        for client_queue in connected_clients:
+            client_info = {
+                "client_id": getattr(client_queue, '_client_id', f"client_{id(client_queue)}"),
+                "connection_time": getattr(client_queue, '_connection_time', None),
+                "queue_size": client_queue.qsize() if hasattr(client_queue, 'qsize') else 0,
+                "client_ip": getattr(client_queue, '_client_ip', 'unknown'),
+                "user_agent": getattr(client_queue, '_user_agent', 'unknown'),
+                "is_connected": True  # 如果在set中说明连接是活跃的
+            }
+            clients_info.append(client_info)
+
+        return {
+            "success": True,
+            "total_clients": len(connected_clients),
+            "clients": clients_info
+        }
+    except Exception as e:
+        logger.error(f"获取连接客户端信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取连接客户端信息失败: {str(e)}")
+
+
+
 @router.get("/{alert_id}", response_model=AlertResponse)
 def get_alert(
     alert_id: int,

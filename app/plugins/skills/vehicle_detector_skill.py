@@ -1,5 +1,5 @@
 """
-COCO检测技能 - 基于Triton推理服务器
+车型检测技能 - 基于Triton推理服务器
 """
 import cv2
 import numpy as np
@@ -11,33 +11,23 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-class CocoDetectorSkill(BaseSkill):
-    """COCO对象检测技能
-    
-    使用YOLO模型检测COCO数据集中的80个常见对象，基于triton_client全局单例
+class VehicleDetectorSkill(BaseSkill):
+    """车型检测技能
+
+    使用YOLO模型进行车型检测，基于triton_client全局单例
     """
-    
+
         # 默认配置
     DEFAULT_CONFIG = {
         "type": "detection",             # 技能类型：检测类
-        "name": "coco_detector",         # 技能唯一标识符
-        "name_zh": "COCO目标检测",        # 技能中文名称
+        "name": "vehicle_detector",         # 技能唯一标识符
+        "name_zh": "车型目标检测",        # 技能中文名称
         "version": "1.0",              # 技能版本
-        "description": "使用YOLO模型检测COCO数据集中的80个常见对象",  # 技能描述
+        "description": "使用YOLO模型进行车型检测",  # 技能描述
         "status": True,                  # 技能状态（是否启用）
-        "required_models": ["yolo11_coco"],  # 所需模型
+        "required_models": ["yolo11_vehicle"],  # 所需模型
         "params": {
-            "classes": [
-                "person", "bicycle", "car", "motorcycle", "airplane", "bus", "train", "truck", "boat", "traffic light",
-                "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
-                "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
-                "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard", 
-                "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple", 
-                "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "couch", 
-                "potted plant", "bed", "dining table", "toilet", "tv", "laptop", "mouse", "remote", "keyboard", "cell phone",
-                "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors", "teddy bear",
-                "hair drier", "toothbrush"
-            ],
+            "classes": ["bus", "microbus","minivan","sedan","suv","truck"],
             "conf_thres": 0.5,
             "iou_thres": 0.45,
             "max_det": 300,
@@ -45,20 +35,20 @@ class CocoDetectorSkill(BaseSkill):
             "enable_default_sort_tracking": False  # 默认不启用SORT跟踪，COCO检测主要用于单帧物体识别
         }
     }
-    
+
     def _initialize(self) -> None:
         """初始化技能"""
         # 获取配置参数
         params = self.config.get("params")
-        
 
-        
+
+
         # 从配置中获取类别列表，如果配置中没有则使用默认列表
         self.classes = params.get("classes")
-        
+
         # 根据类别列表生成类别映射
         self.class_names = {i: class_name for i, class_name in enumerate(self.classes)}
-        
+
         # 检测置信度阈值
         self.conf_thres = params.get("conf_thres")
         # 非极大值抑制阈值
@@ -71,27 +61,27 @@ class CocoDetectorSkill(BaseSkill):
         self.model_name = self.required_models[0]
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
-        
-        self.log("info", f"初始化COCO对象检测器: model={self.model_name}")
-        
+
+        self.log("info", f"初始化车型检测器: model={self.model_name}")
+
     def get_required_models(self) -> List[str]:
         """获取技能所需的模型列表"""
         return self.required_models
-    
+
     def process(self, input_data: Union[np.ndarray, str, Dict[str, Any], Any], fence_config: Dict = None) -> SkillResult:
         """
         处理输入数据，执行COCO对象检测
-        
+
         Args:
             input_data: 输入数据，支持numpy数组、图像路径或包含参数的字典
             fence_config: 电子围栏配置（可选）
-                
+
         Returns:
             SkillResult: 包含检测结果的技能结果对象
         """
         # 1. 解析输入
         image = None
-        
+
         try:
             # 支持多种类型的输入
             if isinstance(input_data, np.ndarray):
@@ -108,40 +98,40 @@ class CocoDetectorSkill(BaseSkill):
                     image = cv2.imread(image)
                     if image is None:
                         return SkillResult.error_result(f"无法加载图像: {image}")
-                
+
                 # 提取电子围栏配置（如果字典中包含）
                 if "fence_config" in input_data:
                     fence_config = input_data["fence_config"]
             else:
                 return SkillResult.error_result("不支持的输入数据类型")
-                
+
             # 检查图像是否有效
             if image is None or image.size == 0:
                 return SkillResult.error_result("无效的图像数据")
-                
+
             # 2. 执行检测
             # 预处理图像
             input_tensor = self.preprocess(image)
-            
+
             # 设置Triton输入
             inputs = {
                 "images": input_tensor
             }
-            
+
             # 执行推理
             outputs = triton_client.infer(self.model_name, inputs)
             if outputs is None:
                 return SkillResult.error_result("推理失败")
-            
+
             # 后处理结果
             detections = outputs["output0"]
             results = self.postprocess(detections, image)
-            
+
             # 3. 可选的跟踪功能（根据配置决定）
             # COCO检测默认不启用跟踪，因为通常用于单帧物体检测
             if self.config.get("params", {}).get("enable_default_sort_tracking", False):
                 results = self.add_tracking_ids(results)
-            
+
             # 4. 应用电子围栏过滤（如果提供了有效的围栏配置）
             if self.is_fence_config_valid(fence_config):
                 self.log("info", f"应用电子围栏过滤: {fence_config}")
@@ -154,7 +144,7 @@ class CocoDetectorSkill(BaseSkill):
                 self.log("info", f"围栏过滤后检测结果数量: {len(results)}")
             elif fence_config:
                 self.log("info", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
-            
+
             # 5. 构建结果数据
             result_data = {
                 "detections": results,
@@ -162,10 +152,10 @@ class CocoDetectorSkill(BaseSkill):
                 "classes": self._count_classes(results),
                 "safety_metrics": self.analyze_safety(results)
             }
-            
+
             # 6. 返回结果
             return SkillResult.success_result(result_data)
-            
+
         except Exception as e:
             logger.exception(f"处理失败: {str(e)}")
             return SkillResult.error_result(f"处理失败: {str(e)}")
@@ -189,7 +179,7 @@ class CocoDetectorSkill(BaseSkill):
         img = cv2.resize(img, (self.input_width, self.input_height))
 
         # 归一化到[0,1]
-        img = img.astype(np.float32) / np.float32(255.0)
+        img = img.astype(np.float32) / 255.0
 
         # 调整为NCHW格式 (1, 3, height, width)
         return np.expand_dims(img.transpose(2, 0, 1), axis=0)
@@ -267,10 +257,10 @@ class CocoDetectorSkill(BaseSkill):
     def _count_classes(self, results):
         """
         计算检测结果中各类别的数量
-        
+
         参数:
             results: 检测结果列表
-            
+
         返回:
             类别计数字典
         """
@@ -285,23 +275,23 @@ class CocoDetectorSkill(BaseSkill):
 
     def analyze_safety(self, detections):
         """分析安全状况（通用COCO检测的基本安全分析）
-        
+
         Args:
             detections: 检测结果
-            
+
         Returns:
             Dict: 分析结果，包含预警信息
         """
         # 统计人员数量
         person_count = 0
-        
+
         # 分类检测结果
         for det in detections:
             class_name = det.get('class_name', '')
             if class_name == 'person':
                 person_count += 1
-        
-        # COCO检测器默认不触发预警，只提供检测计数
+
+        # 车型检测器默认不触发预警，只提供检测计数
         # 如果需要特定的安全逻辑，应该创建专门的技能类
         result = {
             "total_detections": len(detections),
@@ -315,18 +305,18 @@ class CocoDetectorSkill(BaseSkill):
                 "alert_description": ""     # 预警描述
             }
         }
-        
-        self.log("info", f"COCO检测分析: 检测到 {len(detections)} 个对象，其中 {person_count} 个人员")
-        return result 
+
+        self.log("info", f"车型检测分析: 检测到 {len(detections)} 个对象")
+        return result
 
     def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
         """
         获取检测对象的关键点（用于围栏判断）
         对于COCO检测，使用检测框的中心点作为关键点
-        
+
         Args:
             detection: 检测结果
-            
+
         Returns:
             检测点坐标 (x, y)，如果无法获取则返回None
         """
@@ -341,16 +331,19 @@ class CocoDetectorSkill(BaseSkill):
     # 测试代码
 
 
+# 测试代码
 if __name__ == "__main__":
     # 创建检测器 - 传入配置参数会自动调用_initialize()
-    detector = CocoDetectorSkill(CocoDetectorSkill.DEFAULT_CONFIG)
+    detector = VehicleDetectorSkill(VehicleDetectorSkill.DEFAULT_CONFIG)
 
     # 测试图像检测
-    test_image = np.zeros((640, 640, 3), dtype=np.uint8)
-    cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
+    # test_image = np.zeros((640, 640, 3), dtype=np.uint8)
+    # cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
+    image_path = "F:/vehicle_0000777.jpg "
+    image = cv2.imread(image_path)
 
     # 执行检测
-    result = detector.process(test_image)
+    result = detector.process(image)
 
     if not result.success:
         print(f"检测失败: {result.error_message}")
