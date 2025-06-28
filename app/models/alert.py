@@ -4,7 +4,7 @@ from sqlalchemy import Column, String, DateTime, Float, JSON, BigInteger, Intege
 from pydantic import BaseModel
 from enum import IntEnum
 
-from app.db.base_class import Base
+from app.db.base import Base
 
 
 class AlertStatus(IntEnum):
@@ -169,8 +169,8 @@ class AlertCreate(BaseModel):
     # 🆕 新增处理流程字段 - 创建时会自动生成初始流程
     process: Optional[Dict[str, Any]] = None
 
-    class Config:
-        json_schema_extra = {
+    model_config = {
+        "json_schema_extra": {
             "example": {
                 "alert_time": "2025-04-06T12:30:00",
                 "alert_type": "no_helmet",
@@ -239,6 +239,7 @@ class AlertCreate(BaseModel):
                 "processing_notes": "系统自动检测到的安全隐患"
             }
         }
+    }
 
 
 class AlertUpdate(BaseModel):
@@ -315,7 +316,7 @@ class AlertResponse(BaseModel):
 
                         # 构建MinIO路径前缀，确保以斜杠结尾
                         minio_prefix = f"{settings.MINIO_ALERT_VIDEO_PREFIX}{obj.task_id}/"
-                        
+
                         # 调用minio_client实例的get_presigned_url方法
                         url = minio_client.get_presigned_url(
                             settings.MINIO_BUCKET,
@@ -349,5 +350,4 @@ class AlertResponse(BaseModel):
         
         return cls(**data)
     
-    class Config:
-        from_attributes = True 
+    model_config = {"from_attributes": True} 
