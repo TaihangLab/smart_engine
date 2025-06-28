@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     MINIO_ALERT_VIDEO_PREFIX: str = Field(default="alert-videos/", description="报警视频前缀")
 
     # RabbitMQ配置
-    RABBITMQ_HOST: str = Field(default="192.168.1.107", description="RabbitMQ服务器地址")
+    RABBITMQ_HOST: str = Field(default="127.0.0.1", description="RabbitMQ服务器地址")
     RABBITMQ_PORT: int = Field(default=5672, description="RabbitMQ端口")
     RABBITMQ_USER: str = Field(default="guest", description="RabbitMQ用户名")
     RABBITMQ_PASSWORD: str = Field(default="guest", description="RabbitMQ密码")
@@ -251,9 +251,56 @@ class Settings(BaseSettings):
     ALERT_VIDEO_WIDTH: int = Field(default=1280, description="预警视频宽度（像素）")
     ALERT_VIDEO_HEIGHT: int = Field(default=720, description="预警视频高度（像素）")
     
+    # H.264 (AVC) 视频编码配置
+    ALERT_VIDEO_CODEC: str = Field(default="avc1", description="视频编码格式 (avc1=H.264)")
+    ALERT_VIDEO_BITRATE: int = Field(default=2000000, description="视频码率 (bps, 2Mbps默认)")
+    ALERT_VIDEO_GOP_SIZE: int = Field(default=30, description="GOP大小 (关键帧间隔)")
+    
     # 针对高优先级预警的视频配置
     ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警前缓冲时间（秒）")
     ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警后缓冲时间（秒）")
+    
+    # 主要LLM服务配置（后端管理，前端不可见）- 使用Ollama
+    PRIMARY_LLM_PROVIDER: str = Field(default="ollama", description="主要LLM提供商")
+    PRIMARY_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434", description="主要LLM服务器地址")
+    PRIMARY_LLM_API_KEY: str = Field(default="ollama", description="主要LLM API密钥（Ollama不需要密钥）")
+    PRIMARY_LLM_MODEL: str = Field(default="llava:latest", description="主要LLM模型名称")
+    
+    # 备用LLM服务配置（容错机制）- 同样使用Ollama的另一个模型
+    BACKUP_LLM_PROVIDER: str = Field(default="ollama", description="备用LLM提供商")
+    BACKUP_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434", description="备用LLM服务器地址")
+    BACKUP_LLM_API_KEY: str = Field(default="ollama", description="备用LLM API密钥（Ollama不需要密钥）")
+    BACKUP_LLM_MODEL: str = Field(default="qwen3:32b", description="备用LLM模型名称")
+    
+    # 专用场景模型配置（后端根据技能类型自动选择）
+    ANALYSIS_LLM_MODEL: str = Field(default="llava:latest", description="分析场景专用模型（视觉多模态）")
+    REVIEW_LLM_MODEL: str = Field(default="llava:latest", description="复判场景专用模型（视觉多模态）")
+    CHAT_LLM_MODEL: str = Field(default="qwen3:32b", description="对话场景专用模型（纯文本）")
+    
+    # LLM通用参数
+    LLM_TEMPERATURE: float = Field(default=0.1, description="LLM温度参数")
+    LLM_MAX_TOKENS: int = Field(default=1000, description="LLM最大令牌数")
+    LLM_TIMEOUT: int = Field(default=60, description="LLM请求超时时间（秒）")
+    
+    # LLM服务质量配置
+    LLM_RETRY_COUNT: int = Field(default=3, description="LLM请求重试次数")
+    LLM_RETRY_DELAY: float = Field(default=1.0, description="LLM请求重试延迟（秒）")
+    LLM_CONNECTION_POOL_SIZE: int = Field(default=10, description="LLM连接池大小")
+    LLM_ENABLE_CACHE: bool = Field(default=False, description="是否启用LLM响应缓存")
+    LLM_ENABLE_FALLBACK: bool = Field(default=True, description="是否启用备用LLM容错机制")
+    
+    # Redis配置（用于复判队列）
+    REDIS_HOST: str = Field(default="127.0.0.1", description="Redis服务器地址")
+    REDIS_PORT: int = Field(default=6379, description="Redis端口")
+    REDIS_DB: int = Field(default=0, description="Redis数据库编号")
+    REDIS_PASSWORD: str = Field(default="", description="Redis密码")
+    
+    # 预警复判队列配置
+    ALERT_REVIEW_MAX_WORKERS: int = Field(default=1, description="复判队列工作者数量")
+    ALERT_REVIEW_PROCESSING_TIMEOUT: int = Field(default=300, description="复判任务处理超时时间（秒）")
+    ALERT_REVIEW_RETRY_MAX_ATTEMPTS: int = Field(default=3, description="复判任务最大重试次数")
+    ALERT_REVIEW_COMPLETED_TTL: int = Field(default=86400, description="已完成复判任务缓存时间（秒）")
+    ALERT_REVIEW_QUEUE_ENABLED: bool = Field(default=True, description="是否启用复判队列服务")
 
     def get_sse_config(self) -> dict:
         """根据环境获取SSE配置"""
@@ -297,9 +344,10 @@ class Settings(BaseSettings):
 
         return base_config
 
-    class Config:
-        env_file = ".env"
-        case_sensitive = True
+    model_config = {
+        "env_file": ".env",
+        "case_sensitive": True
+    }
 
 settings = Settings()
 

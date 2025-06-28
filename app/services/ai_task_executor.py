@@ -1169,24 +1169,24 @@ class AITaskExecutor:
             return None, False  # 异常情况，不删除任务
     
     def _load_skill_for_task(self, task: AITask, db: Session) -> Optional[Any]:
-        """根据任务配置直接创建技能对象"""
+        """根据任务配置直接创建技能对象（只支持传统技能）"""
         try:
             # 导入技能工厂和技能管理器
             from app.skills.skill_factory import skill_factory
             from app.db.skill_class_dao import SkillClassDAO
             
-            # 获取技能类信息
+            # 获取传统技能类信息
             skill_class = SkillClassDAO.get_by_id(task.skill_class_id, db)
             if not skill_class:
                 logger.error(f"未找到技能类: {task.skill_class_id}")
                 return None
             
-            # 合并默认配置和任务特定配置
-            default_config = skill_class.default_config if skill_class.default_config else {}
+            # 传统技能使用default_config字段
+            skill_config_data = skill_class.default_config if skill_class.default_config else {}
             task_skill_config = json.loads(task.skill_config) if isinstance(task.skill_config, str) else (task.skill_config or {})
             
             # 深度合并配置
-            merged_config = self._merge_config(default_config, task_skill_config)
+            merged_config = self._merge_config(skill_config_data, task_skill_config)
             
             # 使用技能工厂创建技能对象
             skill_instance = skill_factory.create_skill(skill_class.name, merged_config)
@@ -1202,9 +1202,9 @@ class AITaskExecutor:
             logger.error(f"创建技能对象时出错: {str(e)}")
             return None
     
-    def _merge_config(self, default_config: dict, task_skill_config: dict) -> dict:
+    def _merge_config(self, base_config: dict, task_skill_config: dict) -> dict:
         """深度合并配置"""
-        merged = default_config.copy()
+        merged = base_config.copy()
         
         for key, value in task_skill_config.items():
             if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):

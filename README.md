@@ -26,6 +26,9 @@
 - **异步队列架构**：三层解耦设计（采集→检测→推流），支持独立的帧率控制和智能丢帧
 - **RTSP检测结果推流**：可选的FFmpeg RTSP推流功能，实时推送带检测框的视频流
 - **内存优化**：减少不必要的帧拷贝，智能检测框绘制，大幅降低内存使用
+- **🆕 多模态大模型技能**：支持LLM多模态视觉分析，用于复杂场景的智能预判
+- **🆕 智能复判系统**：基于Redis队列的可靠复判架构，支持多工作者并发处理
+- **🆕 LLM服务集成**：集成Ollama本地大模型服务，支持llava、qwen等多模态模型
 
 ## 技术架构
 
@@ -43,6 +46,8 @@
 - **异步队列**：Python Queue + 多线程架构
 - **🆕 预警合并**：基于时间窗口和MD5去重的智能合并算法
 - **🆕 视频编码**：OpenCV + FFmpeg，支持H.264/MP4格式
+- **🆕 多模态大模型**：Ollama + llava/qwen多模态视觉模型
+- **🆕 复判队列**：Redis消息队列，支持任务持久化和故障恢复
 - **图像处理**：OpenCV
 - **数值计算**：NumPy
 - **性能监控**：内置统计模块
@@ -53,8 +58,11 @@
 app/
 ├── api/                    # API路由和端点
 │   ├── ai_tasks.py         # AI任务管理接口
+│   ├── ai_task_review.py   # 🆕 AI任务复判配置接口
 │   ├── alerts.py           # 预警管理接口
 │   ├── cameras.py          # 摄像头管理接口
+│   ├── llm_skills.py       # 🆕 LLM技能管理接口
+│   ├── llm_skill_review.py # 🆕 LLM复判技能接口
 │   ├── models.py           # 模型管理接口
 │   ├── skill_classes.py    # 技能类管理接口
 │   ├── system.py           # 系统状态接口
@@ -67,12 +75,14 @@ app/
 │   ├── base.py             # 数据库基础配置
 │   ├── session.py          # 数据库会话管理
 │   ├── ai_task_dao.py      # AI任务数据访问对象
+│   ├── llm_skill_dao.py    # 🆕 LLM技能数据访问对象
 │   ├── model_dao.py        # 模型数据访问对象
 │   └── skill_class_dao.py  # 技能类数据访问对象
 ├── models/                 # 数据模型定义
-│   ├── ai_task.py          # AI任务模型
+│   ├── ai_task.py          # AI任务模型（新增复判字段）
 │   ├── alert.py            # 预警模型
 │   ├── camera.py           # 摄像头模型
+│   ├── llm_skill.py        # 🆕 LLM技能模型
 │   ├── model.py            # AI模型定义
 │   └── skill.py            # 技能模型
 ├── plugins/                # 插件目录
@@ -102,9 +112,14 @@ app/
 │   ├── alert_service.py                # 预警服务
 │   ├── alert_compensation_service.py   # 预警补偿服务
 │   ├── 🆕 alert_merge_manager.py       # 预警合并管理器（核心新增）
+│   ├── 🆕 alert_review_service.py      # 预警复判服务
+│   ├── 🆕 alert_review_queue_service.py # 基于Redis的复判队列服务
 │   ├── camera_service.py               # 摄像头服务
+│   ├── 🆕 llm_service.py               # 多模态大模型服务
 │   ├── minio_client.py                 # MinIO客户端
+│   ├── 🆕 multimodal_review_service.py # 多模态复判服务
 │   ├── rabbitmq_client.py              # RabbitMQ客户端
+│   ├── 🆕 redis_client.py              # Redis客户端服务
 │   ├── sse_connection_manager.py       # SSE连接管理器
 │   ├── triton_client.py                # Triton推理客户端
 │   ├── tracker_service.py              # 跟踪服务
@@ -121,7 +136,11 @@ app/
 │   ├── adaptive_frame_reader.md            # 自适应帧读取器技术文档
 │   ├── 🆕 alert_merge_duration_config.md   # 预警合并持续时间配置文档
 │   ├── 🆕 alert_merge_realtime_config.md   # 预警合并实时配置文档
-│   └── 🆕 alert_video_examples.md          # 预警视频示例文档
+│   ├── 🆕 alert_review_reliable_architecture.md # 可靠复判架构文档
+│   ├── 🆕 alert_video_examples.md          # 预警视频示例文档
+│   ├── 🆕 llm_skill_examples.md            # 多模态LLM技能示例文档
+│   ├── 🆕 ollama_api.md                    # Ollama API使用文档
+│   └── 🆕 ollama_setup_guide.md            # Ollama服务器配置指南
 ├── requirements.txt            # Python依赖包列表
 └── README.md                   # 项目说明文档
 ```
@@ -163,6 +182,93 @@ ALERT_MERGE_EMERGENCY_DELAY_SECONDS = 1.0    # 紧急预警延迟
 ALERT_MERGE_QUICK_SEND_THRESHOLD = 3         # 快速发送阈值
 ```
 
+### 🆕 多模态大模型复判系统
+
+系统集成了基于Ollama的多模态大模型复判功能，提供智能的预警二次确认机制：
+
+#### 1. 多模态LLM技能系统
+- **无基类依赖**：LLM技能独立于传统技能架构，通过数据库配置动态创建
+- **多模态分析**：支持图像+文本的复合分析，理解复杂场景语义
+- **灵活配置**：支持自定义system_prompt、user_prompt_template、response_format等参数
+- **模型支持**：集成llava:latest（多模态视觉）、qwen3:32b（文本对话）等模型
+
+#### 2. 基于Redis的可靠复判队列
+- **持久化队列**：使用Redis确保复判任务不丢失，支持系统重启恢复
+- **多工作者并发**：3个工作者并发处理，可动态调整数量
+- **故障恢复**：自动检测超时任务，支持指数退避重试机制
+- **状态追踪**：完整的任务状态管理（待处理→处理中→已完成/失败）
+
+#### 3. 智能复判触发机制
+- **实时触发**：预警发送成功后立即检查是否需要复判
+- **条件判断**：基于AI任务配置的复判条件自动触发
+- **异步处理**：复判不阻塞预警发送流程，确保实时性
+
+#### 4. 复判流程架构
+```
+预警产生 → 预警合并 → 发送RabbitMQ → ✅成功 → 复判检查 → Redis队列 → LLM分析 → 结果存储
+```
+
+#### 5. LLM复判配置示例
+
+**基础安全帽复判技能**：
+```json
+{
+  "name": "安全帽佩戴复判",
+  "description": "使用多模态大模型二次确认安全帽检测结果",
+  "system_prompt": "你是一个专业的安全监控助手，专门负责分析工地安全帽佩戴情况。",
+  "user_prompt_template": "请分析这张图片中的人员安全帽佩戴情况。图片来自{camera_name}摄像头，检测到{alert_count}个安全帽相关问题。请仔细观察并给出你的判断。",
+  "response_format": "json",
+  "params": {
+    "temperature": 0.1,
+    "max_tokens": 500
+  }
+}
+```
+
+**专业场景复判技能示例**：
+
+1. **作业未穿工作服识别**
+```json
+{
+  "name": "作业未穿工作服复判",
+  "user_prompt_template": "请仔细观察这张来自{camera_name}的监控图片。图中是否有人在操作软管但没有穿连体裤？请重点关注正在进行操作的人员的着装情况。",
+  "response_format": "json"
+}
+```
+
+2. **天气异常识别**
+```json
+{
+  "name": "天气异常状况复判", 
+  "user_prompt_template": "请观察这张来自{camera_name}的监控图片。图片是否是一个下雨天？请根据地面积水、雨滴、能见度等特征进行判断。",
+  "response_format": "json"
+}
+```
+
+3. **人员驾驶识别**
+```json
+{
+  "name": "人员驾驶状态复判",
+  "user_prompt_template": "请分析这张来自{camera_name}的监控图片。图中的人坐在车里吗？请重点关注人员与车辆的位置关系，特别是是否在驾驶位置。",
+  "response_format": "json"
+}
+```
+
+4. **倚靠栏杆识别**
+```json
+{
+  "name": "倚靠栏杆行为复判",
+  "user_prompt_template": "请分析这张来自{camera_name}的监控图片。图中的人是否靠在栏杆上？请注意区分正常通行和违规倚靠行为。",
+  "response_format": "json"
+}
+```
+
+> **设计要点**：
+> - 使用疑问句格式，问题能够通过「是」或「否」回答
+> - 采用「形容词+名词」形式描述目标，提高准确性
+> - 当大模型分析结果为「是」时，系统输出任务结果
+> - 更多专业场景示例请参考：`docs/llm_skill_examples.md`
+
 ### 🆕 分级视频录制系统
 
 系统根据预警等级自动生成不同规格的预警视频：
@@ -201,6 +307,28 @@ ALERT_VIDEO_POST_BUFFER_SECONDS = 3.0        # 预警后缓冲时间
 # 关键预警视频配置
 ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS = 5.0   # 1-2级预警前缓冲
 ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS = 5.0  # 1-2级预警后缓冲
+```
+
+#### 6. 复判队列配置参数
+```python
+# Redis配置
+REDIS_HOST = "192.168.1.107"                    # Redis服务器地址
+REDIS_PORT = 6379                               # Redis端口
+REDIS_DB = 0                                    # Redis数据库编号
+REDIS_PASSWORD = ""                             # Redis密码
+
+# 复判队列配置
+ALERT_REVIEW_MAX_WORKERS = 3                    # 复判工作者数量
+ALERT_REVIEW_PROCESSING_TIMEOUT = 300           # 处理超时时间（5分钟）
+ALERT_REVIEW_RETRY_MAX_ATTEMPTS = 3             # 最大重试次数
+ALERT_REVIEW_COMPLETED_TTL = 86400              # 完成任务缓存时间（1天）
+ALERT_REVIEW_QUEUE_ENABLED = True               # 是否启用复判队列
+
+# LLM服务配置
+PRIMARY_LLM_PROVIDER = "ollama"                 # 主要LLM提供商
+PRIMARY_LLM_BASE_URL = "http://172.18.1.1:11434" # Ollama服务器地址
+PRIMARY_LLM_MODEL = "llava:latest"              # 多模态视觉模型
+BACKUP_LLM_MODEL = "qwen3:32b"                  # 备用文本模型
 ```
 
 #### 4. 视频存储路径规则
@@ -527,6 +655,10 @@ SQLAlchemy==2.0.25      # ORM数据库
 tritonclient[all]==2.41.0 # Triton推理服务客户端
 uvicorn==0.34.2         # ASGI服务器
 pytest==8.3.4          # 测试框架
+redis==5.2.1            # 🆕 Redis客户端
+langchain==0.3.26       # 🆕 LLM框架
+langchain-openai==0.3.25 # 🆕 OpenAI集成
+langchain-core==0.3.66  # 🆕 LangChain核心
 ```
 
 完整依赖列表请查看`requirements.txt`文件。
@@ -684,6 +816,27 @@ RTSP_STREAMING_SIGN=a9b7ba70783b617e9998dc4dd82eb3c5
 RTSP_STREAMING_DEFAULT_FPS=15.0
 RTSP_STREAMING_MAX_FPS=30.0
 RTSP_STREAMING_MIN_FPS=1.0
+
+# Redis配置（复判队列）
+REDIS_HOST=192.168.1.107
+REDIS_PORT=6379
+REDIS_DB=0
+REDIS_PASSWORD=
+
+# LLM服务配置
+PRIMARY_LLM_PROVIDER=ollama
+PRIMARY_LLM_BASE_URL=http://172.18.1.1:11434
+PRIMARY_LLM_MODEL=llava:latest
+BACKUP_LLM_MODEL=qwen3:32b
+LLM_TEMPERATURE=0.1
+LLM_MAX_TOKENS=1000
+LLM_TIMEOUT=60
+
+# 复判队列配置
+ALERT_REVIEW_MAX_WORKERS=3
+ALERT_REVIEW_PROCESSING_TIMEOUT=300
+ALERT_REVIEW_RETRY_MAX_ATTEMPTS=3
+ALERT_REVIEW_QUEUE_ENABLED=true
 ```
 
 ### 5. 数据库初始化
@@ -813,6 +966,22 @@ class MyCustomSkill(BaseSkill):
 #### 模型管理
 - `GET /api/v1/models` - 获取模型列表
 - `GET /api/v1/models/sync` - 从Triton同步模型
+
+#### LLM技能管理
+- `GET /api/v1/llm-skills` - 获取LLM技能列表
+- `POST /api/v1/llm-skills` - 创建LLM技能
+- `PUT /api/v1/llm-skills/{id}` - 更新LLM技能
+- `DELETE /api/v1/llm-skills/{id}` - 删除LLM技能
+- `POST /api/v1/llm-skills/{id}/test` - 测试LLM技能
+
+#### 复判管理
+- `GET /api/v1/llm-skill-review` - 获取复判技能列表
+- `POST /api/v1/llm-skill-review` - 创建复判技能
+- `PUT /api/v1/llm-skill-review/{id}` - 更新复判技能
+- `POST /api/v1/llm-skill-review/{id}/test` - 测试复判技能
+- `GET /api/v1/ai-task-review/{task_id}` - 获取任务复判配置
+- `PUT /api/v1/ai-task-review/{task_id}` - 配置任务复判
+- `GET /api/v1/ai-task-review/queue/status` - 获取复判队列状态
 
 #### 系统监控
 - `GET /health` - 系统健康检查
@@ -967,6 +1136,61 @@ class MyCustomSkill(BaseSkill):
     "periods": [
       {"start": "00:00", "end": "23:59"}
     ]
+  }
+}
+```
+
+### 带多模态复判的安全帽检测任务
+
+**配置AI任务复判**：
+```json
+{
+  "name": "高精度安全帽检测",
+  "description": "传统检测+LLM复判的双重保障",
+  "camera_id": 8,
+  "skill_class_id": 2,
+  "status": true,
+  "alert_level": 2,
+  "frame_rate": 5.0,
+  "review_enabled": true,
+  "review_llm_skill_class_id": 1,
+  "review_confidence_threshold": 80,
+  "review_conditions": {
+    "min_alert_level": 1,
+    "max_alert_level": 3,
+    "time_range": {"start": "08:00", "end": "18:00"}
+  },
+  "running_period": {
+    "enabled": true,
+    "periods": [
+      {"start": "08:00", "end": "18:00"}
+    ]
+  }
+}
+```
+
+**复判技能配置示例**：
+```json
+{
+  "name": "安全帽佩戴智能复判",
+  "description": "使用多模态大模型对安全帽检测结果进行二次确认",
+  "skill_type": "review",
+  "system_prompt": "你是一个专业的工地安全监控AI助手。你的任务是分析图片中工人的安全帽佩戴情况，并给出准确的判断。",
+  "user_prompt_template": "请仔细分析这张来自{camera_name}的监控图片。系统检测到{detection_count}个可能的安全帽问题。请你重新分析图片中每个人的安全帽佩戴情况，确认是否存在未佩戴安全帽的情况。",
+  "response_format": "json",
+  "params": {
+    "temperature": 0.1,
+    "max_tokens": 800,
+    "response_schema": {
+      "type": "object",
+      "properties": {
+        "decision": {"type": "string", "enum": ["confirm", "reject", "uncertain"]},
+        "confidence": {"type": "number", "minimum": 0, "maximum": 100},
+        "analysis": {"type": "string"},
+        "people_count": {"type": "integer"},
+        "violations": {"type": "array", "items": {"type": "object"}}
+      }
+    }
   }
 }
 ```
@@ -1394,6 +1618,38 @@ server {
      - 检查FFmpeg进程是否正常运行
      - 通过性能监控接口查看推流统计
 
+10. **多模态大模型复判问题**
+   - **Redis连接问题**：
+     - 检查Redis服务是否启动：`redis-cli ping`
+     - 确认Redis配置：主机、端口、密码设置
+     - 查看Redis连接日志：`✅ Redis连接初始化成功` vs `❌ Redis连接初始化失败`
+     - 检查防火墙和网络连接
+   - **Ollama服务问题**：
+     - 检查Ollama服务状态：`curl http://172.18.1.1:11434/api/tags`
+     - 确认模型是否已下载：`ollama list`
+     - 验证模型可用性：`ollama run llava:latest` 或 `ollama run qwen3:32b`
+     - 检查网络连接和服务器资源
+   - **复判队列堆积**：
+     - 查看队列状态：`GET /api/v1/ai-task-review/queue/status`
+     - 检查工作者数量和处理能力
+     - 监控复判任务处理时间
+     - 适当增加工作者数量：调整`ALERT_REVIEW_MAX_WORKERS`
+   - **LLM响应异常**：
+     - 检查prompt模板格式是否正确
+     - 验证response_format配置
+     - 查看LLM服务响应日志
+     - 确认temperature和max_tokens参数合理性
+   - **复判配置错误**：
+     - 检查AI任务复判配置：`review_enabled`、`review_llm_skill_class_id`
+     - 验证复判技能是否存在且可用
+     - 确认复判条件配置：`review_conditions`
+     - 检查置信度阈值设置：`review_confidence_threshold`
+   - **调试方法**：
+     - 查看复判服务启动日志：`✅ 预警复判队列服务已启动`
+     - 测试LLM技能：`POST /api/v1/llm-skills/{id}/test`
+     - 监控队列状态和工作者状态
+     - 检查Redis队列键值：`alert_review_queue`、`alert_review_processing`等
+
 ## 更新日志
 
 ### v1.0.0 (当前版本)
@@ -1430,6 +1686,16 @@ server {
 - ✨ **智能字体加载和英文兜底机制**
 - ✨ 17种专业技能插件
 - ✨ 完整的API文档
+
+#### 🤖 多模态大模型功能
+- ✨ **多模态LLM技能系统（无基类依赖，数据库驱动）**
+- ✨ **基于Redis的可靠复判队列架构**
+- ✨ **Ollama本地大模型服务集成**
+- ✨ **智能复判触发和异步处理机制**
+- ✨ **多工作者并发处理和故障恢复**
+- ✨ **灵活的复判条件配置和置信度管理**
+- ✨ **完整的LLM技能管理和测试接口**
+- ✨ **实时队列状态监控和性能统计**
 
 ## 许可证
 

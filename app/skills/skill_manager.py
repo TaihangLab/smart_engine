@@ -4,12 +4,15 @@
 import os
 import time
 import logging
-from typing import Dict, List, Any, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple, Union
 from sqlalchemy.orm import Session
 
 from app.db.skill_class_dao import SkillClassDAO
 from app.skills.skill_factory import skill_factory
 from app.skills.skill_base import BaseSkill
+from app.services.llm_service import LLMService, LLMServiceResult
+from app.models.llm_skill import LLMSkillClass
+from sqlalchemy import and_
 
 logger = logging.getLogger(__name__)
 
@@ -116,25 +119,25 @@ class SkillManager:
         为任务创建技能对象
         
         Args:
-            skill_class_id: 技能类ID
+            skill_class_id: 技能类ID（只支持传统技能）
             skill_config: 技能配置
             
         Returns:
             技能对象或None
         """
         try:
-            # 获取技能类信息
+            # 获取传统技能类信息
             skill_class = SkillClassDAO.get_by_id(skill_class_id, self.db)
             if not skill_class:
                 logger.error(f"未找到技能类: {skill_class_id}")
                 return None
             
-            # 合并默认配置和任务特定配置
-            default_config = skill_class.default_config if skill_class.default_config else {}
+            # 传统技能使用default_config字段
+            skill_config_data = skill_class.default_config if skill_class.default_config else {}
             task_config = skill_config or {}
             
             # 深度合并配置
-            merged_config = self._merge_config(default_config, task_config)
+            merged_config = self._merge_config(skill_config_data, task_config)
             
             # 使用技能工厂创建技能对象
             skill_instance = skill_factory.create_skill(skill_class.name, merged_config)
@@ -150,9 +153,9 @@ class SkillManager:
             logger.error(f"创建技能对象时出错: {str(e)}")
             return None
     
-    def _merge_config(self, default_config: dict, task_config: dict) -> dict:
+    def _merge_config(self, base_config: dict, task_config: dict) -> dict:
         """深度合并配置"""
-        merged = default_config.copy()
+        merged = base_config.copy()
         
         for key, value in task_config.items():
             if key in merged and isinstance(merged[key], dict) and isinstance(value, dict):
@@ -163,6 +166,162 @@ class SkillManager:
                 merged[key] = value
         
         return merged
+    
+    # ====================== LLM技能相关方法 ======================
+    
+    def call_llm_skill_for_task(self, llm_skill_class_id: int, user_prompt: str,
+                               image_data: Optional[Any] = None, context: Optional[Dict[str, Any]] = None) -> LLMServiceResult:
+        """
+        为任务调用LLM技能
+        
+        Args:
+            llm_skill_class_id: LLM技能类ID
+            user_prompt: 用户提示词
+            image_data: 图像数据 (可选)
+            context: 上下文信息 (可选)
+            
+        Returns:
+            LLM调用结果
+        """
+        try:
+            # 获取LLM技能类信息
+            llm_skill_class = self.db.query(LLMSkillClass).filter(
+                and_(LLMSkillClass.id == llm_skill_class_id, LLMSkillClass.enabled == True)
+            ).first()
+            
+            if not llm_skill_class:
+                logger.error(f"未找到LLM技能类: {llm_skill_class_id}")
+                return LLMServiceResult(
+                    success=False,
+                    error_message=f"未找到LLM技能类: {llm_skill_class_id}"
+                )
+            
+            # 使用技能工厂调用LLM技能
+            result = skill_factory.call_llm_skill(
+                llm_skill_class=llm_skill_class,
+                user_prompt=user_prompt,
+                image_data=image_data,
+                context=context
+            )
+            
+            logger.info(f"LLM技能调用完成: {llm_skill_class.name}, 成功: {result.success}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"调用LLM技能时出错: {str(e)}")
+            return LLMServiceResult(
+                success=False,
+                error_message=f"调用LLM技能时出错: {str(e)}"
+            )
+    
+
+    
+    def get_available_llm_skill_classes(self) -> List[Dict[str, Any]]:
+        """
+        获取所有可用的LLM技能类信息
+        
+        Returns:
+            LLM技能类信息列表
+        """
+        if not self.db:
+            logger.error("未初始化数据库会话，无法获取LLM技能类信息")
+            return []
+            
+        try:
+            # 从数据库获取所有已启用的LLM技能类
+            enabled_llm_classes = self.db.query(LLMSkillClass).filter(
+                LLMSkillClass.enabled == True
+            ).all()
+            
+            # 构建LLM技能类信息
+            result = []
+            for llm_class in enabled_llm_classes:
+                class_info = {
+                    "id": llm_class.id,
+                    "name": llm_class.name,
+                    "name_zh": llm_class.name_zh,
+                    "skill_type": llm_class.skill_type,
+                    "type": "llm",  # 标识为LLM技能
+                    "description": llm_class.description,
+                    "provider": llm_class.provider,
+                    "model_name": llm_class.model_name,
+                    "version": llm_class.version,
+                    "created_at": llm_class.created_at.isoformat() if llm_class.created_at else None,
+                    "updated_at": llm_class.updated_at.isoformat() if llm_class.updated_at else None,
+                    "enabled": llm_class.enabled
+                }
+                result.append(class_info)
+            
+            logger.info(f"找到 {len(result)} 个可用的LLM技能类")
+            return result
+            
+        except Exception as e:
+            logger.error(f"获取LLM技能类信息时出错: {str(e)}")
+            return []
+    
+    def validate_llm_skill_class(self, llm_skill_class_id: int) -> Tuple[bool, Optional[str]]:
+        """
+        验证LLM技能类是否有效
+        
+        Args:
+            llm_skill_class_id: LLM技能类ID
+            
+        Returns:
+            (是否有效, 错误信息)
+        """
+        try:
+            # 获取LLM技能类
+            llm_skill_class = self.db.query(LLMSkillClass).filter(
+                LLMSkillClass.id == llm_skill_class_id
+            ).first()
+            
+            if not llm_skill_class:
+                return False, f"未找到LLM技能类: {llm_skill_class_id}"
+            
+            if not llm_skill_class.enabled:
+                return False, f"LLM技能类已禁用: {llm_skill_class.name}"
+            
+            # 验证LLM技能配置
+            llm_config = {
+                "provider": llm_skill_class.provider,
+                "model_name": llm_skill_class.model_name,
+                "api_config": llm_skill_class.api_config or {},
+                "system_prompt": llm_skill_class.system_prompt
+            }
+            
+            is_valid, error_msg = llm_service.validate_llm_config(llm_config)
+            if not is_valid:
+                return False, f"LLM配置验证失败: {error_msg}"
+            
+            return True, None
+                
+        except Exception as e:
+            logger.exception(f"验证LLM技能类失败: {e}")
+            return False, f"验证异常: {str(e)}"
+    
+    # ====================== 统一技能接口方法 ======================
+    
+    def call_skill_for_task_unified(self, skill_class_id: int, skill_config: Dict[str, Any] = None, 
+                                   is_llm_skill: bool = False, user_prompt: str = "",
+                                   image_data: Optional[Any] = None, context: Optional[Dict[str, Any]] = None) -> Union[BaseSkill, LLMServiceResult]:
+        """
+        为任务调用技能（统一接口，支持传统技能和LLM技能）
+        
+        Args:
+            skill_class_id: 技能类ID
+            skill_config: 传统技能配置
+            is_llm_skill: 是否为LLM技能
+            user_prompt: LLM技能的用户提示词
+            image_data: LLM技能的图像数据
+            context: LLM技能的上下文信息
+            
+        Returns:
+            传统技能对象或LLM调用结果
+        """
+        if is_llm_skill:
+            return self.call_llm_skill_for_task(skill_class_id, user_prompt, image_data, context)
+        else:
+            return self.create_skill_for_task(skill_class_id, skill_config)
 
     def cleanup_all(self) -> None:
         """
@@ -172,27 +331,27 @@ class SkillManager:
             
     def get_available_skill_classes(self) -> List[Dict[str, Any]]:
         """
-        获取所有可用的技能类信息
+        获取所有可用的视觉技能类信息（不包括LLM技能）
         
         Returns:
-            技能类信息列表
+            视觉技能类信息列表
         """
         if not self.db:
             logger.error("未初始化数据库会话，无法获取技能类信息")
             return []
             
         try:
-            # 从数据库获取所有已启用的技能类
+            # 从数据库获取所有已启用的视觉技能类
             enabled_classes = SkillClassDAO.get_all_enabled(self.db)
             
-            # 构建技能类信息
+            # 构建视觉技能类信息
             result = []
             for db_class in enabled_classes:
                 # 获取技能类关联的模型
                 models = SkillClassDAO.get_models(db_class.id, self.db)
                 model_names = [model.name for model in models]
                 
-                # 构建技能类信息
+                # 构建视觉技能类信息
                 class_info = {
                     "id": db_class.id,
                     "name": db_class.name,
@@ -204,11 +363,32 @@ class SkillManager:
                 }
                 
                 result.append(class_info)
-                
+            
+            logger.info(f"找到 {len(result)} 个可用的视觉技能类")
             return result
+            
         except Exception as e:
-            logger.exception(f"获取可用技能类失败: {e}")
+            logger.error(f"获取视觉技能类信息时出错: {str(e)}")
             return []
+    
+    def get_all_available_skill_classes(self) -> Dict[str, List[Dict[str, Any]]]:
+        """
+        获取所有可用的技能类信息（包括传统技能和LLM技能）
+        
+        Returns:
+            包含传统技能和LLM技能的字典
+        """
+        result = {
+            "traditional_skills": self.get_available_skill_classes(),
+            "llm_skills": self.get_available_llm_skill_classes()
+        }
+        
+        total_traditional = len(result["traditional_skills"])
+        total_llm = len(result["llm_skills"])
+        
+        logger.info(f"找到 {total_traditional} 个传统技能类和 {total_llm} 个LLM技能类")
+        
+        return result
             
     def scan_and_sync_skills(self) -> Dict[str, Any]:
         """

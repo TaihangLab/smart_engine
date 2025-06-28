@@ -15,9 +15,11 @@ from typing import Dict, Any, Type, List, Optional, Union, Tuple
 from sqlalchemy.orm import Session
 
 from app.skills.skill_base import BaseSkill
+from app.services.llm_service import LLMService, LLMServiceResult
 from app.db.skill_class_dao import SkillClassDAO
 from app.db.model_dao import ModelDAO
 from app.models.skill import SkillClass
+from app.models.llm_skill import LLMSkillClass
 
 logger = logging.getLogger(__name__)
 
@@ -42,7 +44,7 @@ class SkillFactory:
         """
         初始化技能工厂
         """
-        # 注册的技能类，key为技能名称
+        # 注册的传统技能类，key为技能名称
         self._skill_classes: Dict[str, Type[BaseSkill]] = {}
         
     def register_skill_class(self, skill_class: Type[BaseSkill]) -> bool:
@@ -177,6 +179,177 @@ class SkillFactory:
         except Exception as e:
             logger.exception(f"验证技能配置失败: {e}")
             return False, f"验证异常: {str(e)}"
+    
+    # ====================== LLM技能相关方法 ======================
+    
+    def call_llm_skill(self, llm_skill_class: LLMSkillClass, user_prompt: str, 
+                      image_data: Optional[Any] = None, context: Optional[Dict[str, Any]] = None) -> LLMServiceResult:
+        """
+        调用LLM技能进行分析
+        
+        Args:
+            llm_skill_class: 数据库中的LLM技能类对象
+            user_prompt: 用户提示词
+            image_data: 图像数据 (可选)
+            context: 上下文信息 (可选)
+            
+        Returns:
+            LLM调用结果
+        """
+        try:
+            # 提取响应格式配置
+            response_format = None
+            if llm_skill_class.config:
+                response_format = llm_skill_class.config.get("response_format")
+            
+            # 调用LLM服务（使用后端管理的配置）
+            llm_service = LLMService()
+            result = llm_service.call_llm(
+                skill_type=llm_skill_class.type.value,
+                system_prompt=llm_skill_class.system_prompt or "",
+                user_prompt=user_prompt,
+                user_prompt_template=llm_skill_class.user_prompt_template or "",
+                response_format=response_format,
+                image_data=image_data,
+                context=context,
+                use_backup=False
+            )
+            
+            logger.info(f"LLM技能调用完成: {llm_skill_class.name}, 成功: {result.success}")
+            return result
+            
+        except Exception as e:
+            logger.exception(f"调用LLM技能失败: {e}")
+            # 尝试使用备用配置
+            try:
+                logger.info(f"尝试使用备用LLM配置调用技能: {llm_skill_class.name}")
+                llm_service = LLMService()
+                result = llm_service.call_llm(
+                    skill_type=llm_skill_class.type.value,
+                    system_prompt=llm_skill_class.system_prompt or "",
+                    user_prompt=user_prompt,
+                    user_prompt_template=llm_skill_class.user_prompt_template or "",
+                    response_format=response_format,
+                    image_data=image_data,
+                    context=context,
+                    use_backup=True
+                )
+                logger.info(f"备用LLM配置调用成功: {llm_skill_class.name}")
+                return result
+            except Exception as backup_e:
+                logger.exception(f"备用LLM配置调用也失败: {backup_e}")
+                return LLMServiceResult(
+                    success=False,
+                    error_message=f"调用LLM技能失败: {str(e)}，备用配置也失败: {str(backup_e)}"
+                )
+    
+    def validate_llm_skill_config(self, skill_type: str = None) -> Tuple[bool, Optional[str]]:
+        """
+        验证LLM配置是否有效（检查后端配置）
+        
+        Args:
+            skill_type: 技能类型
+            
+        Returns:
+            (是否有效, 错误信息)
+        """
+        llm_service = LLMService()
+        return llm_service.validate_skill_config(skill_type)
+    
+    def get_llm_skill_types(self) -> List[str]:
+        """
+        获取支持的LLM技能类型
+        
+        Returns:
+            LLM技能类型列表
+        """
+        return [
+            "frame_analysis",      # 摄像头帧分析
+            "safety_review",       # 安全复判
+            "behavior_analysis",   # 行为分析
+            "object_description",  # 对象描述
+            "scene_understanding", # 场景理解
+            "anomaly_detection",   # 异常检测
+            "custom"              # 自定义
+        ]
+    
+    def get_llm_providers(self) -> List[Dict[str, Any]]:
+        """
+        获取支持的LLM提供商列表
+        
+        Returns:
+            提供商信息列表
+        """
+        return [
+            {
+                "name": "openai",
+                "display_name": "OpenAI",
+                "description": "OpenAI GPT系列模型",
+                "models": ["gpt-4o", "gpt-4o-mini", "gpt-4", "gpt-3.5-turbo"],
+                "supports_vision": True
+            },
+            {
+                "name": "azure",
+                "display_name": "Azure OpenAI",
+                "description": "Azure OpenAI服务",
+                "models": ["gpt-4o", "gpt-4", "gpt-35-turbo"],
+                "supports_vision": True
+            },
+            {
+                "name": "anthropic",
+                "display_name": "Anthropic",
+                "description": "Anthropic Claude系列模型",
+                "models": ["claude-3-5-sonnet-20241022", "claude-3-opus-20240229", "claude-3-haiku-20240307"],
+                "supports_vision": True
+            },
+            {
+                "name": "google",
+                "display_name": "Google",
+                "description": "Google Gemini系列模型",
+                "models": ["gemini-1.5-pro", "gemini-1.5-flash", "gemini-pro-vision"],
+                "supports_vision": True
+            },
+            {
+                "name": "ollama",
+                "display_name": "Ollama",
+                "description": "本地部署的开源模型",
+                "models": ["llava", "llama3.2-vision", "minicpm-v"],
+                "supports_vision": True
+            },
+            {
+                "name": "custom",
+                "display_name": "自定义API",
+                "description": "自定义的API接口",
+                "models": ["custom-model"],
+                "supports_vision": True
+            }
+        ]
+    
+    # ====================== 统一技能接口方法 ======================
+    
+    def call_skill_unified(self, skill_name: str = None, config: Dict[str, Any] = None, 
+                          llm_skill_class: LLMSkillClass = None, user_prompt: str = "",
+                          image_data: Optional[Any] = None, context: Optional[Dict[str, Any]] = None) -> Union[BaseSkill, LLMServiceResult]:
+        """
+        统一的技能调用接口，自动识别传统技能还是LLM技能
+        
+        Args:
+            skill_name: 传统技能名称
+            config: 传统技能配置
+            llm_skill_class: LLM技能类对象（如果是LLM技能）
+            user_prompt: LLM技能的用户提示词
+            image_data: LLM技能的图像数据
+            context: LLM技能的上下文信息
+            
+        Returns:
+            传统技能对象或LLM调用结果
+        """
+        # 如果提供了LLM技能类对象，则调用LLM技能
+        if llm_skill_class:
+            return self.call_llm_skill(llm_skill_class, user_prompt, image_data, context)
+        
+        # 否则尝试创建传统技能
+        return self.create_skill(skill_name, config)
             
     def scan_and_register_skills(self, skill_dirs: Union[str, List[str]], db: Session = None) -> Tuple[bool, Dict[str, Any]]:
         """

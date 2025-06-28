@@ -18,7 +18,7 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 from app.services.model_service import sync_models_from_triton
 from app.core.config import settings
 from app.db.session import get_db, engine, SessionLocal
-from app.db.base_class import Base
+from app.db.base import Base
 from app.api import api_router
 from app.services.triton_client import triton_client
 from app.skills.skill_manager import skill_manager
@@ -126,6 +126,40 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.error(f"❌ 启动SSE连接管理器失败: {str(e)}")
     
+    # 🔧 初始化Redis连接
+    logger.info("初始化Redis连接...")
+    try:
+        from app.services.redis_client import init_redis
+        if init_redis():
+            logger.info("✅ Redis连接初始化成功")
+        else:
+            logger.warning("⚠️ Redis连接初始化失败，复判队列服务将不可用")
+    except Exception as e:
+        logger.error(f"❌ 初始化Redis连接失败: {str(e)}")
+    
+    # 🔄 启动预警复判队列服务
+    logger.info("启动预警复判队列服务...")
+    try:
+        from app.services.alert_review_queue_service import start_alert_review_queue_service
+        if settings.ALERT_REVIEW_QUEUE_ENABLED:
+            start_alert_review_queue_service()
+            logger.info("✅ 预警复判队列服务已启动")
+        else:
+            logger.info("⚪ 预警复判队列服务已禁用")
+    except Exception as e:
+        logger.error(f"❌ 启动预警复判队列服务失败: {str(e)}")
+    
+    # 注意：多模态复判功能已集成到LLM任务执行器中，无需单独启动服务
+    
+    # 🚀 启动LLM任务执行器
+    logger.info("启动LLM任务执行器...")
+    try:
+        from app.services.llm_task_executor import llm_task_executor
+        llm_task_executor.start()
+        logger.info("✅ LLM任务执行器已启动")
+    except Exception as e:
+        logger.error(f"❌ 启动LLM任务执行器失败: {str(e)}")
+    
     # ✅ 系统架构已完全简化，无需恢复机制
     
     logger.info("✅ Smart Engine 应用启动完成")
@@ -147,6 +181,30 @@ async def lifespan(app: FastAPI):
             logger.info("✅ SSE连接管理器已关闭")
         except Exception as e:
             logger.error(f"❌ 关闭SSE连接管理器失败: {str(e)}")
+        
+        # 关闭预警复判队列服务
+        try:
+            from app.services.alert_review_queue_service import stop_alert_review_queue_service
+            stop_alert_review_queue_service()
+            logger.info("✅ 预警复判队列服务已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭预警复判队列服务失败: {str(e)}")
+        
+        # 关闭Redis连接
+        try:
+            from app.services.redis_client import close_redis
+            close_redis()
+            logger.info("✅ Redis连接已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭Redis连接失败: {str(e)}")
+        
+        # 关闭LLM任务执行器
+        try:
+            from app.services.llm_task_executor import llm_task_executor
+            llm_task_executor.stop()
+            logger.info("✅ LLM任务执行器已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭LLM任务执行器失败: {str(e)}")
         
         # 系统正常关闭
         logger.info("📝 系统正常关闭")
@@ -189,6 +247,7 @@ app.add_middleware(
 
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
 
 
 # 配置静态文件
