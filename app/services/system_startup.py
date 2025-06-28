@@ -26,8 +26,7 @@ from app.services.unified_compensation_service import start_unified_compensation
 
 # 导入数据库相关
 from app.db.session import engine, SessionLocal
-from app.db.base_class import Base
-from app.db.base import Base as ImportedModelsBase  # 确保所有模型都被导入
+from app.db.base import Base
 
 # 导入其他服务
 from app.services.model_service import sync_models_from_triton
@@ -59,9 +58,9 @@ class SystemStartupService:
         # 需要启动的服务列表
         self.services = [
             {
-                "name": "database_init",
-                "display_name": "数据库初始化",
-                "start_func": self._initialize_database,
+                "name": "system_core",
+                "display_name": "系统核心初始化",
+                "start_func": self._initialize_system_core,
                 "stop_func": None,
                 "enabled": True,
                 "critical": True,
@@ -82,13 +81,13 @@ class SystemStartupService:
     
 
     
-    async def _initialize_database(self):
-        """数据库初始化 - 创建表和基础数据"""
+    async def _initialize_system_core(self):
+        """系统核心初始化 - 数据库、技能管理器、AI任务执行器、SSE连接管理器、Redis、预警复判队列、LLM任务执行器"""
         if self.database_initialized:
-            logger.info("🗄️ 数据库已初始化，跳过")
+            logger.info("🗄️ 系统核心已初始化，跳过")
             return
         
-        logger.info("🗄️ 开始数据库初始化...")
+        logger.info("🗄️ 开始系统核心初始化...")
         
         try:
             # 1. 创建数据库表
@@ -133,13 +132,45 @@ class SystemStartupService:
             except Exception as e:
                 logger.error(f"❌ 启动SSE连接管理器失败: {str(e)}")
             
+            # 6. 初始化Redis连接
+            logger.info("🔧 初始化Redis连接...")
+            try:
+                from app.services.redis_client import init_redis
+                if init_redis():
+                    logger.info("✅ Redis连接初始化成功")
+                else:
+                    logger.warning("⚠️ Redis连接初始化失败，复判队列服务将不可用")
+            except Exception as e:
+                logger.error(f"❌ 初始化Redis连接失败: {str(e)}")
+            
+            # 7. 启动预警复判队列服务
+            logger.info("🔄 启动预警复判队列服务...")
+            try:
+                from app.services.alert_review_queue_service import start_alert_review_queue_service
+                if getattr(settings, 'ALERT_REVIEW_QUEUE_ENABLED', True):
+                    start_alert_review_queue_service()
+                    logger.info("✅ 预警复判队列服务已启动")
+                else:
+                    logger.info("⚪ 预警复判队列服务已禁用")
+            except Exception as e:
+                logger.error(f"❌ 启动预警复判队列服务失败: {str(e)}")
+            
+            # 8. 启动LLM任务执行器
+            logger.info("🚀 启动LLM任务执行器...")
+            try:
+                from app.services.llm_task_executor import llm_task_executor
+                llm_task_executor.start()
+                logger.info("✅ LLM任务执行器已启动")
+            except Exception as e:
+                logger.error(f"❌ 启动LLM任务执行器失败: {str(e)}")
+            
             self.database_initialized = True
-            logger.info("🎉 数据库初始化完成！")
+            logger.info("🎉 系统核心初始化完成！")
             
         except Exception as e:
-            logger.error(f"💥 数据库初始化失败: {str(e)}", exc_info=True)
+            logger.error(f"💥 系统核心初始化失败: {str(e)}", exc_info=True)
             raise
-    
+
     async def startup_system(self):
         """系统启动入口 - 零配置自动启动"""
         if self.startup_completed:
@@ -230,8 +261,8 @@ class SystemStartupService:
             
             for service in sorted_services:
                 try:
-                    # 跳过数据库初始化服务（无需停止）
-                    if service['name'] == 'database_init':
+                    # 跳过系统核心服务（在最后统一处理）
+                    if service['name'] == 'system_core':
                         continue
                     
                     logger.info(f"🛑 停止服务: {service['display_name']}")
@@ -250,40 +281,71 @@ class SystemStartupService:
                     logger.error(f"❌ 停止服务 {service['display_name']} 失败: {str(e)}")
                     self._update_service_status(service['name'], 'error', f'停止失败: {str(e)}')
             
-            # 关闭SSE连接管理器
-            try:
-                await sse_manager.stop()
-                logger.info("✅ SSE连接管理器已关闭")
-            except Exception as e:
-                logger.error(f"❌ 关闭SSE连接管理器失败: {str(e)}")
-            
-            # 关闭RabbitMQ连接
-            try:
-                from app.services.rabbitmq_client import rabbitmq_client
-                rabbitmq_client.close()
-                logger.info("✅ RabbitMQ连接已关闭")
-            except Exception as e:
-                logger.error(f"❌ 关闭RabbitMQ连接失败: {str(e)}")
-            
-            # 关闭技能管理器
-            try:
-                skill_manager.cleanup_all()
-                logger.info("✅ 技能管理器已清理")
-            except Exception as e:
-                logger.error(f"❌ 清理技能管理器失败: {str(e)}")
-            
-            # 关闭任务执行器
-            try:
-                task_executor.scheduler.shutdown()
-                logger.info("✅ AI任务执行器调度器已关闭")
-            except Exception as e:
-                logger.error(f"❌ 关闭AI任务执行器调度器失败: {str(e)}")
+            # 最后关闭系统核心服务
+            await self._shutdown_system_core()
             
             self.startup_completed = False
             logger.info("✅ 系统关闭完成")
             
         except Exception as e:
             logger.error(f"💥 系统关闭过程发生异常: {str(e)}", exc_info=True)
+
+    async def _shutdown_system_core(self):
+        """关闭系统核心服务"""
+        logger.info("🔧 关闭系统核心服务...")
+        
+        # 关闭LLM任务执行器
+        try:
+            from app.services.llm_task_executor import llm_task_executor
+            llm_task_executor.stop()
+            logger.info("✅ LLM任务执行器已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭LLM任务执行器失败: {str(e)}")
+        
+        # 关闭预警复判队列服务
+        try:
+            from app.services.alert_review_queue_service import stop_alert_review_queue_service
+            stop_alert_review_queue_service()
+            logger.info("✅ 预警复判队列服务已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭预警复判队列服务失败: {str(e)}")
+        
+        # 关闭Redis连接
+        try:
+            from app.services.redis_client import close_redis
+            close_redis()
+            logger.info("✅ Redis连接已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭Redis连接失败: {str(e)}")
+        
+        # 关闭SSE连接管理器
+        try:
+            await sse_manager.stop()
+            logger.info("✅ SSE连接管理器已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭SSE连接管理器失败: {str(e)}")
+        
+        # 关闭RabbitMQ连接
+        try:
+            from app.services.rabbitmq_client import rabbitmq_client
+            rabbitmq_client.close()
+            logger.info("✅ RabbitMQ连接已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭RabbitMQ连接失败: {str(e)}")
+        
+        # 关闭技能管理器
+        try:
+            skill_manager.cleanup_all()
+            logger.info("✅ 技能管理器已清理")
+        except Exception as e:
+            logger.error(f"❌ 清理技能管理器失败: {str(e)}")
+        
+        # 关闭任务执行器
+        try:
+            task_executor.scheduler.shutdown()
+            logger.info("✅ AI任务执行器调度器已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭AI任务执行器调度器失败: {str(e)}")
     
     def _update_service_status(self, service_name: str, status: str, message: str):
         """更新服务状态"""
@@ -335,7 +397,12 @@ class SystemStartupService:
             'configuration': {
                 'compensation_enabled': settings.COMPENSATION_ENABLE,
                 'auto_start_enabled': settings.COMPENSATION_AUTO_START,
-                'zero_config_mode': settings.COMPENSATION_ZERO_CONFIG
+                'zero_config_mode': settings.COMPENSATION_ZERO_CONFIG,
+                'alert_review_queue_enabled': getattr(settings, 'ALERT_REVIEW_QUEUE_ENABLED', True),
+                'system_core_services': [
+                    '数据库初始化', 'Triton模型同步', '技能管理器', 'AI任务执行器',
+                    'SSE连接管理器', 'Redis连接', '预警复判队列', 'LLM任务执行器'
+                ]
             },
             'timestamp': datetime.utcnow().isoformat()
         }
