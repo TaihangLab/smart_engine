@@ -82,7 +82,6 @@ class Settings(BaseSettings):
 
     # 死信队列重新处理配置
     DEAD_LETTER_MAX_RETRY_COUNT: int = Field(default=5, description="死信最大重试次数")
-    DEAD_LETTER_MAX_DEATH_COUNT: int = Field(default=3, description="最大死信次数")
     DEAD_LETTER_REPROCESS_TIME_LIMIT: int = Field(default=86400, description="重新处理时间限制（秒）")
 
     # Redis配置
