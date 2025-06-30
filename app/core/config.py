@@ -37,7 +37,7 @@ class Settings(BaseSettings):
     # 数据库配置
     MYSQL_SERVER: str = Field(default="127.0.0.1", description="MySQL服务器地址")
     MYSQL_USER: str = Field(default="root", description="MySQL用户名")
-    MYSQL_PASSWORD: str = Field(default="123456", description="MySQL密码")
+    MYSQL_PASSWORD: str = Field(default="root", description="MySQL密码")
     MYSQL_DB: str = Field(default="smart_vision", description="MySQL数据库名")
     MYSQL_PORT: int = Field(default=3306, description="MySQL端口")
     
@@ -84,11 +84,6 @@ class Settings(BaseSettings):
     DEAD_LETTER_MAX_RETRY_COUNT: int = Field(default=5, description="死信最大重试次数")
     DEAD_LETTER_REPROCESS_TIME_LIMIT: int = Field(default=86400, description="重新处理时间限制（秒）")
 
-    # Redis配置
-    # REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
-    # REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    # REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
-    # REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", "ruoyi123")
     
     # ✅ 系统采用简化架构 - 无需恢复机制配置
 
