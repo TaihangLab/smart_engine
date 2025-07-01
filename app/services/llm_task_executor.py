@@ -1,31 +1,30 @@
 """
-多模态LLM任务执行器
-实现独立的LLM任务调度和执行系统，与传统AI任务执行器平行运行
+LLM任务执行器
+负责多模态LLM任务的调度和执行
 """
-import cv2
-import numpy as np
+import logging
 import threading
 import time
-import json
-import logging
-from datetime import datetime, timedelta
-from typing import Dict, List, Any, Optional
-from sqlalchemy.orm import Session
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
+import uuid
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timezone, timedelta
+from typing import Dict, Any, Optional, List
 
-from app.models.llm_skill import LLMSkillClass
-from app.models.llm_task import LLMTask
-from app.models.alert import Alert
+import cv2
+import numpy as np
+from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy.orm import Session
+
+from app.core.config import settings
 from app.db.session import get_db
 from app.db.llm_skill_dao import LLMTaskDAO
+from app.models.llm_skill import LLMSkillClass
+from app.models.llm_task import LLMTask
+from app.services.adaptive_frame_reader import AdaptiveFrameReader
+from app.services.alert_service import alert_service
 from app.services.camera_service import CameraService
 from app.services.llm_service import llm_service
-from app.services.adaptive_frame_reader import AdaptiveFrameReader
 from app.services.minio_client import minio_client
-from app.services.alert_service import alert_service
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -161,27 +160,36 @@ class LLMTaskProcessor:
                 finally:
                     db.close()
             
+            # 获取输出参数配置并构建JSON格式提示词
+            output_parameters = self.skill_class.output_parameters if self.skill_class.output_parameters else None
+            
+            # 构建增强的提示词（如果有输出参数配置）
+            enhanced_prompt = self._build_json_prompt(user_prompt, output_parameters)
+            
             # 调用LLM服务进行多模态分析
             result = llm_service.call_llm(
                 skill_type=skill_type,
                 system_prompt=system_prompt,
-                user_prompt=user_prompt,
+                user_prompt=enhanced_prompt,
                 image_data=frame,
                 temperature=self.skill_class.temperature / 100.0,
                 max_tokens=self.skill_class.max_tokens,
                 top_p=self.skill_class.top_p / 100.0
             )
             
-            if not result["success"]:
-                logger.error(f"LLM任务 {self.task_id} 分析失败: {result.get('error', '未知错误')}")
+            if not result.success:
+                logger.error(f"LLM任务 {self.task_id} 分析失败: {result.error_message}")
                 return False
             
-            # 解析LLM响应
-            llm_response = result["data"]
-            logger.debug(f"LLM任务 {self.task_id} 分析结果: {llm_response}")
+            # 解析JSON响应并提取输出参数
+            analysis_result, extracted_params = self._parse_json_response(result.response, output_parameters)
+            
+            logger.debug(f"LLM任务 {self.task_id} 原始响应: {result.response}")
+            logger.debug(f"LLM任务 {self.task_id} 解析结果: {analysis_result}")
+            logger.debug(f"LLM任务 {self.task_id} 提取参数: {extracted_params}")
             
             # 根据技能配置处理分析结果
-            self._process_llm_result(llm_response, frame)
+            self._process_llm_result(extracted_params or analysis_result, frame)
             
             return True
             
@@ -199,15 +207,12 @@ class LLMTaskProcessor:
                 logger.debug(f"LLM任务 {self.task_id} 未配置预警条件，跳过预警生成")
                 return
             
-            # 提取输出参数
-            output_params = llm_response.get("analysis", {})
-            
             # 评估预警条件
-            alert_triggered = self._evaluate_alert_conditions(output_params, alert_conditions)
+            alert_triggered = self._evaluate_alert_conditions(llm_response, alert_conditions)
             
             if alert_triggered:
                 # 生成预警
-                self._generate_alert(output_params, frame)
+                self._generate_alert(llm_response, frame)
                 self.stats["alerts_generated"] += 1
                 logger.info(f"LLM任务 {self.task_id} 触发预警")
             else:
@@ -220,7 +225,7 @@ class LLMTaskProcessor:
         """评估预警条件"""
         try:
             condition_groups = alert_conditions.get("condition_groups", [])
-            group_relationship = alert_conditions.get("group_relationship", "or")  # and, or, not
+            global_relation = alert_conditions.get("global_relation", "or")  # 改为global_relation
             
             if not condition_groups:
                 return False
@@ -229,37 +234,39 @@ class LLMTaskProcessor:
             
             for group in condition_groups:
                 conditions = group.get("conditions", [])
-                condition_relationship = group.get("condition_relationship", "and")  # and, or
+                relation = group.get("relation", "all")  # 改为relation
                 
                 condition_results = []
                 
                 for condition in conditions:
-                    param_name = condition.get("param_name")
-                    operator = condition.get("operator")  # ==, !=, >=, <=, >, <, is_empty, not_empty
+                    field = condition.get("field")  # 改为field
+                    operator = condition.get("operator")  # 操作符保持不变，但需要支持新的值
                     value = condition.get("value")
                     
-                    param_value = output_params.get(param_name)
+                    param_value = output_params.get(field)  # 使用field
                     
                     # 执行条件判断
                     result = self._evaluate_single_condition(param_value, operator, value)
                     condition_results.append(result)
                 
                 # 根据条件关系计算组结果
-                if condition_relationship == "and":
+                if relation == "all":  # 改为all
                     group_result = all(condition_results)
-                elif condition_relationship == "or":
+                elif relation == "any":  # 改为any
                     group_result = any(condition_results)
+                elif relation == "not":  # 支持not
+                    group_result = not any(condition_results)
                 else:
                     group_result = False
                 
                 group_results.append(group_result)
             
             # 根据组关系计算最终结果
-            if group_relationship == "and":
+            if global_relation == "and":
                 return all(group_results)
-            elif group_relationship == "or":
+            elif global_relation == "or":
                 return any(group_results)
-            elif group_relationship == "not":
+            elif global_relation == "not":
                 return not any(group_results)
             else:
                 return False
@@ -273,20 +280,24 @@ class LLMTaskProcessor:
         try:
             if operator == "is_empty":
                 return param_value is None or param_value == "" or param_value == []
-            elif operator == "not_empty":
+            elif operator == "is_not_empty":  # 改为is_not_empty
                 return param_value is not None and param_value != "" and param_value != []
-            elif operator == "==":
+            elif operator == "eq":  # 改为eq
                 return param_value == target_value
-            elif operator == "!=":
+            elif operator == "ne":  # 改为ne
                 return param_value != target_value
-            elif operator == ">=":
+            elif operator == "gte":  # 改为gte
                 return float(param_value) >= float(target_value)
-            elif operator == "<=":
+            elif operator == "lte":  # 改为lte
                 return float(param_value) <= float(target_value)
-            elif operator == ">":
+            elif operator == "gt":  # 改为gt
                 return float(param_value) > float(target_value)
-            elif operator == "<":
+            elif operator == "lt":  # 改为lt
                 return float(param_value) < float(target_value)
+            elif operator == "contains":  # 新增contains
+                return str(target_value) in str(param_value)
+            elif operator == "not_contains":  # 新增not_contains
+                return str(target_value) not in str(param_value)
             else:
                 logger.warning(f"未知的条件操作符: {operator}")
                 return False
@@ -310,16 +321,20 @@ class LLMTaskProcessor:
             frame_bytes = encoded_frame.tobytes()
             
             # 上传到MinIO
-            success = minio_client.upload_data(
-                bucket_name=settings.MINIO_BUCKET,
-                object_name=object_name,
-                data=frame_bytes,
-                content_type="image/jpeg"
-            )
-            
-            if not success:
-                logger.error(f"LLM任务 {self.task_id} 图像上传失败")
+            try:
+                uploaded_object_name = minio_client.upload_bytes(
+                    data=frame_bytes,
+                    object_name=object_name.split('/')[-1],  # 只传文件名
+                    content_type="image/jpeg",
+                    prefix="llm_alerts/" + str(self.task_id)
+                )
+                logger.info(f"LLM任务 {self.task_id} 图像上传成功: {uploaded_object_name}")
+            except Exception as e:
+                logger.error(f"LLM任务 {self.task_id} 图像上传失败: {str(e)}")
                 return
+            
+            # 构建完整的对象路径用于URL
+            full_object_path = f"llm_alerts/{self.task_id}/{uploaded_object_name}"
             
             # 构建预警数据
             alert_data = {
@@ -331,8 +346,8 @@ class LLMTaskProcessor:
                 "camera_id": self.task.camera_id,
                 "timestamp": timestamp.isoformat(),
                 "analysis_result": analysis_result,
-                "image_url": f"/api/minio/get-object/{settings.MINIO_BUCKET}/{object_name}",
-                "minio_frame_object_name": object_name,
+                "image_url": f"/api/minio/get-object/{settings.MINIO_BUCKET}/{full_object_path}",
+                "minio_frame_object_name": full_object_path,
                 "level": 2,  # 默认预警等级
                 "message": f"LLM技能 {self.skill_class.name_zh} 检测到异常情况"
             }
@@ -383,6 +398,104 @@ class LLMTaskProcessor:
     def get_stats(self) -> Dict[str, Any]:
         """获取统计信息"""
         return self.stats.copy()
+
+    def _build_json_prompt(self, original_prompt: str, output_parameters: Optional[List[Dict[str, Any]]]) -> str:
+        """
+        根据输出参数构建JSON格式的提示词
+        
+        Args:
+            original_prompt: 原始提示词
+            output_parameters: 输出参数列表
+            
+        Returns:
+            增强的提示词，包含JSON格式要求
+        """
+        if not output_parameters:
+            return original_prompt
+        
+        import json
+        
+        # 构建JSON格式要求
+        json_schema = {}
+        param_descriptions = []
+        
+        for param in output_parameters:
+            param_name = param.get("name", "")
+            param_type = param.get("type", "string")
+            param_desc = param.get("description", "")
+            
+            # 添加到JSON schema
+            json_schema[param_name] = f"<{param_type}>"
+            
+            # 添加到参数描述
+            param_descriptions.append(f"- {param_name} ({param_type}): {param_desc}")
+        
+        # 构建增强提示词
+        enhanced_prompt = f"""{original_prompt}
+
+请严格按照以下JSON格式输出结果：
+```json
+{json.dumps(json_schema, ensure_ascii=False, indent=2)}
+```
+
+输出参数说明：
+{chr(10).join(param_descriptions)}
+
+重要要求：
+1. 必须返回有效的JSON格式
+2. 参数名称必须完全匹配
+3. 数据类型必须正确（string、boolean、number等）
+4. 不要包含额外的解释文字，只返回JSON结果"""
+        
+        return enhanced_prompt
+    
+    def _parse_json_response(self, response_text: str, output_parameters: Optional[List[Dict[str, Any]]]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+        """
+        解析LLM的JSON响应并提取输出参数
+        
+        Args:
+            response_text: LLM的原始响应文本
+            output_parameters: 期望的输出参数列表
+            
+        Returns:
+            (analysis_result, extracted_params) 元组
+        """
+        try:
+            import re
+            import json
+            
+            # 查找JSON代码块
+            json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group(1)
+            else:
+                # 查找直接的JSON对象
+                json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+                if json_match:
+                    json_str = json_match.group()
+                else:
+                    # 如果找不到JSON，返回原始文本
+                    return {"analysis": response_text}, {}
+            
+            # 解析JSON
+            parsed_json = json.loads(json_str)
+            
+            # 提取输出参数
+            extracted_params = {}
+            if output_parameters and isinstance(parsed_json, dict):
+                for param in output_parameters:
+                    param_name = param.get("name", "")
+                    if param_name in parsed_json:
+                        extracted_params[param_name] = parsed_json[param_name]
+            
+            return parsed_json, extracted_params
+            
+        except json.JSONDecodeError as e:
+            logger.warning(f"LLM任务 {self.task_id} JSON解析失败: {str(e)}")
+            return {"analysis": response_text, "parse_error": str(e)}, {}
+        except Exception as e:
+            logger.warning(f"LLM任务 {self.task_id} 响应解析异常: {str(e)}")
+            return {"analysis": response_text, "error": str(e)}, {}
 
 
 class LLMTaskExecutor:

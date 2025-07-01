@@ -94,20 +94,19 @@ class OutputParameter(BaseModel):
 
 class AlertCondition(BaseModel):
     """预警条件定义"""
-    param_name: str = Field(..., description="引用参数名称")
-    operator: str = Field(..., description="条件操作符", pattern="^(==|!=|>=|<=|>|<|is_empty|not_empty)$")
+    field: str = Field(..., description="引用参数名称")
+    operator: str = Field(..., description="条件操作符", pattern="^(eq|ne|gt|lt|gte|lte|contains|not_contains|is_empty|is_not_empty)$")
     value: Optional[Any] = Field(None, description="条件值")
 
 class AlertConditionGroup(BaseModel):
     """预警条件组"""
-    name: str = Field(..., description="条件组名称")
     conditions: List[AlertCondition] = Field(..., description="条件列表")
-    condition_relationship: str = Field("and", description="条件关系", pattern="^(and|or)$")
+    relation: str = Field("all", description="条件关系", pattern="^(all|any|not)$")
 
 class AlertConditions(BaseModel):
     """预警条件配置"""
     condition_groups: List[AlertConditionGroup] = Field(..., description="条件组列表")
-    group_relationship: str = Field("or", description="条件组关系", pattern="^(and|or|not)$")
+    global_relation: str = Field("or", description="条件组关系", pattern="^(and|or|not)$")
 
 # ================== API请求模型 ==================
 
@@ -253,7 +252,6 @@ class LLMSkillClassResponse(BaseModel):
     skill_name: str
     application_scenario: ApplicationScenario
     skill_tags: List[str]
-    skill_icon: Optional[str]  # MinIO对象名称
     skill_icon_url: Optional[str] = None  # 临时访问URL
     skill_description: str
     prompt_template: str

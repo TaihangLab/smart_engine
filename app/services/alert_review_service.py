@@ -1,6 +1,6 @@
 import logging
 import asyncio
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -164,7 +164,7 @@ class AlertReviewService:
             )
             
             # 判断复判结果
-            review_result = self._determine_review_result(llm_result, confidence_threshold)
+            review_result = self._determine_review_result(llm_result, confidence_threshold, llm_skill_class)
             
             # 处理复判结果
             await self._handle_review_result_for_data(alert_data, review_result, llm_result)
@@ -288,7 +288,7 @@ class AlertReviewService:
             )
             
             # 判断复判结果
-            review_result = self._determine_review_result(llm_result, confidence_threshold)
+            review_result = self._determine_review_result(llm_result, confidence_threshold, llm_skill_class)
             
             # 处理复判结果
             await self._handle_review_result(alert, review_result, llm_result)
@@ -423,13 +423,14 @@ class AlertReviewService:
                     error_message=f"LLM复判失败: {str(e)}, 备用配置也失败: {str(backup_e)}"
                 )
     
-    def _determine_review_result(self, llm_result: LLMServiceResult, confidence_threshold: int) -> str:
+    def _determine_review_result(self, llm_result: LLMServiceResult, confidence_threshold: int, llm_skill_class: LLMSkillClass = None) -> str:
         """
         判断复判结果
         
         Args:
             llm_result: LLM调用结果
             confidence_threshold: 置信度阈值
+            llm_skill_class: LLM技能类配置（用于应用默认值）
             
         Returns:
             复判结果 ('confirmed', 'rejected', 'uncertain')
@@ -442,23 +443,29 @@ class AlertReviewService:
             if llm_result.confidence < confidence_threshold:
                 return "uncertain"
             
+            # 应用输出参数默认值（如果有技能类配置）
+            analysis_result = llm_result.analysis_result
+            if llm_skill_class and llm_skill_class.output_parameters:
+                analysis_result = self._apply_output_parameter_defaults(
+                    analysis_result, 
+                    llm_skill_class.output_parameters
+                )
+            
             # 分析LLM响应内容
-            if llm_result.analysis_result:
-                analysis = llm_result.analysis_result
-                
+            if analysis_result:
                 # 检查结论字段
-                if "conclusion" in analysis:
-                    conclusion = analysis["conclusion"].lower()
+                if "conclusion" in analysis_result:
+                    conclusion = analysis_result["conclusion"].lower()
                     if any(word in conclusion for word in ["误报", "false", "错误", "不是"]):
                         return "rejected"
                     elif any(word in conclusion for word in ["确认", "true", "正确", "是"]):
                         return "confirmed"
                 
                 # 检查is_valid字段
-                if "is_valid" in analysis:
-                    if analysis["is_valid"] is False:
+                if "is_valid" in analysis_result:
+                    if analysis_result["is_valid"] is False:
                         return "rejected"
-                    elif analysis["is_valid"] is True:
+                    elif analysis_result["is_valid"] is True:
                         return "confirmed"
             
             # 分析响应文本
@@ -473,6 +480,75 @@ class AlertReviewService:
         except Exception as e:
             self.logger.error(f"判断复判结果失败: {str(e)}")
             return "uncertain"
+    
+    def _apply_output_parameter_defaults(self, raw_analysis_result: Dict[str, Any], output_parameters_config: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        应用输出参数默认值逻辑
+        
+        Args:
+            raw_analysis_result: LLM返回的原始分析结果
+            output_parameters_config: 输出参数配置列表
+            
+        Returns:
+            应用默认值后的分析结果
+        """
+        try:
+            result = raw_analysis_result.copy()
+            
+            for param_config in output_parameters_config:
+                param_name = param_config.get("name")
+                param_type = param_config.get("type", "string")
+                param_required = param_config.get("required", False)
+                param_default = param_config.get("default_value")
+                
+                # 检查参数是否缺失或为空
+                param_value = result.get(param_name)
+                param_missing = (
+                    param_value is None or 
+                    param_value == "" or 
+                    (isinstance(param_value, list) and len(param_value) == 0)
+                )
+                
+                # 如果参数缺失，需要应用默认值
+                if param_missing:
+                    # 如果用户设置了default_value，使用用户设置的值
+                    if param_default is not None:
+                        result[param_name] = param_default
+                        self.logger.debug(f"复判参数 {param_name} 使用用户设置的默认值: {param_default}")
+                    # 如果用户没有设置default_value，根据类型自动推断
+                    else:
+                        auto_default = self._get_auto_default_value(param_type)
+                        result[param_name] = auto_default
+                        self.logger.debug(f"复判参数 {param_name} 使用自动推断的默认值: {auto_default} (类型: {param_type})")
+                    
+                    # 如果是必需参数，记录信息
+                    if param_required:
+                        self.logger.info(f"复判必需参数 {param_name} 缺失，已应用默认值: {result[param_name]}")
+            
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"应用复判输出参数默认值异常: {str(e)}")
+            return raw_analysis_result
+    
+    def _get_auto_default_value(self, param_type: str) -> Any:
+        """
+        根据参数类型自动推断默认值
+        
+        Args:
+            param_type: 参数类型 (string, int, float, boolean)
+            
+        Returns:
+            对应类型的默认值
+        """
+        type_defaults = {
+            "string": "",
+            "int": 0,
+            "float": 0.0,
+            "boolean": False
+        }
+        
+        return type_defaults.get(param_type.lower(), "")
     
     async def _handle_review_result(
         self, 

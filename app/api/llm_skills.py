@@ -34,12 +34,202 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# ================== 辅助函数 ==================
+
+def _get_smart_default_config(task_type: str = "general") -> Dict[str, Any]:
+    """
+    根据任务类型获取智能默认的LLM参数配置
+    
+    Args:
+        task_type: 任务类型 ("general", "recognition", "analysis", "review")
+        
+    Returns:
+        优化的参数配置字典
+    """
+    configs = {
+        "general": {
+            "temperature": 0.7,
+            "max_tokens": 1000,
+            "top_p": 0.95
+        },
+        "recognition": {  # 车牌识别、文字识别等
+            "temperature": 0.1,
+            "max_tokens": 200,
+            "top_p": 0.9
+        },
+        "analysis": {     # 安全分析、行为分析等
+            "temperature": 0.3,
+            "max_tokens": 500,
+            "top_p": 0.95
+        },
+        "review": {       # 复判、二次确认等
+            "temperature": 0.2,
+            "max_tokens": 300,
+            "top_p": 0.9
+        }
+    }
+    
+    return configs.get(task_type, configs["general"])
+
+def _detect_task_type(prompt: str, output_parameters: Optional[List[Dict[str, Any]]]) -> str:
+    """
+    根据提示词和输出参数智能检测任务类型
+    
+    Args:
+        prompt: 用户提示词
+        output_parameters: 输出参数配置
+        
+    Returns:
+        检测到的任务类型
+    """
+    prompt_lower = prompt.lower()
+    
+    # 识别类任务
+    recognition_keywords = ["识别", "车牌", "文字", "号码", "数字", "颜色", "品牌", "型号"]
+    if any(keyword in prompt_lower for keyword in recognition_keywords):
+        return "recognition"
+    
+    # 分析类任务
+    analysis_keywords = ["分析", "检查", "判断", "评估", "检测", "安全", "违规", "行为"]
+    if any(keyword in prompt_lower for keyword in analysis_keywords):
+        return "analysis"
+    
+    # 复判类任务
+    review_keywords = ["复判", "确认", "验证", "二次", "重新", "是否", "对不对"]
+    if any(keyword in prompt_lower for keyword in review_keywords):
+        return "review"
+    
+    # 根据输出参数类型判断
+    if output_parameters:
+        param_types = [param.get("type", "").lower() for param in output_parameters]
+        if all(t in ["string", "int", "float"] for t in param_types):
+            return "recognition"  # 主要是数据提取
+        elif "boolean" in param_types:
+            return "analysis"     # 包含判断逻辑
+    
+    return "general"
+
+def _build_json_prompt(original_prompt: str, output_parameters: Optional[List[Dict[str, Any]]]) -> str:
+    """
+    根据输出参数构建JSON格式的提示词
+    
+    Args:
+        original_prompt: 原始提示词
+        output_parameters: 输出参数列表
+        
+    Returns:
+        增强的提示词，包含JSON格式要求
+    """
+    if not output_parameters:
+        return original_prompt
+    
+    # 构建JSON格式要求
+    json_schema = {}
+    param_descriptions = []
+    
+    for param in output_parameters:
+        param_name = param.get("name", "")
+        param_type = param.get("type", "string")
+        param_desc = param.get("description", "")
+        
+        # 添加到JSON schema
+        json_schema[param_name] = f"<{param_type}>"
+        
+        # 添加到参数描述
+        param_descriptions.append(f"- {param_name} ({param_type}): {param_desc}")
+    
+    # 构建增强提示词
+    enhanced_prompt = f"""{original_prompt}
+
+请严格按照以下JSON格式输出结果：
+```json
+{json.dumps(json_schema, ensure_ascii=False, indent=2)}
+```
+
+输出参数说明：
+{chr(10).join(param_descriptions)}
+
+重要要求：
+1. 必须返回有效的JSON格式
+2. 参数名称必须完全匹配
+3. 数据类型必须正确（string、boolean、number等）
+4. 不要包含额外的解释文字，只返回JSON结果"""
+    
+    return enhanced_prompt
+
+def _parse_json_response(response_text: str, output_parameters: Optional[List[Dict[str, Any]]]) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    """
+    解析LLM的JSON响应并提取输出参数
+    
+    Args:
+        response_text: LLM的原始响应文本
+        output_parameters: 期望的输出参数列表
+        
+    Returns:
+        (analysis_result, extracted_params) 元组
+    """
+    try:
+        # 尝试提取JSON部分
+        import re
+        
+        # 查找JSON代码块
+        json_match = re.search(r'```json\s*(\{.*?\})\s*```', response_text, re.DOTALL)
+        if json_match:
+            json_str = json_match.group(1)
+        else:
+            # 查找直接的JSON对象
+            json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
+            if json_match:
+                json_str = json_match.group()
+            else:
+                # 如果找不到JSON，返回原始文本
+                return {"analysis": response_text}, {}
+        
+        # 解析JSON
+        parsed_json = json.loads(json_str)
+        
+        # 提取输出参数
+        extracted_params = {}
+        if output_parameters and isinstance(parsed_json, dict):
+            for param in output_parameters:
+                param_name = param.get("name", "")
+                if param_name in parsed_json:
+                    extracted_params[param_name] = parsed_json[param_name]
+        
+        return parsed_json, extracted_params
+        
+    except json.JSONDecodeError as e:
+        logger.warning(f"JSON解析失败: {str(e)}")
+        return {"analysis": response_text, "parse_error": str(e)}, {}
+    except Exception as e:
+        logger.warning(f"响应解析异常: {str(e)}")
+        return {"analysis": response_text, "error": str(e)}, {}
+
+def _format_extracted_parameters(extracted_params: Dict[str, Any]) -> str:
+    """
+    格式化提取的参数为可读字符串
+    
+    Args:
+        extracted_params: 提取的参数字典
+        
+    Returns:
+        格式化的参数字符串
+    """
+    if not extracted_params:
+        return "未提取到输出参数"
+    
+    formatted_lines = []
+    for key, value in extracted_params.items():
+        formatted_lines.append(f"{key}: {value}")
+    
+    return "\n".join(formatted_lines)
+
 def get_skill_icon_url(skill_icon: Optional[str]) -> Optional[str]:
     """
     获取技能图标的临时访问URL
     
     Args:
-        skill_icon: MinIO对象名称
+        skill_icon: 技能图标文件名（不包含prefix）
         
     Returns:
         临时访问URL或None
@@ -48,12 +238,12 @@ def get_skill_icon_url(skill_icon: Optional[str]) -> Optional[str]:
         return None
     
     try:
-        # 从MinIO获取临时访问URL（有效期1小时）
-        from datetime import timedelta
-        temp_url = minio_client.client.presigned_get_object(
+        # 使用minio_client的get_presigned_url方法获取临时访问URL（有效期1小时）
+        temp_url = minio_client.get_presigned_url(
             bucket_name=settings.MINIO_BUCKET,
+            prefix=settings.MINIO_LLM_SKILL_ICON_PREFIX.rstrip("/"),
             object_name=skill_icon,
-            expires=timedelta(hours=1)  # 1小时
+            expires=3600  # 1小时
         )
         return temp_url
     except Exception as e:
@@ -100,12 +290,14 @@ async def upload_skill_icon(
         timestamp = int(time.time())
         file_extension = icon.filename.split('.')[-1] if icon.filename and '.' in icon.filename else 'png'
         
+        # 分离prefix和文件名，使用配置而不是硬编码
+        prefix = settings.MINIO_LLM_SKILL_ICON_PREFIX.rstrip("/")  # 去掉尾部斜杠，让minio_client自动处理
         if skill_id:
             # 使用技能ID作为文件名前缀
-            object_name = f"skill-icons/{skill_id}_{timestamp}.{file_extension}"
+            object_name = f"{skill_id}_{timestamp}.{file_extension}"
         else:
             # 使用时间戳作为文件名
-            object_name = f"skill-icons/icon_{timestamp}.{file_extension}"
+            object_name = f"icon_{timestamp}.{file_extension}"
         
         # 读取文件内容并上传到MinIO
         try:
@@ -119,16 +311,17 @@ async def upload_skill_icon(
             uploaded_object_name = minio_client.upload_bytes(
                 data=file_content,
                 object_name=object_name,
-                content_type=icon.content_type
+                content_type=icon.content_type,
+                prefix=prefix
             )
             
-            logger.info(f"技能图标上传成功: {uploaded_object_name}, 文件大小: {len(file_content)} bytes")
+            logger.info(f"技能图标上传成功: {settings.MINIO_LLM_SKILL_ICON_PREFIX}{uploaded_object_name}, 文件大小: {len(file_content)} bytes")
             
             return {
                 "success": True,
                 "message": "技能图标上传成功",
                 "data": {
-                    "object_name": uploaded_object_name,
+                    "object_name": uploaded_object_name,  # 只返回纯文件名，不包含prefix
                     "original_filename": icon.filename,
                     "content_type": icon.content_type,
                     "size": len(file_content),
@@ -159,7 +352,6 @@ def get_llm_skill_classes(
     page: int = Query(1, description="当前页码", ge=1),
     limit: int = Query(10, description="每页数量", ge=1, le=100),
     type_filter: Optional[LLMSkillType] = Query(None, description="技能类型过滤"),
-    provider_filter: Optional[LLMProviderType] = Query(None, description="提供商过滤"),
     status: Optional[bool] = Query(None, description="状态过滤"),
     name: Optional[str] = Query(None, description="名称搜索"),
     db: Session = Depends(get_db)
@@ -171,7 +363,6 @@ def get_llm_skill_classes(
         page: 当前页码，从1开始
         limit: 每页记录数，最大100条
         type_filter: 技能类型过滤
-        provider_filter: 提供商过滤
         status: 过滤启用/禁用的技能类
         name: 名称搜索
         db: 数据库会话
@@ -185,9 +376,6 @@ def get_llm_skill_classes(
         # 应用过滤条件
         if type_filter:
             query = query.filter(LLMSkillClass.type == type_filter)
-        
-        if provider_filter:
-            query = query.filter(LLMSkillClass.provider == provider_filter)
         
         if status is not None:
             query = query.filter(LLMSkillClass.status == status)
@@ -214,7 +402,6 @@ def get_llm_skill_classes(
                 "skill_name": skill_class.skill_name,
                 "application_scenario": skill_class.application_scenario.value,
                 "skill_tags": skill_class.skill_tags or [],
-                "skill_icon": skill_class.skill_icon,  # MinIO对象名称
                 "skill_icon_url": get_skill_icon_url(skill_class.skill_icon),  # 临时访问URL
                 "skill_description": skill_class.skill_description,
                 "status": skill_class.status,
@@ -269,7 +456,6 @@ def get_llm_skill_class(skill_class_id: int, db: Session = Depends(get_db)):
             "skill_name": skill_class.skill_name,
             "application_scenario": skill_class.application_scenario.value,
             "skill_tags": skill_class.skill_tags or [],
-            "skill_icon": skill_class.skill_icon,  # MinIO对象名称
             "skill_icon_url": get_skill_icon_url(skill_class.skill_icon),  # 临时访问URL
             "skill_description": skill_class.skill_description,
             "prompt_template": skill_class.prompt_template,
@@ -296,18 +482,77 @@ def get_llm_skill_class(skill_class_id: int, db: Session = Depends(get_db)):
 
 @router.post("/skill-classes", response_model=Dict[str, Any])
 def create_llm_skill_class(
-    skill_class_data: LLMSkillClassCreate,
+    skill_class_data: LLMSkillClassCreate = Body(
+        ...,
+        example={
+            "skill_name": "安全帽佩戴检查",
+            "skill_id": "helmet_check_basic",
+            "application_scenario": "video_analysis",
+            "skill_tags": ["安全防护", "安全帽", "多模态分析"],
+            "skill_description": "使用多模态大模型检查工人是否正确佩戴安全帽，提供智能的安全防护监控",
+            "prompt_template": "请分析这张来自{camera_name}的工地监控图片，检查图中的工人是否佩戴了安全帽。请给出明确的判断结果和置信度评估。",
+            "output_parameters": [
+                {
+                    "name": "helmet_violation_count",
+                    "type": "int",
+                    "description": "未佩戴安全帽的人数",
+                    "required": True
+                },
+                {
+                    "name": "has_violation",
+                    "type": "boolean", 
+                    "description": "是否存在安全帽违规",
+                    "required": True
+                },
+                {
+                    "name": "confidence_score",
+                    "type": "float",
+                    "description": "检测置信度",
+                    "required": True
+                }
+            ],
+            "alert_conditions": {
+                "condition_groups": [
+                    {
+                        "conditions": [
+                            {
+                                "field": "helmet_violation_count",
+                                "operator": "gte",
+                                "value": 1
+                            }
+                        ],
+                        "relation": "all"
+                    }
+                ],
+                "global_relation": "or"
+            }
+        }
+    ),
     db: Session = Depends(get_db)
 ):
     """
     创建新的LLM技能类（简化版）
+    
+    创建一个新的多模态LLM技能类，用于视频分析或图片处理场景。
+    系统会自动为输出参数推断默认值，前端无需配置default_value字段。
     
     Args:
         skill_class_data: LLM技能类数据（只包含用户必填字段）
         db: 数据库会话
         
     Returns:
-        创建的LLM技能类
+        创建的LLM技能类信息
+        
+    Example:
+        ```json
+        {
+            "skill_name": "安全帽佩戴检查",
+            "skill_id": "helmet_check_basic", 
+            "application_scenario": "video_analysis",
+            "skill_description": "使用多模态大模型检查工人安全帽佩戴情况",
+            "prompt_template": "请分析图片中工人的安全帽佩戴情况"
+        }
+        ```
     """
     try:
         # 检查技能ID是否已存在
@@ -440,7 +685,9 @@ def update_llm_skill_class(
             "data": {
                 "id": skill_class.id,
                 "skill_id": skill_class.skill_id,
-                "skill_name": skill_class.skill_name
+                "skill_name": skill_class.skill_name,
+                "application_scenario": skill_class.application_scenario.value,
+                "updated_at": skill_class.updated_at.isoformat()
             }
         }
         
@@ -546,7 +793,7 @@ def get_llm_tasks(
                 "name": task.name,
                 "description": task.description,
                 "skill_class_id": task.skill_class_id,
-                "skill_class_name": task.skill_class.name_zh if task.skill_class else "",
+                "skill_class_name": task.skill_class.skill_name if task.skill_class else "",
                 "camera_id": task.camera_id,
                 "frame_rate": task.frame_rate,
                 "status": task.status,
@@ -678,6 +925,261 @@ def get_application_scenarios():
 
 # ================== 技能测试和部署管理 ==================
 
+@router.post("/skill-classes/preview-test", response_model=Dict[str, Any])
+async def preview_test_llm_skill(
+    test_image: UploadFile = File(..., description="测试图片"),
+    system_prompt: Optional[str] = Form("你是一个专业的AI助手，擅长分析图像内容并提供准确的判断。", description="系统提示词"),
+    prompt_template: str = Form(..., description="用户提示词模板"),
+    output_parameters: Optional[str] = Form(None, description="输出参数JSON字符串"),
+):
+    """
+    预览测试多模态LLM技能（创建前测试）
+    
+    在正式创建LLM技能类之前，可以使用此接口测试配置的提示词和参数是否有效。
+    支持指定输出参数，大模型将返回JSON格式结果。
+    系统会自动使用优化的默认参数配置，无需用户设置复杂的LLM参数。
+    
+    Args:
+        test_image: 测试图片文件
+        system_prompt: 系统提示词（可选，有智能默认值）
+        prompt_template: 用户提示词模板
+        output_parameters: 输出参数JSON字符串，格式：[{"name":"车牌号","type":"string","description":"车牌号码"},{"name":"车牌颜色","type":"boolean","description":"是否为绿色车牌"}]
+        
+    Returns:
+        测试结果，包含LLM分析结果和性能指标
+    """
+    try:
+        # 验证上传文件类型
+        if not test_image.content_type or not test_image.content_type.startswith('image/'):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="请上传有效的图片文件"
+            )
+        
+        # 读取图片数据
+        image_data = await test_image.read()
+        
+        # 将图片数据转换为numpy数组
+        nparr = np.frombuffer(image_data, np.uint8)
+        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        if frame is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="无法解析图片数据"
+            )
+        
+        # 解析输出参数
+        parsed_output_params = None
+        if output_parameters:
+            try:
+                parsed_output_params = json.loads(output_parameters)
+            except json.JSONDecodeError as e:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"输出参数JSON格式错误: {str(e)}"
+                )
+        
+        # 构建增强的提示词
+        enhanced_prompt = _build_json_prompt(prompt_template, parsed_output_params)
+        
+        # 智能检测任务类型并获取优化配置
+        task_type = _detect_task_type(prompt_template, parsed_output_params)
+        smart_config = _get_smart_default_config(task_type)
+        
+        try:
+            # 创建临时的LLM配置用于测试
+            test_api_config = {
+                "api_key": settings.PRIMARY_LLM_API_KEY or "ollama",
+                "base_url": settings.PRIMARY_LLM_BASE_URL,
+                "temperature": smart_config["temperature"],
+                "max_tokens": smart_config["max_tokens"],
+                "top_p": smart_config["top_p"],
+                "timeout": settings.LLM_TIMEOUT
+            }
+            
+            # 创建临时LLM客户端
+            llm_client = llm_service.create_llm_client(
+                provider=settings.PRIMARY_LLM_PROVIDER,
+                model_name=settings.PRIMARY_LLM_MODEL,
+                api_config=test_api_config
+            )
+            
+            # 创建多模态消息
+            messages = llm_service.create_multimodal_messages(
+                system_prompt=system_prompt,
+                user_prompt=enhanced_prompt,
+                image_data=frame
+            )
+            
+            # 直接调用LLM客户端
+            response = llm_client.invoke(messages)
+            response_text = response.content
+            
+            # 解析响应并提取输出参数
+            analysis_result, extracted_params = _parse_json_response(response_text, parsed_output_params)
+            
+            # 提取置信度
+            confidence = llm_service.extract_confidence(analysis_result)
+            
+            logger.info(f"LLM技能预览测试成功")
+            return {
+                "success": True,
+                "message": "预览测试成功",
+                "data": {
+                    "test_type": "preview",
+                    "raw_response": response_text,
+                    "analysis_result": analysis_result,
+                    "extracted_parameters": extracted_params,
+                    "confidence": confidence,
+                    "test_config": {
+                        "system_prompt": system_prompt,
+                        "original_prompt": prompt_template,
+                        "enhanced_prompt": enhanced_prompt,
+                        "output_parameters": parsed_output_params,
+                        "detected_task_type": task_type,
+                        "smart_config": smart_config,
+                        "temperature": smart_config["temperature"],
+                        "max_tokens": smart_config["max_tokens"],
+                        "top_p": smart_config["top_p"]
+                    },
+                    "test_timestamp": datetime.now().isoformat(),
+                    "image_info": {
+                        "filename": test_image.filename,
+                        "content_type": test_image.content_type,
+                        "size": len(image_data)
+                    }
+                }
+            }
+            
+        except Exception as llm_error:
+            logger.error(f"LLM技能预览测试失败: {str(llm_error)}")
+            return {
+                "success": False,
+                "message": f"预览测试失败: {str(llm_error)}",
+                "data": {
+                    "test_type": "preview",
+                    "error_details": str(llm_error),
+                    "test_config": {
+                        "system_prompt": system_prompt,
+                        "prompt_template": prompt_template,
+                        "output_parameters": parsed_output_params,
+                        "temperature": smart_config["temperature"],
+                        "max_tokens": smart_config["max_tokens"],
+                        "top_p": smart_config["top_p"]
+                    }
+                }
+            }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"预览测试LLM技能失败: {str(e)}", exc_info=True)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"预览测试LLM技能失败: {str(e)}"
+        )
+
+@router.post("/skill-classes/connection-test", response_model=Dict[str, Any])
+async def test_llm_connection(
+    system_prompt: Optional[str] = Form("你是一个专业的AI助手", description="系统提示词"),
+    test_prompt: Optional[str] = Form("请简单回答：你好，请介绍一下你自己", description="测试提示词"),
+):
+    """
+    测试LLM服务连接（不需要图片）
+    
+    快速验证LLM服务是否正常工作，用于在配置阶段测试连接。
+    系统会自动使用优化的默认参数配置。
+    
+    Args:
+        system_prompt: 系统提示词（可选）
+        test_prompt: 测试提示词（可选）
+        
+    Returns:
+        连接测试结果
+    """
+    try:
+        # 智能检测任务类型并获取优化配置
+        task_type = _detect_task_type(test_prompt, None)
+        smart_config = _get_smart_default_config(task_type)
+        
+        # 创建测试用的LLM配置
+        test_api_config = {
+            "api_key": settings.PRIMARY_LLM_API_KEY or "ollama",
+            "base_url": settings.PRIMARY_LLM_BASE_URL,
+            "temperature": smart_config["temperature"],
+            "max_tokens": smart_config["max_tokens"],
+            "top_p": smart_config["top_p"],
+            "timeout": settings.LLM_TIMEOUT
+        }
+        
+        # 创建LLM客户端
+        llm_client = llm_service.create_llm_client(
+            provider=settings.PRIMARY_LLM_PROVIDER,
+            model_name=settings.PRIMARY_LLM_MODEL,
+            api_config=test_api_config
+        )
+        
+        # 创建简单的文本消息（不包含图片）
+        messages = llm_service.create_multimodal_messages(
+            system_prompt=system_prompt,
+            user_prompt=test_prompt,
+            image_data=None  # 不传图片
+        )
+        
+        # 调用LLM
+        import time
+        start_time = time.time()
+        response = llm_client.invoke(messages)
+        end_time = time.time()
+        
+        response_text = response.content
+        response_time = round((end_time - start_time) * 1000, 2)  # 毫秒
+        
+        logger.info(f"LLM连接测试成功，响应时间: {response_time}ms")
+        
+        return {
+            "success": True,
+            "message": "LLM服务连接正常",
+            "data": {
+                "test_type": "connection",
+                "response_text": response_text,
+                "response_time_ms": response_time,
+                "service_config": {
+                    "provider": settings.PRIMARY_LLM_PROVIDER,
+                    "model": settings.PRIMARY_LLM_MODEL,
+                    "base_url": settings.PRIMARY_LLM_BASE_URL
+                },
+                "test_config": {
+                    "system_prompt": system_prompt,
+                    "test_prompt": test_prompt,
+                    "detected_task_type": task_type,
+                    "smart_config": smart_config,
+                    "temperature": smart_config["temperature"],
+                    "max_tokens": smart_config["max_tokens"],
+                    "top_p": smart_config["top_p"]
+                },
+                "test_timestamp": datetime.now().isoformat()
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"LLM连接测试失败: {str(e)}")
+        return {
+            "success": False,
+            "message": f"LLM服务连接失败: {str(e)}",
+            "data": {
+                "test_type": "connection",
+                "error_details": str(e),
+                "service_config": {
+                    "provider": settings.PRIMARY_LLM_PROVIDER,
+                    "model": settings.PRIMARY_LLM_MODEL,
+                    "base_url": settings.PRIMARY_LLM_BASE_URL
+                },
+                "test_timestamp": datetime.now().isoformat()
+            }
+        }
+
 @router.post("/skill-classes/{skill_class_id}/test", response_model=Dict[str, Any])
 async def test_llm_skill(
     skill_class_id: int,
@@ -687,7 +1189,7 @@ async def test_llm_skill(
 ):
     """
     测试多模态LLM技能
-    支持上传图片进行实时测试
+    支持上传图片进行实时测试，会使用技能类配置的输出参数自动生成JSON格式要求
     """
     try:
         # 检查技能类是否存在
@@ -721,41 +1223,64 @@ async def test_llm_skill(
         # 准备测试参数
         skill_type = skill_class.type.value
         system_prompt = skill_class.system_prompt or ""
+        
+        # 使用自定义提示词或技能类的提示词模板
         user_prompt = custom_prompt or skill_class.user_prompt_template or ""
+        
+        # 获取输出参数配置
+        output_parameters = skill_class.output_parameters if skill_class.output_parameters else None
+        
+        # 构建增强的提示词（如果有输出参数配置）
+        enhanced_prompt = _build_json_prompt(user_prompt, output_parameters)
         
         # 调用LLM服务进行测试
         result = llm_service.call_llm(
-            skill_type=skill_type,
             system_prompt=system_prompt,
-            user_prompt=user_prompt,
+            user_prompt=enhanced_prompt,
             image_data=frame,
             temperature=skill_class.temperature / 100.0,
             max_tokens=skill_class.max_tokens,
             top_p=skill_class.top_p / 100.0
         )
         
-        if result["success"]:
+        if result.success:
+            # 解析JSON响应并提取输出参数
+            analysis_result, extracted_params = _parse_json_response(result.response, output_parameters)
+            
             logger.info(f"LLM技能 {skill_class_id} 测试成功")
             return {
                 "success": True,
                 "message": "技能测试成功",
                 "data": {
                     "skill_class_id": skill_class_id,
-                    "skill_name": skill_class.name_zh,
-                    "test_result": result["data"],
-                    "processing_time": result.get("processing_time", 0),
-                    "model_used": result.get("model_name", ""),
-                    "test_timestamp": result.get("timestamp", "")
+                    "skill_name": skill_class.skill_name,
+                    "raw_response": result.response,
+                    "analysis_result": analysis_result,
+                    "extracted_parameters": extracted_params,
+                    "formatted_parameters": _format_extracted_parameters(extracted_params),
+                    "confidence": result.confidence,
+                    "processing_time": getattr(result, "processing_time", 0),
+                    "model_used": getattr(result, "model_name", settings.PRIMARY_LLM_MODEL),
+                    "test_config": {
+                        "original_prompt": user_prompt,
+                        "enhanced_prompt": enhanced_prompt,
+                        "output_parameters": output_parameters,
+                        "system_prompt": system_prompt,
+                        "temperature": skill_class.temperature / 100.0,
+                        "max_tokens": skill_class.max_tokens,
+                        "top_p": skill_class.top_p / 100.0
+                    },
+                    "test_timestamp": datetime.now().isoformat()
                 }
             }
         else:
-            logger.error(f"LLM技能 {skill_class_id} 测试失败: {result.get('error', '未知错误')}")
+            logger.error(f"LLM技能 {skill_class_id} 测试失败: {result.error_message}")
             return {
                 "success": False,
-                "message": f"技能测试失败: {result.get('error', '未知错误')}",
+                "message": f"技能测试失败: {result.error_message}",
                 "data": {
                     "skill_class_id": skill_class_id,
-                    "error_details": result.get("error", "")
+                    "error_details": result.error_message
                 }
             }
         
@@ -809,7 +1334,7 @@ def deploy_llm_skill(
             "message": "LLM技能部署成功",
             "data": {
                 "skill_class_id": skill_class_id,
-                "skill_name": skill_class.name_zh,
+                "skill_name": skill_class.skill_name,
                 "deployment_config": deployment_config,
                 "status": "deployed"
             }
