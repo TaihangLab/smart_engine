@@ -385,21 +385,29 @@ async def upload_skill_class_image(
         _, ext = os.path.splitext(file.filename)
         object_name = f"{skill_class_id}_{skill_class['name']}{ext}"
         
-        # 上传到MinIO
-        res = minio_client.upload_file(
-            file=file,
+        # 读取文件内容
+        file_content = await file.read()
+        
+        # 上传到MinIO（统一使用upload_bytes）
+        uploaded_object_name = minio_client.upload_bytes(
+            data=file_content,
             object_name=object_name,
-            prefix=settings.MINIO_SKILL_IMAGE_PREFIX
+            content_type=file.content_type or "image/jpeg",
+            prefix=settings.MINIO_SKILL_IMAGE_PREFIX.rstrip("/")  # 去掉尾部斜杠
         )
 
-        logger.info(f"图片上传成功: {object_name}")
+        logger.info(f"图片上传成功: {uploaded_object_name}")
         
-        # 更新技能类的图片URL字段，但只存储对象路径
-        updated_data = {"image_object_name": object_name}
+        # 更新技能类的图片URL字段，但只存储对象路径（不包含prefix）
+        updated_data = {"image_object_name": uploaded_object_name}
         skill_class_service.update(skill_class_id, updated_data, db)
         
         # 获取临时URL用于返回
-        temp_url = minio_client.get_presigned_url(settings.MINIO_BUCKET, settings.MINIO_SKILL_IMAGE_PREFIX, object_name)
+        temp_url = minio_client.get_presigned_url(
+            bucket_name=settings.MINIO_BUCKET, 
+            prefix=settings.MINIO_SKILL_IMAGE_PREFIX.rstrip("/"), 
+            object_name=uploaded_object_name
+        )
         
         return {
             "success": True,
