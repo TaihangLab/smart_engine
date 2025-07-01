@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import asyncio
 import math
@@ -18,69 +19,61 @@ router = APIRouter()
 async def alert_stream(request: Request):
     """
     创建SSE连接，用于实时推送报警信息。
-    这个端点会保持连接打开，并在有新报警时通过SSE协议推送数据。
+    使用StreamingResponse实现更稳定的SSE流。
     """
     client_ip = request.client.host if request.client else "unknown"
     user_agent = request.headers.get("user-agent", "unknown")
     logger.info(f"收到SSE连接请求，客户端IP: {client_ip}")
     
-    # 注册客户端 - 使用连接管理器
+    # 注册客户端
     client_queue = await register_sse_client(client_ip, user_agent)
-    logger.info(f"已注册SSE客户端，客户端IP: {client_ip}")
-
-    # 创建响应对象并设置SSE必需的头部
-    response = Response(
+    client_id = getattr(client_queue, '_client_id', 'unknown')
+    logger.info(f"已注册SSE客户端，客户端ID: {client_id}")
+    
+    async def generate():
+        try:
+            # 发送连接成功消息
+            yield "data: {\"event\": \"connected\"}\n\n"
+            logger.info(f"SSE连接建立成功，客户端ID: {client_id}")
+            
+            while True:
+                try:
+                    # 检查客户端是否断开
+                    if await request.is_disconnected():
+                        logger.info(f"客户端断开连接，客户端ID: {client_id}")
+                        break
+                    
+                    # 等待消息，超时则发送心跳
+                    message = await asyncio.wait_for(client_queue.get(), timeout=10.0)
+                    yield message
+                    logger.debug(f"发送消息给客户端 {client_id}")
+                    
+                except asyncio.TimeoutError:
+                    # 发送心跳
+                    yield ": heartbeat\n\n"
+                    
+                except Exception as e:
+                    logger.error(f"SSE流生成错误: {e}")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"SSE连接异常: {e}")
+        finally:
+            # 清理客户端
+            unregister_sse_client(client_queue)
+            logger.info(f"SSE客户端已清理，客户端ID: {client_id}")
+    
+    return StreamingResponse(
+        generate(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
         }
     )
-    logger.debug(f"已创建SSE响应对象，客户端IP: {client_ip}")
-    
-    # 创建SSE流生成器
-    async def event_generator():
-        message_count = 0
-        heartbeat_count = 0
-        client_id = getattr(client_queue, '_client_id', 'unknown')
-        
-        try:
-            # 发送初始连接成功消息
-            logger.debug(f"发送SSE连接成功消息，客户端ID: {client_id}")
-            yield "data: {\"event\": \"connected\"}\n\n"
-            message_count += 1
-            
-            # 等待队列中的消息
-            while True:
-                if await request.is_disconnected():
-                    logger.info(f"检测到SSE客户端断开连接，客户端ID: {client_id}")
-                    break
-                
-                # 从队列获取消息，设置超时防止阻塞
-                try:
-                    message = await asyncio.wait_for(client_queue.get(), timeout=1.0)
-                    yield message
-                    message_count += 1
-                    logger.debug(f"已向SSE客户端发送消息，客户端ID: {client_id}, 消息计数: {message_count}")
-                except asyncio.TimeoutError:
-                    # 发送心跳保持连接
-                    yield ": heartbeat\n\n"
-                    heartbeat_count += 1
-                    logger.debug(f"发送SSE心跳，客户端ID: {client_id}")
-                    
-        except asyncio.CancelledError:
-            # 连接已取消
-            logger.info(f"SSE连接已取消，客户端ID: {client_id}")
-            pass
-        finally:
-            # 注销客户端
-            unregister_sse_client(client_queue)
-            logger.info(f"SSE客户端连接已关闭，客户端ID: {client_id}, 发送消息: {message_count}, 心跳: {heartbeat_count}")
-    
-    # 返回SSE响应
-    response.body_iterator = event_generator()
-    return response
 
 @router.get("/real-time", response_model=Dict[str, Any])  # 向后兼容的路由
 async def get_realtime_alerts(
@@ -271,10 +264,10 @@ def get_sse_status():
     """
     try:
         logger.info("收到获取SSE状态请求")
-
+        
         # 获取连接管理器状态
         from app.services.sse_connection_manager import sse_manager
-
+        
         status_info = {
             "success": True,
             "sse_enabled": True,
@@ -291,7 +284,7 @@ def get_sse_status():
                 "batch_size": getattr(sse_manager, 'batch_size', 10)
             }
         }
-
+        
         return status_info
     except Exception as e:
         logger.error(f"获取SSE状态失败: {str(e)}")
@@ -307,19 +300,19 @@ async def get_alert_statistics(
     """
     try:
         logger.info(f"收到获取报警统计请求，统计天数: {days}")
-
+        
         # 计算时间范围
         from datetime import datetime, timedelta
         end_date = datetime.now()
         start_date = end_date - timedelta(days=days)
-
+        
         # 获取统计数据
         stats = await alert_service.get_alert_statistics(
             db=db,
             start_date=start_date,
             end_date=end_date
         )
-
+        
         return {
             "success": True,
             "time_range": {
@@ -341,7 +334,7 @@ def get_connected_clients():
     try:
         logger.info("收到获取连接客户端信息请求")
         clients_info = []
-
+        
         # connected_clients 是一个set，包含客户端队列对象
         for client_queue in connected_clients:
             client_info = {
@@ -353,7 +346,7 @@ def get_connected_clients():
                 "is_connected": True  # 如果在set中说明连接是活跃的
             }
             clients_info.append(client_info)
-
+        
         return {
             "success": True,
             "total_clients": len(connected_clients),
@@ -524,12 +517,11 @@ def send_test_alert(
         
         logger.info("正在调用AI任务执行器生成测试报警...")
         
-        # 调用AI任务执行器的_generate_alert_with_merge方法
-        result = task_executor._generate_alert_with_merge(
+        # 调用AI任务执行器的_generate_alert方法
+        result = task_executor._generate_alert_async(
             task=mock_task,
             alert_data=mock_alert_data,
             frame=mock_frame,
-            db=db,
             level=1
         )
         
