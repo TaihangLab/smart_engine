@@ -29,6 +29,7 @@
 - **🆕 多模态大模型技能**：支持LLM多模态视觉分析，用于复杂场景的智能预判
 - **🆕 智能复判系统**：基于Redis队列的可靠复判架构，支持多工作者并发处理
 - **🆕 LLM服务集成**：集成Ollama本地大模型服务，支持llava、qwen等多模态模型
+- **🆕 多模态大模型复判系统**：支持基于Ollama的多模态大模型复判功能，提供智能的预警二次确认机制
 
 ## 技术架构
 
@@ -189,26 +190,127 @@ ALERT_MERGE_QUICK_SEND_THRESHOLD = 3         # 快速发送阈值
 #### 1. 多模态LLM技能系统
 - **无基类依赖**：LLM技能独立于传统技能架构，通过数据库配置动态创建
 - **多模态分析**：支持图像+文本的复合分析，理解复杂场景语义
-- **灵活配置**：支持自定义system_prompt、user_prompt_template、response_format等参数
+- **🆕 JSON结构化输出**：支持定义输出参数，大模型返回标准JSON格式结果
+- **灵活配置**：支持自定义system_prompt、user_prompt_template、output_parameters等参数
+- **智能默认值**：输出参数支持自动类型推断，前端无需配置default_value字段
 - **模型支持**：集成llava:latest（多模态视觉）、qwen3:32b（文本对话）等模型
 
-#### 2. 基于Redis的可靠复判队列
+#### 2. JSON格式输出功能
+
+**功能特性**：
+- **结构化输出**：大模型按照预定义的输出参数返回JSON格式结果
+- **类型约束**：支持string、boolean、number等数据类型约束
+- **自动解析**：系统自动提取JSON结果并格式化显示
+- **容错处理**：支持各种JSON格式变体，包含代码块和直接对象格式
+- **🆕 智能默认配置**：系统自动检测任务类型并应用最优参数，用户无需设置复杂的LLM参数
+
+**智能任务类型检测**：
+- **识别类任务**（车牌识别、文字识别）：`temperature=0.1, max_tokens=200` - 高精度、短回答
+- **分析类任务**（安全分析、行为检测）：`temperature=0.3, max_tokens=500` - 平衡精度和详细度
+- **复判类任务**（二次确认、验证）：`temperature=0.2, max_tokens=300` - 高确定性
+- **通用任务**：`temperature=0.7, max_tokens=1000` - 标准配置
+
+**使用示例**：
+
+**车牌识别JSON输出示例**：
+```javascript
+// 用户提示词
+"识别图中的车牌号，并输出车号。判断图中车牌是否为绿色车牌。"
+
+// 输出参数配置
+[
+  {
+    "name": "车牌号",
+    "type": "string",
+    "description": "车牌号码"
+  },
+  {
+    "name": "车牌颜色",
+    "type": "boolean", 
+    "description": "是否为绿色车牌（新能源车）"
+  }
+]
+
+// 模型原始输出
+```json
+{
+  "车牌号": "苏E·T4C14",
+  "车牌颜色": false
+}
+```
+
+// 格式化显示结果
+车牌号: 苏E·T4C14
+车牌颜色: false
+```
+
+**🆕 简化的预览测试接口示例**：
+```bash
+curl -X POST "http://localhost:8000/api/v1/llm-skills/skill-classes/preview-test" \
+  -H "Content-Type: multipart/form-data" \
+  -F "test_image=@/path/to/car_image.jpg" \
+  -F "prompt_template=识别图中的车牌号，并输出车号。判断图中车牌是否为绿色车牌。" \
+  -F 'output_parameters=[{"name":"车牌号","type":"string","description":"车牌号码"},{"name":"车牌颜色","type":"boolean","description":"是否为绿色车牌"}]'
+```
+
+**🆕 简化的连接测试接口示例**：
+```bash
+curl -X POST "http://localhost:8000/api/v1/llm-skills/skill-classes/connection-test" \
+  -F "test_prompt=请简单介绍一下你自己"
+```
+
+**返回结果示例**：
+```json
+{
+  "success": true,
+  "message": "预览测试成功",
+  "data": {
+    "test_type": "preview",
+    "raw_response": "```json\n{\n  \"车牌号\": \"苏E·T4C14\",\n  \"车牌颜色\": false\n}\n```",
+    "analysis_result": {
+      "车牌号": "苏E·T4C14",
+      "车牌颜色": false
+    },
+    "extracted_parameters": {
+      "车牌号": "苏E·T4C14",
+      "车牌颜色": false
+    },
+    "confidence": 0.9,
+    "test_config": {
+      "original_prompt": "识别图中的车牌号，并输出车号。判断图中车牌是否为绿色车牌。",
+      "enhanced_prompt": "识别图中的车牌号，并输出车号。判断图中车牌是否为绿色车牌。\n\n请严格按照以下JSON格式输出结果：\n```json\n{\n  \"车牌号\": \"<string>\",\n  \"车牌颜色\": \"<boolean>\"\n}\n```\n\n输出参数说明：\n- 车牌号 (string): 车牌号码\n- 车牌颜色 (boolean): 是否为绿色车牌\n\n重要要求：\n1. 必须返回有效的JSON格式\n2. 参数名称必须完全匹配\n3. 数据类型必须正确（string、boolean、number等）\n4. 不要包含额外的解释文字，只返回JSON结果",
+      "output_parameters": [
+        {"name": "车牌号", "type": "string", "description": "车牌号码"},
+        {"name": "车牌颜色", "type": "boolean", "description": "是否为绿色车牌"}
+      ],
+      "detected_task_type": "recognition",
+      "smart_config": {
+        "temperature": 0.1,
+        "max_tokens": 200,
+        "top_p": 0.9
+      }
+    }
+  }
+}
+```
+
+#### 3. 基于Redis的可靠复判队列
 - **持久化队列**：使用Redis确保复判任务不丢失，支持系统重启恢复
 - **多工作者并发**：3个工作者并发处理，可动态调整数量
 - **故障恢复**：自动检测超时任务，支持指数退避重试机制
 - **状态追踪**：完整的任务状态管理（待处理→处理中→已完成/失败）
 
-#### 3. 智能复判触发机制
+#### 4. 智能复判触发机制
 - **实时触发**：预警发送成功后立即检查是否需要复判
 - **条件判断**：基于AI任务配置的复判条件自动触发
 - **异步处理**：复判不阻塞预警发送流程，确保实时性
 
-#### 4. 复判流程架构
+#### 5. 复判流程架构
 ```
 预警产生 → 预警合并 → 发送RabbitMQ → ✅成功 → 复判检查 → Redis队列 → LLM分析 → 结果存储
 ```
 
-#### 5. LLM复判配置示例
+#### 6. LLM复判配置示例
 
 **基础安全帽复判技能**：
 ```json
@@ -307,28 +409,6 @@ ALERT_VIDEO_POST_BUFFER_SECONDS = 3.0        # 预警后缓冲时间
 # 关键预警视频配置
 ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS = 5.0   # 1-2级预警前缓冲
 ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS = 5.0  # 1-2级预警后缓冲
-```
-
-#### 6. 复判队列配置参数
-```python
-# Redis配置
-REDIS_HOST = "192.168.1.107"                    # Redis服务器地址
-REDIS_PORT = 6379                               # Redis端口
-REDIS_DB = 0                                    # Redis数据库编号
-REDIS_PASSWORD = ""                             # Redis密码
-
-# 复判队列配置
-ALERT_REVIEW_MAX_WORKERS = 3                    # 复判工作者数量
-ALERT_REVIEW_PROCESSING_TIMEOUT = 300           # 处理超时时间（5分钟）
-ALERT_REVIEW_RETRY_MAX_ATTEMPTS = 3             # 最大重试次数
-ALERT_REVIEW_COMPLETED_TTL = 86400              # 完成任务缓存时间（1天）
-ALERT_REVIEW_QUEUE_ENABLED = True               # 是否启用复判队列
-
-# LLM服务配置
-PRIMARY_LLM_PROVIDER = "ollama"                 # 主要LLM提供商
-PRIMARY_LLM_BASE_URL = "http://172.18.1.1:11434" # Ollama服务器地址
-PRIMARY_LLM_MODEL = "llava:latest"              # 多模态视觉模型
-BACKUP_LLM_MODEL = "qwen3:32b"                  # 备用文本模型
 ```
 
 #### 4. 视频存储路径规则
@@ -973,6 +1053,8 @@ class MyCustomSkill(BaseSkill):
 - `PUT /api/v1/llm-skills/{id}` - 更新LLM技能
 - `DELETE /api/v1/llm-skills/{id}` - 删除LLM技能
 - `POST /api/v1/llm-skills/{id}/test` - 测试LLM技能
+- `POST /api/v1/llm-skills/skill-classes/preview-test` - 🆕 预览测试LLM技能（支持JSON输出参数）
+- `POST /api/v1/llm-skills/skill-classes/connection-test` - 🆕 测试LLM连接
 
 #### 复判管理
 - `GET /api/v1/llm-skill-review` - 获取复判技能列表
