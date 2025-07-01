@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = Field(default=False, description="MinIO是否使用HTTPS")
     MINIO_BUCKET: str = Field(default="visionai", description="MinIO存储桶名称")
     MINIO_SKILL_IMAGE_PREFIX: str = Field(default="skill-images/", description="技能图片前缀")
+    MINIO_LLM_SKILL_ICON_PREFIX: str = Field(default="skill-icons/", description="大模型技能图标前缀")
     MINIO_ALERT_IMAGE_PREFIX: str = Field(default="alert-images/", description="报警图片前缀")
     MINIO_ALERT_VIDEO_PREFIX: str = Field(default="alert-videos/", description="报警视频前缀")
 
