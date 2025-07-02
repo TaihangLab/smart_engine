@@ -236,12 +236,11 @@ def get_skill_icon_url(skill_icon: Optional[str]) -> Optional[str]:
     """
     if not skill_icon:
         return None
-    
     try:
         # 使用minio_client的get_presigned_url方法获取临时访问URL（有效期1小时）
         temp_url = minio_client.get_presigned_url(
             bucket_name=settings.MINIO_BUCKET,
-            prefix=settings.MINIO_LLM_SKILL_ICON_PREFIX.rstrip("/"),
+            prefix=settings.MINIO_LLM_SKILL_ICON_PREFIX,
             object_name=skill_icon,
             expires=3600  # 1小时
         )
@@ -598,7 +597,7 @@ def create_llm_skill_class(
             temperature=70,  # 默认0.7
             max_tokens=1000,
             top_p=95,  # 默认0.95
-            status=True,
+            status=False,  # 默认未发布状态
             version="1.0"
         )
         
@@ -872,19 +871,6 @@ def create_llm_task(
 
 
 # ================== 配置和枚举接口 ==================
-
-@router.get("/providers", response_model=List[Dict[str, str]])
-def get_llm_providers():
-    """
-    获取支持的LLM提供商列表
-    """
-    providers = []
-    for provider in LLMProviderType:
-        providers.append({
-            "value": provider.value,
-            "label": provider.value.replace("_", " ").title()
-        })
-    return providers
 
 @router.get("/skill-types", response_model=List[Dict[str, str]])
 def get_llm_skill_types():
@@ -1293,15 +1279,10 @@ async def test_llm_skill(
             detail=f"测试LLM技能失败: {str(e)}"
         )
 
-@router.post("/skill-classes/{skill_class_id}/deploy", response_model=Dict[str, Any])
-def deploy_llm_skill(
-    skill_class_id: int,
-    deploy_config: Dict[str, Any],
-    db: Session = Depends(get_db)
-):
+@router.post("/skill-classes/{skill_class_id}/publish", response_model=Dict[str, Any])
+def publish_llm_skill(skill_class_id: int, db: Session = Depends(get_db)):
     """
-    部署LLM技能到生产环境
-    配置输出参数、预警条件等
+    发布LLM技能（设置status为True）
     """
     try:
         # 检查技能类是否存在
@@ -1312,41 +1293,156 @@ def deploy_llm_skill(
                 detail=f"LLM技能类不存在: ID={skill_class_id}"
             )
         
-        # 更新技能配置
-        deployment_config = {
-            "output_parameters": deploy_config.get("output_parameters", []),
-            "alert_conditions": deploy_config.get("alert_conditions", {}),
-            "response_format": deploy_config.get("response_format", "json"),
-            "deployment_settings": deploy_config.get("deployment_settings", {}),
-            "deployed_at": datetime.now().isoformat(),
-            "deployed_version": deploy_config.get("version", skill_class.version)
-        }
-        
-        # 更新数据库
-        skill_class.config = deployment_config
-        skill_class.status = True  # 部署后自动启用
+        # 发布技能
+        skill_class.status = True
         db.commit()
         
-        logger.info(f"LLM技能 {skill_class_id} 部署成功")
+        logger.info(f"LLM技能 {skill_class_id} 发布成功")
         
         return {
             "success": True,
-            "message": "LLM技能部署成功",
+            "message": "LLM技能发布成功",
             "data": {
                 "skill_class_id": skill_class_id,
                 "skill_name": skill_class.skill_name,
-                "deployment_config": deployment_config,
-                "status": "deployed"
+                "status": True
             }
         }
         
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"部署LLM技能失败: {str(e)}")
+        logger.error(f"发布LLM技能失败: {str(e)}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"部署LLM技能失败: {str(e)}"
+            detail=f"发布LLM技能失败: {str(e)}"
+        )
+
+@router.post("/skill-classes/{skill_class_id}/unpublish", response_model=Dict[str, Any])
+def unpublish_llm_skill(skill_class_id: int, db: Session = Depends(get_db)):
+    """
+    下线LLM技能（设置status为False）
+    """
+    try:
+        # 检查技能类是否存在
+        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_class_id).first()
+        if not skill_class:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"LLM技能类不存在: ID={skill_class_id}"
+            )
+        
+        # 检查是否有关联的任务正在运行
+        running_tasks = [task for task in skill_class.llm_tasks if task.status == True]
+        if running_tasks:
+            task_names = [task.name for task in running_tasks]
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail=f"无法下线LLM技能，存在正在运行的任务: {', '.join(task_names)}"
+            )
+        
+        # 下线技能
+        skill_class.status = False
+        db.commit()
+        
+        logger.info(f"LLM技能 {skill_class_id} 下线成功")
+        
+        return {
+            "success": True,
+            "message": "LLM技能下线成功",
+            "data": {
+                "skill_class_id": skill_class_id,
+                "skill_name": skill_class.skill_name,
+                "status": False
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"下线LLM技能失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"下线LLM技能失败: {str(e)}"
+        )
+
+@router.post("/skill-classes/batch-delete", response_model=Dict[str, Any])
+def batch_delete_llm_skills(
+    skill_ids: List[int] = Body(..., description="要删除的技能类ID列表"),
+    db: Session = Depends(get_db)
+):
+    """
+    批量删除LLM技能类
+    """
+    try:
+        if not skill_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="技能ID列表不能为空"
+            )
+        
+        deleted_skills = []
+        failed_skills = []
+        
+        for skill_id in skill_ids:
+            try:
+                # 查找技能类
+                skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_id).first()
+                if not skill_class:
+                    failed_skills.append({
+                        "skill_id": skill_id,
+                        "reason": "技能不存在"
+                    })
+                    continue
+                
+                # 检查是否有关联的任务
+                task_count = len(skill_class.llm_tasks)
+                if task_count > 0:
+                    failed_skills.append({
+                        "skill_id": skill_id,
+                        "skill_name": skill_class.skill_name,
+                        "reason": f"存在 {task_count} 个关联任务"
+                    })
+                    continue
+                
+                # 删除技能类
+                skill_name = skill_class.skill_name
+                db.delete(skill_class)
+                
+                deleted_skills.append({
+                    "skill_id": skill_id,
+                    "skill_name": skill_name
+                })
+                
+            except Exception as e:
+                failed_skills.append({
+                    "skill_id": skill_id,
+                    "reason": str(e)
+                })
+        
+        # 提交所有删除操作
+        db.commit()
+        
+        logger.info(f"批量删除LLM技能完成，成功删除 {len(deleted_skills)} 个，失败 {len(failed_skills)} 个")
+        
+        return {
+            "success": True,
+            "message": f"批量删除完成，成功删除 {len(deleted_skills)} 个技能",
+            "data": {
+                "deleted_count": len(deleted_skills),
+                "failed_count": len(failed_skills),
+                "deleted_skills": deleted_skills,
+                "failed_skills": failed_skills
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量删除LLM技能失败: {str(e)}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"批量删除LLM技能失败: {str(e)}"
         )
 
 @router.put("/tasks/{task_id}", response_model=Dict[str, Any])

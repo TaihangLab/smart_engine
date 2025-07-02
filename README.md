@@ -1782,3 +1782,83 @@ server {
 ## 许可证
 
 MIT License
+
+#### 3. 技能发布管理
+
+**🆕 简化的发布管理**：
+- **发布技能**：`POST /api/v1/llm-skills/skill-classes/{id}/publish` - 将技能状态设为可用
+- **下线技能**：`POST /api/v1/llm-skills/skill-classes/{id}/unpublish` - 将技能状态设为不可用
+- **批量删除**：`POST /api/v1/llm-skills/skill-classes/batch-delete` - 批量删除多个技能
+
+**发布技能示例**：
+```bash
+# 发布技能（status设为true）
+curl -X POST "http://localhost:8000/api/v1/llm-skills/skill-classes/1/publish"
+
+# 返回结果
+{
+  "success": true,
+  "message": "LLM技能发布成功",
+  "data": {
+    "skill_class_id": 1,
+    "skill_name": "车牌识别技能",
+    "status": true
+  }
+}
+```
+
+**下线技能示例**：
+```bash
+# 下线技能（status设为false）
+curl -X POST "http://localhost:8000/api/v1/llm-skills/skill-classes/1/unpublish"
+
+# 返回结果
+{
+  "success": true,
+  "message": "LLM技能下线成功",
+  "data": {
+    "skill_class_id": 1,
+    "skill_name": "车牌识别技能",
+    "status": false
+  }
+}
+```
+
+**批量删除示例**：
+```bash
+curl -X POST "http://localhost:8000/api/v1/llm-skills/skill-classes/batch-delete" \
+  -H "Content-Type: application/json" \
+  -d '[1, 2, 3]'
+
+# 返回结果
+{
+  "success": true,
+  "message": "批量删除完成，成功删除 2 个技能",
+  "data": {
+    "deleted_count": 2,
+    "failed_count": 1,
+    "deleted_skills": [
+      {"skill_id": 1, "skill_name": "车牌识别"},
+      {"skill_id": 2, "skill_name": "安全帽检测"}
+    ],
+    "failed_skills": [
+      {"skill_id": 3, "skill_name": "人员检测", "reason": "存在 2 个关联任务"}
+    ]
+  }
+}
+```
+
+### 📊 管理流程
+
+```
+创建技能 → 预览测试 → 发布上线 → 正式使用 → 下线维护 → 批量删除
+  ↓          ↓         ↓         ↓         ↓         ↓
+status:   status:   status:   status:   status:   删除记录
+false     false     true      true      false
+(默认)    (测试)    (发布)    (运行)    (下线)
+```
+
+**🔒 默认状态说明**：
+- **新创建的技能**：`status = false`（默认未发布状态，不可用于创建任务）
+- **发布后的技能**：`status = true`（可用状态，可以创建任务使用）
+- **下线后的技能**：`status = false`（不可用状态，停止使用但保留配置）
