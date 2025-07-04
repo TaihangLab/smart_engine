@@ -431,14 +431,19 @@ def get_alert_process(
     logger.info(f"获取报警处理流程成功: ID={alert_id}, 步骤数: {process_summary['total_steps']}")
     return response
 
-@router.post("/test", description="发送测试报警（仅供测试使用）")
-def send_test_alert(
+@router.post("/test", description="发送测试报警（高性能优化版本）")
+async def send_test_alert(
     db: Session = Depends(get_db)
 ):
     """
-    使用AI任务执行器生成测试报警（仅用于测试）
+    🚀 高性能测试报警接口 - 异步处理优化
+    
+    优化策略：
+    1. 快速响应：接口立即返回，后台异步处理
+    2. 异步MinIO上传：避免IO阻塞
+    3. 数据库查询缓存：减少重复查询
     """
-    logger.info("收到发送测试报警请求")
+    logger.info("收到发送测试报警请求 - 高性能版本")
     
     try:
         # 导入必要的模块
@@ -447,49 +452,28 @@ def send_test_alert(
         import numpy as np
         import cv2
         import json
+        import asyncio
         from datetime import datetime
         
-        # 创建模拟的AITask对象
+        # 🚀 优化1：预构建轻量级模拟数据
         mock_task = AITask(
-            id=9999,  # 测试任务ID
-            name="测试报警任务",
-            description="用于测试报警功能的模拟任务",
-            status=True,
-            alert_level=1,
-            frame_rate=1.0,
+            id=9999, name="测试报警任务", description="高性能测试", status=True,
+            alert_level=1, frame_rate=1.0, task_type="detection", config='{}',
+            camera_id=123, skill_class_id=9999, skill_config='{}',
             running_period='{"enabled": true, "periods": [{"start": "00:00", "end": "23:59"}]}',
-            electronic_fence='{"enabled": true, "points": [[{"x": 100, "y": 80}, {"x": 500, "y": 80}, {"x": 500, "y": 350}, {"x": 100, "y": 350}]], "trigger_mode": "inside"}',
-            task_type="detection",
-            config='{}',
-            camera_id=123,
-            skill_class_id=9999,
-            skill_config='{}'
+            electronic_fence='{"enabled": true, "points": [[{"x": 100, "y": 80}, {"x": 500, "y": 80}, {"x": 500, "y": 350}, {"x": 100, "y": 350}]], "trigger_mode": "inside"}'
         )
         
-        # 创建模拟的报警数据（使用与示例一致的检测结果格式）
+        # 🚀 优化2：简化报警数据结构
         mock_alert_data = {
             "detections": [
-                {
-                    "bbox": [383, 113, 472, 317],  # [x1, y1, x2, y2] - 果蔬生鲜区域
-                    "confidence": 0.8241143226623535,
-                    "class_name": "果蔬生鲜"
-                },
-                {
-                    "bbox": [139, 105, 251, 308],  # [x1, y1, x2, y2] - 家居家纺区域
-                    "confidence": 0.8606756329536438,
-                    "class_name": "家居家纺"
-                },
-                {
-                    "bbox": [491, 125, 558, 301],  # [x1, y1, x2, y2] - 食品饮料区域
-                    "confidence": 0.6238403916358948,
-                    "class_name": "食品饮料"
-                }
+                {"bbox": [383, 113, 472, 317], "confidence": 0.82, "class_name": "果蔬生鲜"},
+                {"bbox": [139, 105, 251, 308], "confidence": 0.86, "class_name": "家居家纺"},
+                {"bbox": [491, 125, 558, 301], "confidence": 0.62, "class_name": "食品饮料"}
             ],
             "alert_info": {
-                "alert_triggered": True,
-                "alert_level": 1,
-                "alert_name": "商品区域检测报警",
-                "alert_type": "product_area_detection",
+                "alert_triggered": True, "alert_level": 1,
+                "alert_name": "商品区域检测报警", "alert_type": "product_area_detection",
                 "alert_description": "检测到多个商品区域有异常活动，请及时查看"
             }
         }
@@ -515,26 +499,41 @@ def send_test_alert(
         cv2.putText(mock_frame, timestamp_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(mock_frame, "摄像头ID: 123", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
-        logger.info("正在调用AI任务执行器生成测试报警...")
+        # 🚀 优化6：异步处理 - 立即返回响应，后台处理
+        task_id = f"test_{int(datetime.now().timestamp())}"
         
-        # 调用AI任务执行器的_generate_alert方法
-        result = task_executor._generate_alert_async(
-            task=mock_task,
-            alert_data=mock_alert_data,
-            frame=mock_frame,
-            level=1
-        )
+        # 创建异步任务，不等待完成
+        async def process_alert_async():
+            try:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    task_executor.alert_executor,  # 使用现有线程池
+                    task_executor._generate_alert_async_optimized,  # 新的优化方法
+                    mock_task, mock_alert_data, mock_frame, 1
+                )
+                if result:
+                    logger.info(f"✅ 异步测试报警处理完成: task_id={task_id}")
+                else:
+                    logger.warning(f"⚠️ 异步测试报警处理失败: task_id={task_id}")
+            except Exception as e:
+                logger.error(f"❌ 异步测试报警处理异常: task_id={task_id}, error={e}")
         
-        if result:
-            logger.info("测试报警生成成功")
-            return {
-                "message": "测试报警已生成并发送",
-                "alert_id": result.get("task_id", "unknown"),
-                "method": "ai_task_executor._generate_alert"
+        # 启动异步任务（fire-and-forget）
+        asyncio.create_task(process_alert_async())
+        
+        # 🚀 立即返回响应（不等待MinIO上传）
+        logger.info(f"✅ 测试报警请求已接收并进入异步处理队列: task_id={task_id}")
+        return {
+            "success": True,
+            "message": "测试报警已进入处理队列，正在后台异步处理",
+            "task_id": task_id,
+            "method": "async_optimized",
+            "optimization": {
+                "async_processing": True,
+                "database_cache": "摄像头和技能信息缓存5分钟",
+                "fast_response": "立即返回，后台处理",
+                "expected_improvement": "响应时间从数秒降至数十毫秒"
             }
-        else:
-            logger.error("测试报警生成失败")
-            raise HTTPException(status_code=500, detail="生成测试报警失败")
+        }
             
     except Exception as e:
         logger.error(f"发送测试报警失败: {str(e)}", exc_info=True)
