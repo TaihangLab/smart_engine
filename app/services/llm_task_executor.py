@@ -142,7 +142,7 @@ class LLMTaskProcessor:
             # 准备LLM分析参数
             skill_type = self.skill_class.type.value
             system_prompt = self.skill_class.system_prompt or ""
-            user_prompt = self.skill_class.user_prompt_template or ""
+            user_prompt = self.skill_class.prompt_template or ""
             
             # 处理用户提示词模板中的变量替换
             if user_prompt:
@@ -172,9 +172,9 @@ class LLMTaskProcessor:
                 system_prompt=system_prompt,
                 user_prompt=enhanced_prompt,
                 image_data=frame,
-                temperature=self.skill_class.temperature / 100.0,
+                temperature=self.skill_class.temperature,
                 max_tokens=self.skill_class.max_tokens,
-                top_p=self.skill_class.top_p / 100.0
+                top_p=self.skill_class.top_p
             )
             
             if not result.success:
