@@ -4,6 +4,7 @@ from app.models.model import Model
 from app.models.ai_task import AITask
 from app.models.alert import Alert, AlertCreate, AlertResponse
 from app.models.llm_skill import LLMSkillClass
+from app.models.review_llm_skill import ReviewSkillClass
 from app.models.llm_task import LLMTask
 
 # 🎯 导入零配置补偿机制相关模型
