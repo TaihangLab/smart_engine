@@ -31,7 +31,7 @@ class AITask(Base):
     
     # 复判配置
     review_enabled = Column(Boolean, default=False)  # 是否启用复判
-    review_llm_skill_class_id = Column(Integer, ForeignKey("llm_skill_classes.id"), nullable=True)  # 复判LLM技能类ID
+    review_skill_class_id = Column(Integer, ForeignKey("review_skill_classes.id"), nullable=True)  # 复判技能类ID
     review_confidence_threshold = Column(Integer, default=80)  # 复判置信度阈值（0-100）
     review_conditions = Column(JSON, nullable=True)  # 复判触发条件，如特定预警等级、类型等
     
@@ -40,7 +40,7 @@ class AITask(Base):
 
     # 关系对象
     skill_class = relationship("SkillClass")
-    review_llm_skill_class = relationship("LLMSkillClass", foreign_keys=[review_llm_skill_class_id])
+    review_skill_class = relationship("ReviewSkillClass", foreign_keys=[review_skill_class_id])
 
     def __repr__(self):
         return f"<AITask(id={self.id}, name='{self.name}', type='{self.task_type}')>" 
