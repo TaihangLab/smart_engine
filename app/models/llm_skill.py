@@ -1,7 +1,7 @@
 """
 多模态LLM技能相关数据模型
 """
-from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, ForeignKey, Text, Enum as SQLEnum, BigInteger
+from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, ForeignKey, Text, Enum as SQLEnum, BigInteger, Float
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 from pydantic import BaseModel, Field, validator
@@ -62,10 +62,10 @@ class LLMSkillClass(Base):
     system_prompt = Column(Text, nullable=True)
     user_prompt_template = Column(Text, nullable=True)
     
-    # 模型参数（后端管理）
-    temperature = Column(Integer, default=70)  # 存储为整数，实际使用时除以100
+    # 模型参数（后端管理） - 使用小数格式存储
+    temperature = Column(Float, default=0.7)  # 0.0-1.0
     max_tokens = Column(Integer, default=1000)
-    top_p = Column(Integer, default=95)  # 存储为整数，实际使用时除以100
+    top_p = Column(Float, default=0.95)  # 0.0-1.0
     
     # 其他配置
     config = Column(JSON, nullable=True)
