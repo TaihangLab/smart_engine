@@ -109,19 +109,19 @@ def _detect_task_type(prompt: str, output_parameters: Optional[List[Dict[str, An
     
     return "general"
 
-def _build_json_prompt(original_prompt: str, output_parameters: Optional[List[Dict[str, Any]]]) -> str:
+def _build_llm_system_prompt(base_system_prompt: str, output_parameters: Optional[List[Dict[str, Any]]]) -> str:
     """
-    根据输出参数构建JSON格式的提示词
+    构建LLM技能的系统提示词，包含角色定义和JSON输出格式要求
     
     Args:
-        original_prompt: 原始提示词
+        base_system_prompt: 基础系统提示词（角色定义）
         output_parameters: 输出参数列表
         
     Returns:
-        增强的提示词，包含JSON格式要求
+        增强的系统提示词
     """
     if not output_parameters:
-        return original_prompt
+        return base_system_prompt
     
     # 构建JSON格式要求
     json_schema = {}
@@ -138,8 +138,8 @@ def _build_json_prompt(original_prompt: str, output_parameters: Optional[List[Di
         # 添加到参数描述
         param_descriptions.append(f"- {param_name} ({param_type}): {param_desc}")
     
-    # 构建增强提示词
-    enhanced_prompt = f"""{original_prompt}
+    # 构建增强的系统提示词
+    enhanced_system_prompt = f"""{base_system_prompt}
 
 请严格按照以下JSON格式输出结果：
 ```json
@@ -155,7 +155,7 @@ def _build_json_prompt(original_prompt: str, output_parameters: Optional[List[Di
 3. 数据类型必须正确（string、boolean、number等）
 4. 不要包含额外的解释文字，只返回JSON结果"""
     
-    return enhanced_prompt
+    return enhanced_system_prompt
 
 def _parse_json_response(response_text: str, output_parameters: Optional[List[Dict[str, Any]]]) -> tuple[Dict[str, Any], Dict[str, Any]]:
     """
@@ -428,24 +428,25 @@ def get_llm_skill_classes(
             detail=f"获取LLM技能类列表失败: {str(e)}"
         )
 
-@router.get("/skill-classes/{skill_class_id}", response_model=Dict[str, Any])
-def get_llm_skill_class(skill_class_id: int, db: Session = Depends(get_db)):
+@router.get("/skill-classes/{skill_id}", response_model=Dict[str, Any])
+def get_llm_skill_class(skill_id: str, db: Session = Depends(get_db)):
     """
     获取指定LLM技能类详情
     
     Args:
-        skill_class_id: LLM技能类ID
+        skill_id: LLM技能类业务ID
         db: 数据库会话
         
     Returns:
         LLM技能类详情
     """
     try:
-        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_class_id).first()
+        # 使用业务skill_id字段查询，而不是数据库主键id
+        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.skill_id == skill_id).first()
         if not skill_class:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"LLM技能类不存在: ID={skill_class_id}"
+                detail=f"LLM技能类不存在: skill_id={skill_id}"
             )
         
         # 格式化详细信息
@@ -574,6 +575,10 @@ def create_llm_skill_class(
         output_parameters_dict = [param.model_dump() for param in skill_class_data.output_parameters] if skill_class_data.output_parameters else []
         alert_conditions_dict = skill_class_data.alert_conditions.model_dump() if skill_class_data.alert_conditions else None
         
+        # 智能检测任务类型并获取优化配置
+        task_type = _detect_task_type(skill_class_data.prompt_template, output_parameters_dict)
+        smart_config = _get_smart_default_config(task_type)
+        
         # 创建LLM技能类
         skill_class = LLMSkillClass(
             # 用户提供的字段
@@ -587,16 +592,17 @@ def create_llm_skill_class(
             output_parameters=output_parameters_dict,
             alert_conditions=alert_conditions_dict,
             
-            # 系统内部字段（使用默认值）
+            # 系统内部字段（使用智能优化配置）
             type=LLMSkillType.MULTIMODAL_ANALYSIS,
             provider=LLMProviderType.CUSTOM,
             model_name=settings.PRIMARY_LLM_MODEL,
             api_base=settings.PRIMARY_LLM_BASE_URL,
             system_prompt="你是一个专业的AI助手，擅长分析图像内容并提供准确的判断。",
-            user_prompt_template=skill_class_data.prompt_template,
-            temperature=70,  # 默认0.7
-            max_tokens=1000,
-            top_p=95,  # 默认0.95
+
+            # 使用智能配置而不是硬编码默认值
+            temperature=smart_config["temperature"],  # 直接使用小数格式
+            max_tokens=smart_config["max_tokens"],
+            top_p=smart_config["top_p"],  # 直接使用小数格式
             status=False,  # 默认未发布状态
             version="1.0"
         )
@@ -606,16 +612,23 @@ def create_llm_skill_class(
         db.refresh(skill_class)
         
         logger.info(f"创建LLM技能类成功: {skill_class.skill_name} (ID: {skill_class.id}, 技能ID: {skill_class.skill_id})")
+        logger.info(f"智能配置应用 - 任务类型: {task_type}, 参数: temperature={smart_config['temperature']}, max_tokens={smart_config['max_tokens']}, top_p={smart_config['top_p']}")
         
         return {
             "success": True,
-            "message": "LLM技能类创建成功",
+            "message": "LLM技能类创建成功（已应用智能参数优化）",
             "data": {
                 "id": skill_class.id,
                 "skill_id": skill_class.skill_id,
                 "skill_name": skill_class.skill_name,
                 "application_scenario": skill_class.application_scenario.value,
-                "created_at": skill_class.created_at.isoformat()
+                "created_at": skill_class.created_at.isoformat(),
+                "smart_config_applied": {
+                    "detected_task_type": task_type,
+                    "temperature": smart_config["temperature"],
+                    "max_tokens": smart_config["max_tokens"],
+                    "top_p": smart_config["top_p"]
+                }
             }
         }
         
@@ -634,9 +647,9 @@ def create_llm_skill_class(
             detail=f"创建LLM技能类失败: {str(e)}"
         )
 
-@router.put("/skill-classes/{skill_class_id}", response_model=Dict[str, Any])
+@router.put("/skill-classes/{skill_id}", response_model=Dict[str, Any])
 def update_llm_skill_class(
-    skill_class_id: int,
+    skill_id: str,
     skill_class_data: LLMSkillClassUpdate,
     db: Session = Depends(get_db)
 ):
@@ -644,7 +657,7 @@ def update_llm_skill_class(
     更新LLM技能类
     
     Args:
-        skill_class_id: LLM技能类ID
+        skill_id: LLM技能类业务ID
         skill_class_data: 更新的LLM技能类数据
         db: 数据库会话
         
@@ -652,12 +665,12 @@ def update_llm_skill_class(
         更新后的LLM技能类
     """
     try:
-        # 查找技能类
-        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_class_id).first()
+        # 使用业务skill_id字段查询，而不是数据库主键id
+        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.skill_id == skill_id).first()
         if not skill_class:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"LLM技能类不存在: ID={skill_class_id}"
+                detail=f"LLM技能类不存在: skill_id={skill_id}"
             )
         
         # 更新字段
@@ -670,13 +683,15 @@ def update_llm_skill_class(
         if 'alert_conditions' in update_data:
             update_data['alert_conditions'] = skill_class_data.alert_conditions.model_dump() if skill_class_data.alert_conditions else None
         
+
+        
         for field, value in update_data.items():
             setattr(skill_class, field, value)
         
         db.commit()
         db.refresh(skill_class)
         
-        logger.info(f"更新LLM技能类成功: {skill_class.skill_name} (ID: {skill_class.id})")
+        logger.info(f"更新LLM技能类成功: {skill_class.skill_name} (skill_id: {skill_id})")
         
         return {
             "success": True,
@@ -699,25 +714,25 @@ def update_llm_skill_class(
             detail=f"更新LLM技能类失败: {str(e)}"
         )
 
-@router.delete("/skill-classes/{skill_class_id}", response_model=Dict[str, Any])
-def delete_llm_skill_class(skill_class_id: int, db: Session = Depends(get_db)):
+@router.delete("/skill-classes/{skill_id}", response_model=Dict[str, Any])
+def delete_llm_skill_class(skill_id: str, db: Session = Depends(get_db)):
     """
     删除LLM技能类
     
     Args:
-        skill_class_id: LLM技能类ID
+        skill_id: LLM技能类业务ID
         db: 数据库会话
         
     Returns:
         删除结果
     """
     try:
-        # 查找技能类
-        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_class_id).first()
+        # 使用业务skill_id字段查询，而不是数据库主键id
+        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.skill_id == skill_id).first()
         if not skill_class:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"LLM技能类不存在: ID={skill_class_id}"
+                detail=f"LLM技能类不存在: skill_id={skill_id}"
             )
         
         # 检查是否有关联的任务或规则
@@ -734,7 +749,7 @@ def delete_llm_skill_class(skill_class_id: int, db: Session = Depends(get_db)):
         db.delete(skill_class)
         db.commit()
         
-        logger.info(f"删除LLM技能类成功: {skill_class.skill_name} (ID: {skill_class_id})")
+        logger.info(f"删除LLM技能类成功: {skill_class.skill_name} (skill_id: {skill_id})")
         
         return {
             "success": True,
@@ -966,8 +981,11 @@ async def preview_test_llm_skill(
                     detail=f"输出参数JSON格式错误: {str(e)}"
                 )
         
-        # 构建增强的提示词
-        enhanced_prompt = _build_json_prompt(prompt_template, parsed_output_params)
+        # 构建增强的系统提示词（包含JSON格式要求）
+        enhanced_system_prompt = _build_llm_system_prompt(system_prompt, parsed_output_params)
+        
+        # 用户提示词保持纯粹
+        user_prompt_clean = prompt_template
         
         # 智能检测任务类型并获取优化配置
         task_type = _detect_task_type(prompt_template, parsed_output_params)
@@ -993,8 +1011,8 @@ async def preview_test_llm_skill(
             
             # 创建多模态消息
             messages = llm_service.create_multimodal_messages(
-                system_prompt=system_prompt,
-                user_prompt=enhanced_prompt,
+                system_prompt=enhanced_system_prompt,
+                user_prompt=user_prompt_clean,
                 image_data=frame
             )
             
@@ -1019,9 +1037,10 @@ async def preview_test_llm_skill(
                     "extracted_parameters": extracted_params,
                     "confidence": confidence,
                     "test_config": {
-                        "system_prompt": system_prompt,
+                        "base_system_prompt": system_prompt,
+                        "enhanced_system_prompt": enhanced_system_prompt,
+                        "user_prompt": user_prompt_clean,
                         "original_prompt": prompt_template,
-                        "enhanced_prompt": enhanced_prompt,
                         "output_parameters": parsed_output_params,
                         "detected_task_type": task_type,
                         "smart_config": smart_config,
@@ -1047,9 +1066,11 @@ async def preview_test_llm_skill(
                     "test_type": "preview",
                     "error_details": str(llm_error),
                     "test_config": {
-                        "system_prompt": system_prompt,
-                        "prompt_template": prompt_template,
+                        "base_system_prompt": system_prompt,
+                        "user_prompt": prompt_template,
                         "output_parameters": parsed_output_params,
+                        "detected_task_type": task_type,
+                        "smart_config": smart_config,
                         "temperature": smart_config["temperature"],
                         "max_tokens": smart_config["max_tokens"],
                         "top_p": smart_config["top_p"]
@@ -1166,144 +1187,31 @@ async def test_llm_connection(
             }
         }
 
-@router.post("/skill-classes/{skill_class_id}/test", response_model=Dict[str, Any])
-async def test_llm_skill(
-    skill_class_id: int,
-    test_image: UploadFile = File(..., description="测试图片"),
-    custom_prompt: Optional[str] = Form(None, description="自定义提示词（可选）"),
-    db: Session = Depends(get_db)
-):
-    """
-    测试多模态LLM技能
-    支持上传图片进行实时测试，会使用技能类配置的输出参数自动生成JSON格式要求
-    """
-    try:
-        # 检查技能类是否存在
-        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_class_id).first()
-        if not skill_class:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"LLM技能类不存在: ID={skill_class_id}"
-            )
-        
-        # 验证上传文件类型
-        if not test_image.content_type.startswith('image/'):
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="请上传有效的图片文件"
-            )
-        
-        # 读取图片数据
-        image_data = await test_image.read()
-        
-        # 将图片数据转换为numpy数组
-        nparr = np.frombuffer(image_data, np.uint8)
-        frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-        
-        if frame is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="无法解析图片数据"
-            )
-        
-        # 准备测试参数
-        skill_type = skill_class.type.value
-        system_prompt = skill_class.system_prompt or ""
-        
-        # 使用自定义提示词或技能类的提示词模板
-        user_prompt = custom_prompt or skill_class.user_prompt_template or ""
-        
-        # 获取输出参数配置
-        output_parameters = skill_class.output_parameters if skill_class.output_parameters else None
-        
-        # 构建增强的提示词（如果有输出参数配置）
-        enhanced_prompt = _build_json_prompt(user_prompt, output_parameters)
-        
-        # 调用LLM服务进行测试
-        result = llm_service.call_llm(
-            system_prompt=system_prompt,
-            user_prompt=enhanced_prompt,
-            image_data=frame,
-            temperature=skill_class.temperature / 100.0,
-            max_tokens=skill_class.max_tokens,
-            top_p=skill_class.top_p / 100.0
-        )
-        
-        if result.success:
-            # 解析JSON响应并提取输出参数
-            analysis_result, extracted_params = _parse_json_response(result.response, output_parameters)
-            
-            logger.info(f"LLM技能 {skill_class_id} 测试成功")
-            return {
-                "success": True,
-                "message": "技能测试成功",
-                "data": {
-                    "skill_class_id": skill_class_id,
-                    "skill_name": skill_class.skill_name,
-                    "raw_response": result.response,
-                    "analysis_result": analysis_result,
-                    "extracted_parameters": extracted_params,
-                    "formatted_parameters": _format_extracted_parameters(extracted_params),
-                    "confidence": result.confidence,
-                    "processing_time": getattr(result, "processing_time", 0),
-                    "model_used": getattr(result, "model_name", settings.PRIMARY_LLM_MODEL),
-                    "test_config": {
-                        "original_prompt": user_prompt,
-                        "enhanced_prompt": enhanced_prompt,
-                        "output_parameters": output_parameters,
-                        "system_prompt": system_prompt,
-                        "temperature": skill_class.temperature / 100.0,
-                        "max_tokens": skill_class.max_tokens,
-                        "top_p": skill_class.top_p / 100.0
-                    },
-                    "test_timestamp": datetime.now().isoformat()
-                }
-            }
-        else:
-            logger.error(f"LLM技能 {skill_class_id} 测试失败: {result.error_message}")
-            return {
-                "success": False,
-                "message": f"技能测试失败: {result.error_message}",
-                "data": {
-                    "skill_class_id": skill_class_id,
-                    "error_details": result.error_message
-                }
-            }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"测试LLM技能失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"测试LLM技能失败: {str(e)}"
-        )
-
-@router.post("/skill-classes/{skill_class_id}/publish", response_model=Dict[str, Any])
-def publish_llm_skill(skill_class_id: int, db: Session = Depends(get_db)):
+@router.post("/skill-classes/{skill_id}/publish", response_model=Dict[str, Any])
+def publish_llm_skill(skill_id: str, db: Session = Depends(get_db)):
     """
     发布LLM技能（设置status为True）
     """
     try:
-        # 检查技能类是否存在
-        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_class_id).first()
+        # 使用业务skill_id字段查询，而不是数据库主键id
+        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.skill_id == skill_id).first()
         if not skill_class:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"LLM技能类不存在: ID={skill_class_id}"
+                detail=f"LLM技能类不存在: skill_id={skill_id}"
             )
         
         # 发布技能
         skill_class.status = True
         db.commit()
         
-        logger.info(f"LLM技能 {skill_class_id} 发布成功")
+        logger.info(f"LLM技能 {skill_id} 发布成功")
         
         return {
             "success": True,
             "message": "LLM技能发布成功",
             "data": {
-                "skill_class_id": skill_class_id,
+                "skill_id": skill_id,
                 "skill_name": skill_class.skill_name,
                 "status": True
             }
@@ -1318,18 +1226,18 @@ def publish_llm_skill(skill_class_id: int, db: Session = Depends(get_db)):
             detail=f"发布LLM技能失败: {str(e)}"
         )
 
-@router.post("/skill-classes/{skill_class_id}/unpublish", response_model=Dict[str, Any])
-def unpublish_llm_skill(skill_class_id: int, db: Session = Depends(get_db)):
+@router.post("/skill-classes/{skill_id}/unpublish", response_model=Dict[str, Any])
+def unpublish_llm_skill(skill_id: str, db: Session = Depends(get_db)):
     """
     下线LLM技能（设置status为False）
     """
     try:
-        # 检查技能类是否存在
-        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_class_id).first()
+        # 使用业务skill_id字段查询，而不是数据库主键id
+        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.skill_id == skill_id).first()
         if not skill_class:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"LLM技能类不存在: ID={skill_class_id}"
+                detail=f"LLM技能类不存在: skill_id={skill_id}"
             )
         
         # 检查是否有关联的任务正在运行
@@ -1345,13 +1253,13 @@ def unpublish_llm_skill(skill_class_id: int, db: Session = Depends(get_db)):
         skill_class.status = False
         db.commit()
         
-        logger.info(f"LLM技能 {skill_class_id} 下线成功")
+        logger.info(f"LLM技能 {skill_id} 下线成功")
         
         return {
             "success": True,
             "message": "LLM技能下线成功",
             "data": {
-                "skill_class_id": skill_class_id,
+                "skill_id": skill_id,
                 "skill_name": skill_class.skill_name,
                 "status": False
             }
@@ -1368,7 +1276,7 @@ def unpublish_llm_skill(skill_class_id: int, db: Session = Depends(get_db)):
 
 @router.post("/skill-classes/batch-delete", response_model=Dict[str, Any])
 def batch_delete_llm_skills(
-    skill_ids: List[int] = Body(..., description="要删除的技能类ID列表"),
+    skill_ids: List[str] = Body(..., description="要删除的技能类业务ID列表"),
     db: Session = Depends(get_db)
 ):
     """
@@ -1386,8 +1294,8 @@ def batch_delete_llm_skills(
         
         for skill_id in skill_ids:
             try:
-                # 查找技能类
-                skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == skill_id).first()
+                # 使用业务skill_id字段查询，而不是数据库主键id
+                skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.skill_id == skill_id).first()
                 if not skill_class:
                     failed_skills.append({
                         "skill_id": skill_id,
