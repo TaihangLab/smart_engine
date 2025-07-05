@@ -2,10 +2,11 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
+import json
 
 from app.db.session import get_db
 from app.models.ai_task import AITask
-from app.models.llm_skill import LLMSkillClass
+from app.models.review_llm_skill import ReviewSkillClass
 from app.services.alert_review_service import alert_review_service
 
 router = APIRouter()
@@ -13,7 +14,7 @@ router = APIRouter()
 class AITaskReviewConfig(BaseModel):
     """AI任务复判配置模型"""
     review_enabled: bool = Field(False, description="是否启用复判")
-    review_llm_skill_class_id: Optional[int] = Field(None, description="复判LLM技能类ID")
+    review_skill_class_id: Optional[int] = Field(None, description="复判技能类ID")
     review_confidence_threshold: int = Field(80, ge=0, le=100, description="复判置信度阈值")
     review_conditions: Optional[Dict[str, Any]] = Field(None, description="复判触发条件")
 
@@ -38,24 +39,34 @@ async def get_ai_task_review_config(
             detail=f"AI任务不存在: {task_id}"
         )
     
-    # 获取关联的LLM技能类信息
-    llm_skill_class = None
-    if ai_task.review_llm_skill_class_id:
-        llm_skill_class = db.query(LLMSkillClass).filter(
-            LLMSkillClass.id == ai_task.review_llm_skill_class_id
+    # 获取关联的复判技能类信息
+    review_skill_class = None
+    if ai_task.review_skill_class_id:
+        review_skill_class = db.query(ReviewSkillClass).filter(
+            ReviewSkillClass.id == ai_task.review_skill_class_id
         ).first()
+    
+    # 解析技能标签
+    skill_tags = []
+    if review_skill_class and review_skill_class.skill_tags:
+        try:
+            skill_tags = json.loads(review_skill_class.skill_tags)
+        except:
+            skill_tags = []
     
     return {
         "task_id": task_id,
         "task_name": ai_task.name,
         "review_enabled": ai_task.review_enabled,
-        "review_llm_skill_class_id": ai_task.review_llm_skill_class_id,
-        "review_llm_skill_class": {
-            "id": llm_skill_class.id,
-            "name": llm_skill_class.name,
-            "name_zh": llm_skill_class.name_zh,
-            "type": llm_skill_class.type
-        } if llm_skill_class else None,
+        "review_skill_class_id": ai_task.review_skill_class_id,
+        "review_skill_class": {
+            "id": review_skill_class.id,
+            "skill_id": review_skill_class.skill_id,
+            "name": review_skill_class.skill_name,
+            "description": review_skill_class.description,
+            "tags": skill_tags,
+            "status": review_skill_class.status
+        } if review_skill_class else None,
         "review_confidence_threshold": ai_task.review_confidence_threshold,
         "review_conditions": ai_task.review_conditions
     }
@@ -78,27 +89,27 @@ async def update_ai_task_review_config(
             detail=f"AI任务不存在: {task_id}"
         )
     
-    # 如果启用复判，验证LLM技能类
-    if config.review_enabled and config.review_llm_skill_class_id:
-        llm_skill_class = db.query(LLMSkillClass).filter(
-            LLMSkillClass.id == config.review_llm_skill_class_id
+    # 如果启用复判，验证复判技能类
+    if config.review_enabled and config.review_skill_class_id:
+        review_skill_class = db.query(ReviewSkillClass).filter(
+            ReviewSkillClass.id == config.review_skill_class_id
         ).first()
-        if not llm_skill_class:
+        if not review_skill_class:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"LLM技能类不存在: {config.review_llm_skill_class_id}"
+                detail=f"复判技能类不存在: {config.review_skill_class_id}"
             )
         
-        # 验证技能类类型是否适合复判
-        if llm_skill_class.type.value != "multimodal_review":
+        # 验证技能是否已发布
+        if not review_skill_class.status:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"技能类类型 {llm_skill_class.type.value} 不适合用于复判，请选择 multimodal_review 类型的技能"
+                detail=f"技能 {review_skill_class.skill_name} 尚未发布，请先发布技能后再配置"
             )
     
     # 更新配置
     ai_task.review_enabled = config.review_enabled
-    ai_task.review_llm_skill_class_id = config.review_llm_skill_class_id
+    ai_task.review_skill_class_id = config.review_skill_class_id
     ai_task.review_confidence_threshold = config.review_confidence_threshold
     ai_task.review_conditions = config.review_conditions
     
@@ -111,7 +122,7 @@ async def update_ai_task_review_config(
         "task_id": task_id,
         "config": {
             "review_enabled": ai_task.review_enabled,
-            "review_llm_skill_class_id": ai_task.review_llm_skill_class_id,
+            "review_skill_class_id": ai_task.review_skill_class_id,
             "review_confidence_threshold": ai_task.review_confidence_threshold,
             "review_conditions": ai_task.review_conditions
         }
@@ -125,25 +136,22 @@ async def get_available_review_skills(
 ) -> List[Dict[str, Any]]:
     """获取可用的复判技能列表"""
     
-    from app.models.llm_skill import LLMSkillType
-    
-    llm_skills = db.query(LLMSkillClass).filter(
-        LLMSkillClass.type == LLMSkillType.MULTIMODAL_REVIEW,
-        LLMSkillClass.status == True  # 只显示已上线的技能
-    ).order_by(LLMSkillClass.created_at.desc()).all()
+    review_skills = db.query(ReviewSkillClass).filter(
+        ReviewSkillClass.status == True  # 只显示已上线的技能
+    ).order_by(ReviewSkillClass.created_at.desc()).all()
     
     return [
         {
             "id": skill.id,
-            "name": skill.name,
-            "name_zh": skill.name_zh,
-            "type": skill.type,
+            "skill_id": skill.skill_id,
+            "name": skill.skill_name,
             "description": skill.description,
+            "tags": json.loads(skill.skill_tags) if skill.skill_tags else [],
             "version": skill.version,
             "created_at": skill.created_at,
             "updated_at": skill.updated_at
         }
-        for skill in llm_skills
+        for skill in review_skills
     ]
 
 @router.post("/alerts/review",
@@ -184,11 +192,11 @@ async def get_review_enabled_tasks(
     
     result = []
     for task in tasks:
-        # 获取关联的LLM技能类
-        llm_skill_class = None
-        if task.review_llm_skill_class_id:
-            llm_skill_class = db.query(LLMSkillClass).filter(
-                LLMSkillClass.id == task.review_llm_skill_class_id
+        # 获取关联的复判技能类
+        review_skill_class = None
+        if task.review_skill_class_id:
+            review_skill_class = db.query(ReviewSkillClass).filter(
+                ReviewSkillClass.id == task.review_skill_class_id
             ).first()
         
         result.append({
@@ -196,12 +204,14 @@ async def get_review_enabled_tasks(
             "name": task.name,
             "description": task.description,
             "camera_id": task.camera_id,
-            "review_llm_skill_class": {
-                "id": llm_skill_class.id,
-                "name": llm_skill_class.name,
-                "name_zh": llm_skill_class.name_zh,
-                "type": llm_skill_class.type
-            } if llm_skill_class else None,
+            "review_skill_class": {
+                "id": review_skill_class.id,
+                "skill_id": review_skill_class.skill_id,
+                "name": review_skill_class.skill_name,
+                "description": review_skill_class.description,
+                "tags": json.loads(review_skill_class.skill_tags) if review_skill_class.skill_tags else [],
+                "status": review_skill_class.status
+            } if review_skill_class else None,
             "review_confidence_threshold": task.review_confidence_threshold,
             "review_conditions": task.review_conditions,
             "created_at": task.created_at
