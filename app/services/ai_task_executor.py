@@ -1,6 +1,7 @@
 """
 基于精确调度的AI任务执行器
 """
+import asyncio
 import cv2
 import numpy as np
 import threading
@@ -719,8 +720,24 @@ class AITaskExecutor:
         self.scheduler = BackgroundScheduler()
         self.scheduler.start()
         
-        # 创建线程池用于异步处理预警
-        self.alert_executor = ThreadPoolExecutor(max_workers=5, thread_name_prefix="AlertGen")
+        # 🚀 创建高性能线程池用于异步处理预警
+        from app.core.config import settings
+        self.alert_executor = ThreadPoolExecutor(
+            max_workers=settings.ALERT_GENERATION_POOL_SIZE, 
+            thread_name_prefix="AlertGen"
+        )
+        
+        # 🚀 创建消息处理线程池
+        self.message_executor = ThreadPoolExecutor(
+            max_workers=settings.MESSAGE_PROCESSING_POOL_SIZE,
+            thread_name_prefix="MessageProc"
+        )
+        
+        # 🚀 创建图像处理线程池
+        self.image_executor = ThreadPoolExecutor(
+            max_workers=settings.IMAGE_PROCESSING_POOL_SIZE,
+            thread_name_prefix="ImageProc"
+        )
         
         # 初始化目录
         os.makedirs("alerts", exist_ok=True)
@@ -730,6 +747,16 @@ class AITaskExecutor:
         try:
             if hasattr(self, 'alert_executor'):
                 self.alert_executor.shutdown(wait=True)
+        except:
+            pass
+        try:
+            if hasattr(self, 'message_executor'):
+                self.message_executor.shutdown(wait=True)
+        except:
+            pass
+        try:
+            if hasattr(self, 'image_executor'):
+                self.image_executor.shutdown(wait=True)
         except:
             pass
         try:
@@ -1373,6 +1400,31 @@ class AITaskExecutor:
         finally:
             db.close()
     
+    def _generate_alert_async_optimized(self, task: AITask, alert_data: Dict, frame: np.ndarray, level: int) -> Optional[Dict]:
+        """🚀 高性能优化版异步生成预警
+        
+        优化策略：
+        1. 异步MinIO上传：不阻塞主流程
+        2. 数据库查询缓存：减少重复查询
+        3. 图像处理优化：优化编码参数和质量
+        4. 快速响应：先发送预警，后续补充图片URL
+        
+        Args:
+            task: AI任务对象
+            alert_data: 报警数据（安全分析结果）
+            frame: 报警截图帧
+            level: 预警等级
+            
+        Returns:
+            生成的预警信息字典，失败时返回None
+        """
+        # 创建新的数据库会话（因为在新线程中）
+        db = next(get_db())
+        try:
+            return self._generate_alert_with_merge_optimized(task, alert_data, frame, db, level)
+        finally:
+            db.close()
+    
     def _generate_alert_with_merge(self, task: AITask, alert_data, frame, db: Session, level: int):
         """生成预警并发送到合并管理器
         
@@ -1528,6 +1580,277 @@ class AITaskExecutor:
             logger.error(f"生成报警时出错: {str(e)}")
             return None
     
+    def _generate_alert_with_merge_optimized(self, task: AITask, alert_data, frame, db: Session, level: int):
+        """🚀 高性能优化版生成预警并发送到合并管理器
+        
+        优化策略：
+        1. 数据库查询缓存：使用缓存减少重复查询
+        2. 异步MinIO上传：不阻塞主流程
+        3. 快速预警发送：先发送基础信息，后补充图片
+        
+        Args:
+            task: AI任务对象
+            alert_data: 报警数据（安全分析结果）
+            frame: 报警截图帧
+            db: 数据库会话
+            level: 预警等级（技能返回的实际预警等级）
+        """
+        try:
+            from app.services.camera_service import CameraService
+            from app.services.minio_client import minio_client
+            from app.services.rabbitmq_client import rabbitmq_client
+            from datetime import datetime
+            import cv2
+            import threading
+            
+            # 🚀 优化1：使用缓存获取摄像头信息（避免重复数据库查询）
+            camera_info = self._get_cached_camera_info(task.camera_id, db)
+            camera_name = camera_info.get("name", f"摄像头{task.camera_id}") if camera_info else f"摄像头{task.camera_id}"
+            
+            # 确保location字段不为None
+            location = "未知位置"
+            if camera_info:
+                camera_location = camera_info.get("location")
+                if camera_location:
+                    location = camera_location
+            
+            # 直接从alert_data中获取预警信息
+            alert_info_data = alert_data.get("alert_info", {})
+            alert_info = {
+                "name": alert_info_data.get("alert_name", "系统预警"),
+                "type": alert_info_data.get("alert_type", "安全生产预警"),
+                "description": alert_info_data.get("alert_description", f"{camera_name}检测到安全风险，请及时处理。")
+            }
+            
+            # 在frame上绘制检测框（预警截图，尝试使用技能的自定义绘制函数）
+            annotated_frame = self._draw_alert_detections_with_skill(task, frame.copy(), alert_data)
+            
+            # 🚀 优化3：使用缓存获取技能信息
+            skill_info = self._get_cached_skill_info(task.skill_class_id, db)
+            skill_class_id = skill_info["id"] if skill_info else task.skill_class_id
+            skill_name_zh = skill_info["name_zh"] if skill_info else "未知技能"
+            
+            # 处理检测结果格式
+            formatted_results = self._format_detection_results(alert_data)
+            
+            # 解析电子围栏配置
+            electronic_fence = self._parse_fence_config(task)
+            
+            # 🚀 优化4：先构建预警基础信息（不包含图片URL）
+            timestamp = int(time.time())
+            complete_alert = {
+                "alert_time": datetime.now().isoformat(),
+                "alert_level": level,
+                "alert_name": alert_info["name"],
+                "alert_type": alert_info["type"], 
+                "alert_description": alert_info["description"],
+                "location": location,
+                "camera_id": task.camera_id,
+                "camera_name": camera_name,
+                "task_id": task.id,
+                "skill_class_id": skill_class_id,
+                "skill_name_zh": skill_name_zh,
+                "electronic_fence": electronic_fence,
+                "minio_frame_object_name": "",  # 先为空，异步上传后更新
+                "minio_video_object_name": "",
+                "result": formatted_results,
+                "processing_status": "uploading_image"  # 标记图片正在上传
+            }
+            
+            # 🚀 优化5：企业级异步MinIO上传（多层保障机制）
+            def enterprise_async_upload_image():
+                try:
+                    # 将绘制了检测框的frame编码为JPEG字节数据
+                    success, img_encoded = cv2.imencode('.jpg', annotated_frame)
+                    if not success:
+                        logger.error("图像编码失败")
+                        return
+                    
+                    # 构建文件名和路径
+                    img_filename = f"alert_{task.id}_{task.camera_id}_{timestamp}.jpg"
+                    from app.core.config import settings
+                    minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{task.id}"
+                    
+                    # 🎯 使用企业级上传编排器（包含智能重试、降级存储、补偿队列）
+                    from app.services.minio_upload_orchestrator import minio_upload_orchestrator, UploadPriority, UploadStrategy
+                    
+                    async def upload_callback(result):
+                        """上传完成回调"""
+                        if result.status.value == "success":
+                            logger.info(f"✅ 企业级预警图片上传成功: {result.object_name}")
+                            # TODO: 可以在这里发送更新消息，告知图片上传完成
+                        elif result.status.value == "fallback":
+                            logger.warning(f"⚠️ 预警图片已保存到降级存储: {result.fallback_file_id}")
+                        elif result.status.value == "compensating":
+                            logger.warning(f"⚠️ 预警图片上传失败，已加入补偿队列: {result.compensation_task_id}")
+                        else:
+                            logger.error(f"❌ 企业级预警图片上传失败: {result.error_message}")
+                    
+                    # 同步调用企业级上传编排器
+                    upload_result = minio_upload_orchestrator.upload_sync(
+                        data=img_encoded.tobytes(),
+                        object_name=img_filename,
+                        content_type="image/jpeg",
+                        prefix=minio_prefix,
+                        priority=UploadPriority.CRITICAL,  # 预警图片为关键优先级
+                        strategy=UploadStrategy.HYBRID,    # 使用混合策略
+                        metadata={
+                            "task_id": task.id,
+                            "camera_id": task.camera_id,
+                            "alert_level": level,
+                            "timestamp": timestamp
+                        }
+                    )
+                    
+                    # 处理上传结果
+                    if hasattr(upload_result, 'result'):
+                        # 如果返回的是Future对象，等待结果
+                        try:
+                            final_result = upload_result.result(timeout=30)  # 最多等待30秒
+                            # 检查callback是否是协程函数
+                            if asyncio.iscoroutinefunction(upload_callback):
+                                # 创建新的事件循环（因为在普通线程中）
+                                try:
+                                    loop = asyncio.get_event_loop()
+                                except RuntimeError:
+                                    loop = asyncio.new_event_loop()
+                                    asyncio.set_event_loop(loop)
+                                loop.run_until_complete(upload_callback(final_result))
+                            else:
+                                upload_callback(final_result)
+                        except Exception as e:
+                            logger.error(f"❌ 等待企业级上传结果超时: {str(e)}")
+                    else:
+                        # 直接处理结果
+                        # 检查callback是否是协程函数
+                        if asyncio.iscoroutinefunction(upload_callback):
+                            # 创建新的事件循环（因为在普通线程中）
+                            try:
+                                loop = asyncio.get_event_loop()
+                            except RuntimeError:
+                                loop = asyncio.new_event_loop()
+                                asyncio.set_event_loop(loop)
+                            loop.run_until_complete(upload_callback(upload_result))
+                        else:
+                            upload_callback(upload_result)
+                    
+                except Exception as e:
+                    logger.error(f"❌ 企业级异步MinIO上传失败: {str(e)}")
+                    # 即使企业级上传失败，也要尝试降级处理
+                    try:
+                        from app.services.minio_fallback_storage import minio_fallback_storage
+                        fallback_id = minio_fallback_storage.store_file(
+                            data=img_encoded.tobytes(),
+                            object_name=img_filename,
+                            content_type="image/jpeg",
+                            prefix=minio_prefix,
+                            priority=1,
+                            metadata={"task_id": task.id, "camera_id": task.camera_id}
+                        )
+                        logger.info(f"💾 预警图片已紧急保存到降级存储: {fallback_id}")
+                    except Exception as fallback_error:
+                        logger.critical(f"🚨 预警图片保存完全失败: {str(fallback_error)}")
+            
+            # 启动企业级异步上传线程
+            upload_thread = threading.Thread(target=enterprise_async_upload_image, daemon=True)
+            upload_thread.start()
+            
+            # 准备原始帧数据（用于视频录制）
+            frame_bytes = None
+            try:
+                if frame is not None:
+                    # 先缩放到目标分辨率以减少存储压力
+                    height, width = frame.shape[:2]
+                    from app.core.config import settings
+                    target_width = getattr(settings, 'ALERT_VIDEO_WIDTH', 1280)
+                    target_height = getattr(settings, 'ALERT_VIDEO_HEIGHT', 720)
+                    video_quality = getattr(settings, 'ALERT_VIDEO_QUALITY', 75)
+                    
+                    if width != target_width or height != target_height:
+                        frame = cv2.resize(frame, (target_width, target_height))
+                    
+                    # 编码为低质量JPEG字节数据
+                    success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, video_quality])
+                    if success:
+                        frame_bytes = encoded.tobytes()
+            except Exception as e:
+                logger.warning(f"编码原始帧失败: {str(e)}")
+            
+            # 🚀 优化7：立即发送到预警合并管理器（不等待图片上传）
+            success = alert_merge_manager.add_alert(
+                alert_data=complete_alert,
+                image_object_name="",  # 图片正在异步上传
+                frame_bytes=frame_bytes
+            )
+            
+            if success:
+                logger.info(f"✅ 高性能预警已添加到合并管理器: task_id={task.id}, camera_id={task.camera_id}, level={level}")
+                logger.info(f"🚀 性能优化: 图片异步上传中，预警已提前发送")
+                return complete_alert
+            else:
+                logger.error(f"❌ 添加高性能预警到合并管理器失败: task_id={task.id}")
+                return None
+            
+        except Exception as e:
+            logger.error(f"🚀 高性能生成报警时出错: {str(e)}")
+            return None
+    
+    # 🚀 性能优化：数据库查询缓存
+    _camera_info_cache = {}
+    _skill_info_cache = {}
+    _cache_expire_time = 300  # 缓存5分钟
+    
+    def _get_cached_camera_info(self, camera_id: int, db: Session) -> Dict:
+        """获取缓存的摄像头信息，减少数据库查询"""
+        import time
+        current_time = time.time()
+        cache_key = f"camera_{camera_id}"
+        
+        # 检查缓存是否存在且未过期
+        if cache_key in self._camera_info_cache:
+            cached_data, cache_time = self._camera_info_cache[cache_key]
+            if current_time - cache_time < self._cache_expire_time:
+                return cached_data
+        
+        # 缓存不存在或已过期，从数据库查询
+        try:
+            from app.services.camera_service import CameraService
+            camera_info = CameraService.get_ai_camera_by_id(camera_id, db)
+            if camera_info:
+                # 更新缓存
+                self._camera_info_cache[cache_key] = (camera_info, current_time)
+                return camera_info
+        except Exception as e:
+            logger.warning(f"获取摄像头信息失败: {e}")
+        
+        return {}
+    
+    def _get_cached_skill_info(self, skill_class_id: int, db: Session) -> Dict:
+        """获取缓存的技能信息，减少数据库查询"""
+        import time
+        current_time = time.time()
+        cache_key = f"skill_{skill_class_id}"
+        
+        # 检查缓存是否存在且未过期
+        if cache_key in self._skill_info_cache:
+            cached_data, cache_time = self._skill_info_cache[cache_key]
+            if current_time - cache_time < self._cache_expire_time:
+                return cached_data
+        
+        # 缓存不存在或已过期，从数据库查询
+        try:
+            from app.services.skill_class_service import SkillClassService
+            skill_info = SkillClassService.get_by_id(skill_class_id, db, is_detail=False)
+            if skill_info:
+                # 更新缓存
+                self._skill_info_cache[cache_key] = (skill_info, current_time)
+                return skill_info
+        except Exception as e:
+            logger.warning(f"获取技能信息失败: {e}")
+        
+        return {}
+    
+
     def _draw_alert_detections_with_skill(self, task: AITask, frame: np.ndarray, alert_data: Dict) -> np.ndarray:
         """为预警截图绘制检测框，优先使用技能的自定义绘制函数"""
         try:

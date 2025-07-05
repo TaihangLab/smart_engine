@@ -67,13 +67,22 @@ class SystemStartupService:
                 "startup_order": 0
             },
             {
+                "name": "enterprise_minio_services",
+                "display_name": "企业级MinIO服务集群",
+                "start_func": self._initialize_enterprise_minio_services,
+                "stop_func": self._shutdown_enterprise_minio_services,
+                "enabled": True,
+                "critical": False,
+                "startup_order": 1
+            },
+            {
                 "name": "unified_compensation",
                 "display_name": "统一补偿服务",
                 "start_func": start_unified_compensation,
                 "stop_func": stop_unified_compensation,
                 "enabled": settings.COMPENSATION_AUTO_START,
                 "critical": True,
-                "startup_order": 1
+                "startup_order": 2
             }
         ]
         
@@ -170,6 +179,84 @@ class SystemStartupService:
         except Exception as e:
             logger.error(f"💥 系统核心初始化失败: {str(e)}", exc_info=True)
             raise
+
+    async def _initialize_enterprise_minio_services(self):
+        """初始化企业级MinIO服务集群"""
+        logger.info("🚀 开始初始化企业级MinIO服务集群...")
+        
+        try:
+            # 1. 启动MinIO健康监控服务
+            logger.info("🩺 启动MinIO健康监控服务...")
+            from app.services.minio_health_monitor import minio_health_monitor
+            minio_health_monitor.start()
+            logger.info("✅ MinIO健康监控服务已启动")
+            
+            # 2. 启动MinIO补偿队列服务
+            logger.info("🔄 启动MinIO补偿队列服务...")
+            from app.services.minio_compensation_queue import minio_compensation_queue
+            minio_compensation_queue.start()
+            logger.info("✅ MinIO补偿队列服务已启动")
+            
+            # 3. 启动MinIO降级存储服务
+            logger.info("📁 启动MinIO降级存储服务...")
+            from app.services.minio_fallback_storage import minio_fallback_storage
+            minio_fallback_storage.start()
+            logger.info("✅ MinIO降级存储服务已启动")
+            
+            # 4. 企业级MinIO客户端已自动初始化
+            logger.info("🏢 验证企业级MinIO客户端...")
+            from app.services.enterprise_minio_client import enterprise_minio_client
+            health_status = enterprise_minio_client.health_check()
+            if health_status.get("healthy", False):
+                logger.info("✅ 企业级MinIO客户端健康状态良好")
+            else:
+                logger.warning("⚠️ 企业级MinIO客户端健康检查有警告")
+            
+            # 5. MinIO上传编排器无需手动启动（单例模式）
+            logger.info("🎯 验证MinIO上传编排器...")
+            from app.services.minio_upload_orchestrator import minio_upload_orchestrator
+            stats = minio_upload_orchestrator.get_stats()
+            logger.info(f"✅ MinIO上传编排器已就绪: {stats}")
+            
+            logger.info("🎉 企业级MinIO服务集群初始化完成！")
+            
+        except Exception as e:
+            logger.error(f"❌ 企业级MinIO服务集群初始化失败: {str(e)}", exc_info=True)
+            raise
+
+    async def _shutdown_enterprise_minio_services(self):
+        """关闭企业级MinIO服务集群"""
+        logger.info("⏹️ 开始关闭企业级MinIO服务集群...")
+        
+        try:
+            # 1. 停止MinIO健康监控服务
+            try:
+                from app.services.minio_health_monitor import minio_health_monitor
+                minio_health_monitor.stop()
+                logger.info("✅ MinIO健康监控服务已停止")
+            except Exception as e:
+                logger.error(f"❌ 停止MinIO健康监控服务失败: {str(e)}")
+            
+            # 2. 停止MinIO补偿队列服务
+            try:
+                from app.services.minio_compensation_queue import minio_compensation_queue
+                minio_compensation_queue.stop()
+                logger.info("✅ MinIO补偿队列服务已停止")
+            except Exception as e:
+                logger.error(f"❌ 停止MinIO补偿队列服务失败: {str(e)}")
+            
+            # 3. 停止MinIO降级存储服务
+            try:
+                from app.services.minio_fallback_storage import minio_fallback_storage
+                minio_fallback_storage.stop()
+                logger.info("✅ MinIO降级存储服务已停止")
+            except Exception as e:
+                logger.error(f"❌ 停止MinIO降级存储服务失败: {str(e)}")
+            
+            logger.info("🎉 企业级MinIO服务集群已安全关闭！")
+            
+        except Exception as e:
+            logger.error(f"❌ 关闭企业级MinIO服务集群时出错: {str(e)}")
 
     async def startup_system(self):
         """系统启动入口 - 零配置自动启动"""
