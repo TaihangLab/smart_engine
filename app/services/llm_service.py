@@ -142,14 +142,21 @@ class LLMService:
                     # 确保Ollama的URL以/v1结尾
                     base_url = base_url.rstrip("/") + "/v1"
                 
-                return ChatOpenAI(
-                    model=model_name,
-                    api_key=api_key,
-                    base_url=base_url,
-                    temperature=api_config.get("temperature", 0.1),
-                    max_tokens=api_config.get("max_tokens", 1000),
-                    timeout=api_config.get("timeout", 60)
-                )
+                # 构建ChatOpenAI参数
+                llm_params = {
+                    "model": model_name,
+                    "api_key": api_key,
+                    "base_url": base_url,
+                    "temperature": api_config.get("temperature", 0.1),
+                    "max_tokens": api_config.get("max_tokens", 1000),
+                    "timeout": api_config.get("timeout", 60)
+                }
+                
+                # 添加top_p参数（如果配置中有）
+                if "top_p" in api_config:
+                    llm_params["top_p"] = api_config["top_p"]
+                
+                return ChatOpenAI(**llm_params)
             # elif provider == "anthropic":
             #     return ChatAnthropic(
             #         model=model_name,
