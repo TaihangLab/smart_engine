@@ -1,9 +1,9 @@
 """
-MinIO补偿队列服务 - 持久化重试机制（MySQL版本）
-================================================
+MinIO补偿队列服务 - 持久化重试机制
+==================================
 
 企业级特性：
-1. 🔄 持久化重试队列（MySQL存储）
+1. 🔄 持久化重试队列
 2. 📊 任务状态跟踪
 3. ⏰ 定期重试调度
 4. 🎯 智能重试策略
@@ -16,6 +16,7 @@ MinIO补偿队列服务 - 持久化重试机制（MySQL版本）
 import asyncio
 import json
 import logging
+import sqlite3
 import threading
 import time
 from dataclasses import dataclass, asdict
@@ -27,15 +28,25 @@ import uuid
 import os
 
 from app.core.config import settings
-from app.db.minio_session import (
-    minio_db_manager, 
-    MinIOCompensationTask as MinIOCompensationTaskModel, 
-    CompensationTaskStatus, 
-    CompensationTaskType
-)
-from sqlalchemy import text
 
 logger = logging.getLogger(__name__)
+
+
+class CompensationTaskStatus(Enum):
+    """补偿任务状态"""
+    PENDING = "pending"         # 待重试
+    PROCESSING = "processing"   # 处理中
+    COMPLETED = "completed"     # 已完成
+    FAILED = "failed"          # 永久失败
+    CANCELLED = "cancelled"     # 已取消
+
+
+class CompensationTaskType(Enum):
+    """补偿任务类型"""
+    UPLOAD_IMAGE = "upload_image"
+    UPLOAD_VIDEO = "upload_video"
+    DELETE_FILE = "delete_file"
+    DOWNLOAD_FILE = "download_file"
 
 
 @dataclass
@@ -70,28 +81,29 @@ class CompensationTask:
         }
     
     @classmethod
-    def from_db_model(cls, db_model: MinIOCompensationTaskModel) -> 'CompensationTask':
-        """从数据库模型创建"""
+    def from_dict(cls, data: Dict[str, Any]) -> 'CompensationTask':
+        """从字典创建"""
         return cls(
-            id=db_model.id,
-            task_type=CompensationTaskType(db_model.task_type),
-            status=CompensationTaskStatus(db_model.status),
-            payload=json.loads(db_model.payload),
-            created_at=db_model.created_at,
-            updated_at=db_model.updated_at,
-            retry_count=db_model.retry_count,
-            max_retries=db_model.max_retries,
-            next_retry_at=db_model.next_retry_at,
-            last_error=db_model.last_error,
-            priority=db_model.priority
+            id=data['id'],
+            task_type=CompensationTaskType(data['task_type']),
+            status=CompensationTaskStatus(data['status']),
+            payload=json.loads(data['payload']),
+            created_at=datetime.fromisoformat(data['created_at']),
+            updated_at=datetime.fromisoformat(data['updated_at']),
+            retry_count=data['retry_count'],
+            max_retries=data['max_retries'],
+            next_retry_at=datetime.fromisoformat(data['next_retry_at']) if data['next_retry_at'] else None,
+            last_error=data['last_error'],
+            priority=data['priority']
         )
 
 
 class MinIOCompensationQueue:
-    """MinIO补偿队列服务（MySQL版本）"""
+    """MinIO补偿队列服务"""
     
     def __init__(self):
         """初始化补偿队列服务"""
+        self.db_path = self._init_database()
         self._worker_thread = None
         self._running = False
         self._lock = threading.RLock()
@@ -112,23 +124,47 @@ class MinIOCompensationQueue:
             CompensationTaskType.DOWNLOAD_FILE: self._process_download_task
         }
         
-        # 验证数据库连接
-        self._verify_database_connection()
-        
-        logger.info("✅ MinIO补偿队列服务（MySQL版本）初始化完成")
+        logger.info("✅ MinIO补偿队列服务初始化完成")
     
-    def _verify_database_connection(self):
-        """验证数据库连接"""
+    def _init_database(self) -> str:
+        """初始化SQLite数据库"""
         try:
-            if not minio_db_manager.health_check():
-                raise Exception("MinIO数据库健康检查失败")
+            # 确保数据目录存在
+            data_dir = Path("data/compensation")
+            data_dir.mkdir(parents=True, exist_ok=True)
             
-            # 获取连接信息
-            conn_info = minio_db_manager.get_connection_info()
-            logger.info(f"✅ MinIO数据库连接验证成功: {conn_info}")
+            db_path = data_dir / "minio_compensation.db"
+            
+            # 创建数据库表
+            with sqlite3.connect(str(db_path)) as conn:
+                conn.execute("""
+                    CREATE TABLE IF NOT EXISTS compensation_tasks (
+                        id TEXT PRIMARY KEY,
+                        task_type TEXT NOT NULL,
+                        status TEXT NOT NULL,
+                        payload TEXT NOT NULL,
+                        created_at TEXT NOT NULL,
+                        updated_at TEXT NOT NULL,
+                        retry_count INTEGER DEFAULT 0,
+                        max_retries INTEGER DEFAULT 5,
+                        next_retry_at TEXT,
+                        last_error TEXT,
+                        priority INTEGER DEFAULT 1
+                    )
+                """)
+                
+                # 创建索引
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_status ON compensation_tasks(status)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_next_retry ON compensation_tasks(next_retry_at)")
+                conn.execute("CREATE INDEX IF NOT EXISTS idx_priority ON compensation_tasks(priority)")
+                
+                conn.commit()
+                
+            logger.info(f"✅ MinIO补偿队列数据库初始化完成: {db_path}")
+            return str(db_path)
             
         except Exception as e:
-            logger.error(f"❌ MinIO数据库连接验证失败: {str(e)}")
+            logger.error(f"❌ 补偿队列数据库初始化失败: {str(e)}")
             raise
     
     def start(self):
@@ -157,72 +193,40 @@ class MinIOCompensationQueue:
                  priority: int = 1, max_retries: int = 5) -> str:
         """添加补偿任务"""
         try:
-            task_id = str(uuid.uuid4())
-            now = datetime.now()
-            
-            # 创建数据库模型
-            db_task = MinIOCompensationTaskModel(
-                id=task_id,
-                task_type=task_type.value,
-                status=CompensationTaskStatus.PENDING.value,
-                payload=json.dumps(payload),
-                created_at=now,
-                updated_at=now,
-                retry_count=0,
+            task = CompensationTask(
+                id=str(uuid.uuid4()),
+                task_type=task_type,
+                status=CompensationTaskStatus.PENDING,
+                payload=payload,
+                created_at=datetime.now(),
+                updated_at=datetime.now(),
                 max_retries=max_retries,
                 priority=priority
             )
             
-            # 保存到数据库
-            with minio_db_manager.get_session() as session:
-                session.add(db_task)
-                session.commit()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    INSERT INTO compensation_tasks 
+                    (id, task_type, status, payload, created_at, updated_at, 
+                     retry_count, max_retries, priority) 
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (
+                    task.id, task.task_type.value, task.status.value,
+                    json.dumps(task.payload), task.created_at.isoformat(),
+                    task.updated_at.isoformat(), task.retry_count,
+                    task.max_retries, task.priority
+                ))
+                conn.commit()
             
-            logger.info(f"✅ 补偿任务已添加: {task_id}, 类型: {task_type.value}, 优先级: {priority}")
-            return task_id
+            with self._lock:
+                self._metrics["total_tasks"] += 1
+                self._metrics["pending_tasks"] += 1
+            
+            logger.info(f"✅ 补偿任务已添加: {task.id} ({task_type.value})")
+            return task.id
             
         except Exception as e:
             logger.error(f"❌ 添加补偿任务失败: {str(e)}")
-            raise
-    
-    def get_task_by_id(self, task_id: str) -> Optional[CompensationTask]:
-        """根据ID获取任务"""
-        try:
-            with minio_db_manager.get_session() as session:
-                db_task = session.query(MinIOCompensationTaskModel).filter(
-                    MinIOCompensationTaskModel.id == task_id
-                ).first()
-                
-                if db_task:
-                    return CompensationTask.from_db_model(db_task)
-                return None
-                
-        except Exception as e:
-            logger.error(f"❌ 获取补偿任务失败: {str(e)}")
-            return None
-    
-    def update_task_status(self, task_id: str, status: CompensationTaskStatus, 
-                          error_message: Optional[str] = None):
-        """更新任务状态"""
-        try:
-            with minio_db_manager.get_session() as session:
-                db_task = session.query(MinIOCompensationTaskModel).filter(
-                    MinIOCompensationTaskModel.id == task_id
-                ).first()
-                
-                if db_task:
-                    db_task.status = status.value
-                    db_task.updated_at = datetime.now()
-                    if error_message:
-                        db_task.last_error = error_message
-                    session.commit()
-                    
-                    logger.debug(f"✅ 任务状态已更新: {task_id} -> {status.value}")
-                else:
-                    logger.warning(f"⚠️ 任务不存在: {task_id}")
-                    
-        except Exception as e:
-            logger.error(f"❌ 更新任务状态失败: {str(e)}")
             raise
     
     def _worker_loop(self):
@@ -255,16 +259,16 @@ class MinIOCompensationQueue:
         """处理待重试的任务"""
         try:
             # 获取需要处理的任务（按优先级和创建时间排序）
-            with minio_db_manager.get_session() as session:
-                cursor = session.query(MinIOCompensationTaskModel).filter(
-                    MinIOCompensationTaskModel.status == CompensationTaskStatus.PENDING.value,
-                    (MinIOCompensationTaskModel.next_retry_at.is_(None)) | (MinIOCompensationTaskModel.next_retry_at <= text('CURRENT_TIMESTAMP'))
-                ).order_by(
-                    MinIOCompensationTaskModel.priority.asc(),
-                    MinIOCompensationTaskModel.created_at.asc()
-                ).limit(10)
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
+                cursor = conn.execute("""
+                    SELECT * FROM compensation_tasks 
+                    WHERE status = ? AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                    ORDER BY priority ASC, created_at ASC
+                    LIMIT 10
+                """, (CompensationTaskStatus.PENDING.value, datetime.now().isoformat()))
                 
-                tasks = [CompensationTask.from_db_model(task) for task in cursor]
+                tasks = [CompensationTask.from_dict(dict(row)) for row in cursor.fetchall()]
             
             processed_count = 0
             for task in tasks:
@@ -285,7 +289,7 @@ class MinIOCompensationQueue:
         logger.info(f"🔄 开始处理补偿任务: {task.id} ({task.task_type.value})")
         
         # 更新任务状态为处理中
-        self.update_task_status(task.id, CompensationTaskStatus.PROCESSING)
+        self._update_task_status(task.id, CompensationTaskStatus.PROCESSING)
         
         try:
             # 获取任务处理器
@@ -298,7 +302,7 @@ class MinIOCompensationQueue:
             
             if success:
                 # 任务成功完成
-                self.update_task_status(task.id, CompensationTaskStatus.COMPLETED)
+                self._update_task_status(task.id, CompensationTaskStatus.COMPLETED)
                 with self._lock:
                     self._metrics["completed_tasks"] += 1
                     self._metrics["pending_tasks"] -= 1
@@ -334,7 +338,18 @@ class MinIOCompensationQueue:
             logger.warning(f"⚠️ 补偿任务将重试: {task.id} (第{task.retry_count}次，{delay_seconds}秒后)")
         
         # 更新数据库
-        self.update_task_status(task.id, task.status, error_message)
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                UPDATE compensation_tasks 
+                SET status = ?, retry_count = ?, next_retry_at = ?, 
+                    last_error = ?, updated_at = ?
+                WHERE id = ?
+            """, (
+                task.status.value, task.retry_count,
+                task.next_retry_at.isoformat() if task.next_retry_at else None,
+                task.last_error, task.updated_at.isoformat(), task.id
+            ))
+            conn.commit()
     
     def _process_upload_task(self, task: CompensationTask) -> bool:
         """处理上传任务"""
@@ -419,19 +434,36 @@ class MinIOCompensationQueue:
             logger.error(f"❌ 补偿下载任务失败: {str(e)}")
             return False
     
+    def _update_task_status(self, task_id: str, status: CompensationTaskStatus):
+        """更新任务状态"""
+        try:
+            with sqlite3.connect(self.db_path) as conn:
+                conn.execute("""
+                    UPDATE compensation_tasks 
+                    SET status = ?, updated_at = ?
+                    WHERE id = ?
+                """, (status.value, datetime.now().isoformat(), task_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"❌ 更新任务状态失败 {task_id}: {str(e)}")
+    
     def _cleanup_expired_tasks(self):
         """清理过期任务"""
         try:
             # 清理7天前的已完成任务
             cutoff_date = datetime.now() - timedelta(days=7)
             
-            with minio_db_manager.get_session() as session:
-                cursor = session.query(MinIOCompensationTaskModel).filter(
-                    MinIOCompensationTaskModel.status.in_([CompensationTaskStatus.COMPLETED.value, CompensationTaskStatus.FAILED.value]),
-                    MinIOCompensationTaskModel.updated_at < cutoff_date
-                ).delete()
-                deleted_count = cursor
-                session.commit()
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    DELETE FROM compensation_tasks 
+                    WHERE status IN (?, ?) AND updated_at < ?
+                """, (
+                    CompensationTaskStatus.COMPLETED.value,
+                    CompensationTaskStatus.FAILED.value,
+                    cutoff_date.isoformat()
+                ))
+                deleted_count = cursor.rowcount
+                conn.commit()
             
             if deleted_count > 0:
                 logger.info(f"🧹 清理了 {deleted_count} 个过期补偿任务")
@@ -443,11 +475,13 @@ class MinIOCompensationQueue:
         """获取补偿队列指标"""
         try:
             # 从数据库获取实时统计
-            with minio_db_manager.get_session() as session:
-                cursor = session.query(MinIOCompensationTaskModel.status, text('COUNT(*) as count')).group_by(
-                    MinIOCompensationTaskModel.status
-                ).all()
-                status_counts = {row[0]: row[1] for row in cursor}
+            with sqlite3.connect(self.db_path) as conn:
+                cursor = conn.execute("""
+                    SELECT status, COUNT(*) as count 
+                    FROM compensation_tasks 
+                    GROUP BY status
+                """)
+                status_counts = {row[0]: row[1] for row in cursor.fetchall()}
             
             return {
                 "queue_metrics": {
@@ -458,7 +492,7 @@ class MinIOCompensationQueue:
                     "total_tasks": sum(status_counts.values())
                 },
                 "service_metrics": self._metrics.copy(),
-                "database_path": "MySQL",
+                "database_path": self.db_path,
                 "service_status": "running" if self._running else "stopped"
             }
             
@@ -470,15 +504,24 @@ class MinIOCompensationQueue:
                      limit: int = 50) -> List[Dict[str, Any]]:
         """获取任务列表"""
         try:
-            with minio_db_manager.get_session() as session:
-                cursor = session.query(MinIOCompensationTaskModel).filter(
-                    MinIOCompensationTaskModel.status == status.value
-                ).order_by(
-                    MinIOCompensationTaskModel.priority.asc(),
-                    MinIOCompensationTaskModel.created_at.desc()
-                ).limit(limit).all()
+            with sqlite3.connect(self.db_path) as conn:
+                conn.row_factory = sqlite3.Row
                 
-                return [task.to_dict() for task in cursor]
+                if status:
+                    cursor = conn.execute("""
+                        SELECT * FROM compensation_tasks 
+                        WHERE status = ?
+                        ORDER BY priority ASC, created_at DESC
+                        LIMIT ?
+                    """, (status.value, limit))
+                else:
+                    cursor = conn.execute("""
+                        SELECT * FROM compensation_tasks 
+                        ORDER BY priority ASC, created_at DESC
+                        LIMIT ?
+                    """, (limit,))
+                
+                return [dict(row) for row in cursor.fetchall()]
                 
         except Exception as e:
             logger.error(f"❌ 获取任务列表失败: {str(e)}")

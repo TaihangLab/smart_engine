@@ -244,6 +244,35 @@ class Settings(BaseSettings):
     DEAD_LETTER_REQUEUE_DELAY: int = Field(default=60, description="死信重新入队延迟（秒）")
     DEAD_LETTER_RETENTION_HOURS: int = Field(default=168, description="死信保留时间（小时）- 7天")
 
+    # 🚀 数据库连接池高性能配置
+    # ==========================
+    DB_POOL_SIZE: int = Field(default=50, description="数据库连接池大小 - 高并发优化")
+    DB_MAX_OVERFLOW: int = Field(default=100, description="数据库连接池最大溢出连接数")
+    DB_POOL_TIMEOUT: int = Field(default=30, description="获取连接的超时时间（秒）")
+    DB_POOL_RECYCLE: int = Field(default=3600, description="连接回收时间（秒）- 1小时")
+    DB_POOL_PRE_PING: bool = Field(default=True, description="连接前预检查")
+    DB_ECHO: bool = Field(default=False, description="是否输出SQL调试信息")
+    DB_AUTOCOMMIT: bool = Field(default=False, description="自动提交事务")
+    DB_AUTOFLUSH: bool = Field(default=False, description="自动刷新会话")
+
+    # 🧵 线程池高性能配置  
+    # ===================
+    AI_TASK_EXECUTOR_POOL_SIZE: int = Field(default=20, description="AI任务执行线程池大小")
+    ALERT_GENERATION_POOL_SIZE: int = Field(default=15, description="预警生成线程池大小")
+    MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=10, description="消息处理线程池大小")
+    IMAGE_PROCESSING_POOL_SIZE: int = Field(default=8, description="图像处理线程池大小")
+
+    # 🚀 RabbitMQ连接池优化配置
+    # =========================
+    RABBITMQ_CONNECTION_POOL_SIZE: int = Field(default=20, description="RabbitMQ连接池大小")
+    RABBITMQ_CHANNEL_POOL_SIZE: int = Field(default=50, description="RabbitMQ通道池大小")
+    RABBITMQ_CONNECTION_HEARTBEAT: int = Field(default=600, description="心跳间隔（秒）")
+    RABBITMQ_CONNECTION_BLOCKED_TIMEOUT: int = Field(default=300, description="连接阻塞超时（秒）")
+    RABBITMQ_PUBLISH_CONFIRM: bool = Field(default=True, description="启用发布确认机制")
+    RABBITMQ_PREFETCH_COUNT: int = Field(default=20, description="消费者预取消息数量")
+    RABBITMQ_BATCH_SIZE: int = Field(default=10, description="批量处理消息数量")
+    RABBITMQ_BATCH_TIMEOUT: float = Field(default=2.0, description="批量处理超时时间（秒）")
+
     # 🎪 通知渠道配置
     # ==============
     NOTIFICATION_CHANNEL_PRIORITY: List[str] = Field(
