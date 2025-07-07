@@ -7,7 +7,7 @@ from app.db.session import get_db
 from app.models.alert import Alert
 from app.models.ai_task import AITask
 from app.models.llm_skill import LLMSkillClass
-from app.services.llm_service import LLMService, LLMServiceResult
+from app.services.llm_service import llm_service, LLMServiceResult
 from app.services.minio_client import minio_client
 from app.core.config import settings
 
@@ -22,7 +22,6 @@ class AlertReviewService:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
         self.review_queue = asyncio.Queue()
-        self.llm_service = LLMService()
         self.is_running = False
     
     async def start(self):
@@ -388,7 +387,7 @@ class AlertReviewService:
         """
         try:
             # 调用LLM服务进行复判
-            result = self.llm_service.call_llm(
+            result = llm_service.call_llm(
                 skill_type=llm_skill_class.type.value,
                 system_prompt=llm_skill_class.system_prompt or "你是专业的安全预警复判专家。",
                 user_prompt=prompt,
@@ -405,7 +404,7 @@ class AlertReviewService:
             self.logger.error(f"LLM复判调用失败: {str(e)}")
             # 尝试备用配置
             try:
-                result = self.llm_service.call_llm(
+                result = llm_service.call_llm(
                     skill_type=llm_skill_class.type.value,
                     system_prompt=llm_skill_class.system_prompt or "你是专业的安全预警复判专家。",
                     user_prompt=prompt,
