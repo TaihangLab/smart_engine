@@ -15,7 +15,7 @@ from typing import Dict, Any, Type, List, Optional, Union, Tuple
 from sqlalchemy.orm import Session
 
 from app.skills.skill_base import BaseSkill
-from app.services.llm_service import LLMService, LLMServiceResult
+from app.services.llm_service import llm_service, LLMServiceResult
 from app.db.skill_class_dao import SkillClassDAO
 from app.db.model_dao import ModelDAO
 from app.models.skill import SkillClass
@@ -203,7 +203,6 @@ class SkillFactory:
                 response_format = llm_skill_class.config.get("response_format")
             
             # 调用LLM服务（使用后端管理的配置）
-            llm_service = LLMService()
             result = llm_service.call_llm(
                 skill_type=llm_skill_class.type.value,
                 system_prompt=llm_skill_class.system_prompt or "",
@@ -223,7 +222,6 @@ class SkillFactory:
             # 尝试使用备用配置
             try:
                 logger.info(f"尝试使用备用LLM配置调用技能: {llm_skill_class.name}")
-                llm_service = LLMService()
                 result = llm_service.call_llm(
                     skill_type=llm_skill_class.type.value,
                     system_prompt=llm_skill_class.system_prompt or "",
@@ -253,7 +251,6 @@ class SkillFactory:
         Returns:
             (是否有效, 错误信息)
         """
-        llm_service = LLMService()
         return llm_service.validate_skill_config(skill_type)
     
     def get_llm_skill_types(self) -> List[str]:

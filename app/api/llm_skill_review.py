@@ -13,7 +13,7 @@ import logging
 
 from app.db.session import get_db
 from app.models.review_llm_skill import ReviewSkillClass, ReviewSkillCreate, ReviewSkillUpdate
-from app.services.llm_service import LLMService
+from app.services.llm_service import llm_service
 from app.core.config import settings
 
 # 导入智能配置函数
@@ -312,26 +312,16 @@ async def preview_test_review_skill(
                 "timeout": settings.LLM_TIMEOUT
             }
         
-            # 调用LLM服务进行测试
-            llm_service = LLMService()
-            
-            # 创建临时LLM客户端
-            llm_client = llm_service.create_llm_client(
-                provider=settings.PRIMARY_LLM_PROVIDER,
-                model_name=settings.REVIEW_LLM_MODEL,
-                api_config=test_api_config
-            )
-            
-            # 创建多模态消息
-            messages = llm_service.create_multimodal_messages(
+            # 使用现代化LLM服务进行测试
+            # 使用多模态链进行测试
+            chain = llm_service.create_multimodal_chain(
                 system_prompt=system_prompt,
-                user_prompt=user_prompt_clean,
-                image_data=frame
+                temperature=smart_config["temperature"],
+                max_tokens=smart_config["max_tokens"]
             )
             
-            # 直接调用LLM客户端
-            response = llm_client.invoke(messages)
-            response_text = response.content
+            # 调用链
+            response_text = await llm_service.ainvoke_chain(chain, {"text": user_prompt_clean, "image": frame})
             
             # 解析响应并提取True/False判断
             analysis_result, review_result = _parse_review_response(response_text)

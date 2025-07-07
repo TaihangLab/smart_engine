@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.db.skill_class_dao import SkillClassDAO
 from app.skills.skill_factory import skill_factory
 from app.skills.skill_base import BaseSkill
-from app.services.llm_service import LLMService, LLMServiceResult
+from app.services.llm_service import llm_service, LLMServiceResult
 from app.models.llm_skill import LLMSkillClass
 from sqlalchemy import and_
 

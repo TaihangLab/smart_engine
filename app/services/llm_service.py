@@ -1,23 +1,36 @@
 """
-LLM服务模块
-专门处理多模态大模型调用
+现代化LLM服务模块 - 基于LangChain 0.3.x
+使用LCEL、Runnables和现代化最佳实践
 """
 import logging
 import base64
 import json
-from typing import Dict, Any, Optional, List, Union
+from typing import Dict, Any, Optional, List, Union, AsyncGenerator, Callable
 from io import BytesIO
 from PIL import Image
 import numpy as np
 
-from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_core.messages.base import BaseMessage
-from langchain.schema import LLMResult
-from langchain_openai import ChatOpenAI
-# from langchain_anthropic import ChatAnthropic
-# from langchain_google_genai import ChatGoogleGenerativeAI
+# LangChain Core
+from langchain_core.messages import (
+    HumanMessage, SystemMessage, AIMessage, BaseMessage
+)
+from langchain_core.runnables import (
+    Runnable, RunnablePassthrough, RunnableParallel, RunnableLambda,
+    RunnableConfig, ConfigurableField
+)
+from langchain_core.runnables.history import RunnableWithMessageHistory
+from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
+from langchain_core.callbacks import AsyncCallbackHandler, StdOutCallbackHandler
+from langchain_core.runnables.utils import Input, Output
+from langchain_core.chat_history import BaseChatMessageHistory, InMemoryChatMessageHistory
 
+# LangChain Integrations
+from langchain_openai import ChatOpenAI
+
+# 项目模块
 from app.core.config import settings
+from app.services.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -44,29 +57,141 @@ class LLMServiceResult:
         }
 
 
+class RedisMemoryStore:
+    """基于Redis的消息历史存储，与RunnableWithMessageHistory兼容"""
+    
+    def __init__(self, redis_client, ttl: int = 7 * 24 * 3600):
+        self.redis_client = redis_client
+        self.ttl = ttl
+        self.prefix = "llm_chat_history:"
+    
+    def get_messages(self, session_id: str) -> List[BaseMessage]:
+        """获取会话消息历史"""
+        try:
+            key = f"{self.prefix}{session_id}"
+            messages_data = self.redis_client.lrange(key, 0, -1)
+            
+            messages = []
+            for message_json in messages_data:
+                try:
+                    message_dict = json.loads(message_json)
+                    message_type = message_dict.get('type', 'human')
+                    content = message_dict.get('content', '')
+                    
+                    if message_type == 'human':
+                        messages.append(HumanMessage(content=content))
+                    elif message_type == 'ai':
+                        messages.append(AIMessage(content=content))
+                    elif message_type == 'system':
+                        messages.append(SystemMessage(content=content))
+                except (json.JSONDecodeError, KeyError) as e:
+                    logger.warning(f"解析消息失败: {e}")
+                    continue
+            
+            return messages
+        except Exception as e:
+            logger.error(f"获取消息历史失败: {e}")
+            return []
+    
+    def add_message(self, session_id: str, message: BaseMessage):
+        """添加消息到历史"""
+        try:
+            key = f"{self.prefix}{session_id}"
+            
+            if isinstance(message, HumanMessage):
+                message_type = 'human'
+            elif isinstance(message, AIMessage):
+                message_type = 'ai'
+            elif isinstance(message, SystemMessage):
+                message_type = 'system'
+            else:
+                message_type = 'unknown'
+            
+            message_data = {
+                'type': message_type,
+                'content': message.content
+            }
+            
+            message_json = json.dumps(message_data, ensure_ascii=False)
+            
+            # 添加到列表末尾
+            self.redis_client.rpush(key, message_json)
+            
+            # 设置过期时间
+            self.redis_client.expire(key, self.ttl)
+            
+            # 限制会话长度，保留最近100条消息
+            self.redis_client.ltrim(key, -100, -1)
+            
+        except Exception as e:
+            logger.error(f"保存消息失败: {e}")
+    
+    def clear(self, session_id: str):
+        """清除会话历史"""
+        try:
+            key = f"{self.prefix}{session_id}"
+            self.redis_client.delete(key)
+        except Exception as e:
+            logger.error(f"清除会话历史失败: {e}")
+
+
 class LLMService:
     """
-    LLM服务类
-    处理多模态大模型调用，支持文本+图像分析
+    现代化LLM服务
+    使用LangChain 0.3.x的最新特性：LCEL、Runnables、现代化流式响应
     """
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
+        self.memory_store = RedisMemoryStore(redis_client)
+        self._chains_cache = {}
+        
+        # 配置可调节的运行时参数
+        self.configurable_llm = self._create_configurable_llm()
+        
+    def _create_configurable_llm(self) -> Runnable:
+        """创建可配置的LLM实例"""
+        try:
+            # 创建基础配置
+            base_config = self.get_llm_config()
+            
+            # 创建可配置的ChatOpenAI实例
+            llm = ChatOpenAI(
+                model=base_config["model_name"],
+                api_key=base_config["api_config"]["api_key"],
+                base_url=base_config["api_config"]["base_url"],
+                temperature=base_config["api_config"]["temperature"],
+                max_tokens=base_config["api_config"]["max_tokens"],
+                timeout=base_config["api_config"]["timeout"]
+            ).configurable_fields(
+                # 运行时可配置的字段
+                temperature=ConfigurableField(
+                    id="temperature",
+                    name="Temperature",
+                    description="The temperature of the model"
+                ),
+                max_tokens=ConfigurableField(
+                    id="max_tokens", 
+                    name="Max Tokens",
+                    description="The maximum number of tokens to generate"
+                ),
+                model_name=ConfigurableField(
+                    id="model_name",
+                    name="Model Name", 
+                    description="The model to use"
+                )
+            )
+            
+            return llm
+            
+        except Exception as e:
+            self.logger.error(f"创建可配置LLM失败: {str(e)}")
+            raise
     
     def get_llm_config(self, skill_type: str = None, use_backup: bool = False) -> Dict[str, Any]:
-        """
-        根据技能类型自动选择合适的LLM配置（后端管理）
-        
-        Args:
-            skill_type: 技能类型，用于选择专用模型
-            use_backup: 是否使用备用配置
-            
-        Returns:
-            LLM配置字典
-        """
+        """获取LLM配置"""
         try:
             if use_backup and settings.BACKUP_LLM_BASE_URL:
-                # 使用备用配置
                 return {
                     "provider": settings.BACKUP_LLM_PROVIDER,
                     "model_name": settings.BACKUP_LLM_MODEL or settings.PRIMARY_LLM_MODEL,
@@ -89,7 +214,6 @@ class LLMService:
                 elif "chat" in skill_type.lower():
                     model_name = settings.CHAT_LLM_MODEL
             
-            # 使用主要配置
             return {
                 "provider": settings.PRIMARY_LLM_PROVIDER,
                 "model_name": model_name,
@@ -104,7 +228,6 @@ class LLMService:
             
         except Exception as e:
             self.logger.error(f"获取LLM配置失败: {str(e)}")
-            # 返回默认配置
             return {
                 "provider": "openai",
                 "model_name": "gpt-4o",
@@ -117,117 +240,35 @@ class LLMService:
                 }
             }
     
-    def create_llm_client(self, provider: str, model_name: str, api_config: Dict[str, Any]):
-        """
-        根据提供商创建LLM客户端
-        
-        Args:
-            provider: LLM提供商 (openai, anthropic, google, ollama, etc.)
-            model_name: 模型名称
-            api_config: API配置
-            
-        Returns:
-            LLM客户端实例
-        """
-        try:
-            if provider in ["openai", "ollama"]:
-                # Ollama使用OpenAI兼容的API
-                api_key = api_config.get("api_key", "")
-                if provider == "ollama":
-                    # Ollama不需要真实的API key，但LangChain需要一个非空值
-                    api_key = api_key or "ollama"
-                
-                base_url = api_config.get("base_url", "https://api.openai.com/v1")
-                if provider == "ollama" and not base_url.endswith("/v1"):
-                    # 确保Ollama的URL以/v1结尾
-                    base_url = base_url.rstrip("/") + "/v1"
-                
-                # 构建ChatOpenAI参数
-                llm_params = {
-                    "model": model_name,
-                    "api_key": api_key,
-                    "base_url": base_url,
-                    "temperature": api_config.get("temperature", 0.1),
-                    "max_tokens": api_config.get("max_tokens", 1000),
-                    "timeout": api_config.get("timeout", 60)
-                }
-                
-                # 添加top_p参数（如果配置中有）
-                if "top_p" in api_config:
-                    llm_params["top_p"] = api_config["top_p"]
-                
-                return ChatOpenAI(**llm_params)
-            # elif provider == "anthropic":
-            #     return ChatAnthropic(
-            #         model=model_name,
-            #         api_key=api_config.get("api_key"),
-            #         temperature=api_config.get("temperature", 0.1),
-            #         max_tokens=api_config.get("max_tokens", 1000)
-            #     )
-            # elif provider == "google":
-            #     return ChatGoogleGenerativeAI(
-            #         model=model_name,
-            #         google_api_key=api_config.get("api_key"),
-            #         temperature=api_config.get("temperature", 0.1),
-            #         max_output_tokens=api_config.get("max_tokens", 1000)
-            #     )
-            # elif provider == "azure":
-            #     return ChatOpenAI(
-            #         model=model_name,
-            #         api_key=api_config.get("api_key"),
-            #         azure_endpoint=api_config.get("azure_endpoint"),
-            #         api_version=api_config.get("api_version", "2024-02-01"),
-            #         temperature=api_config.get("temperature", 0.1),
-            #         max_tokens=api_config.get("max_tokens", 1000)
-            #     )
-            else:
-                raise ValueError(f"不支持的LLM提供商: {provider}")
-                
-        except Exception as e:
-            self.logger.error(f"创建LLM客户端失败: {str(e)}")
-            raise
-    
     def encode_image_to_base64(self, image: Union[np.ndarray, Image.Image, bytes]) -> str:
-        """
-        将图像编码为base64字符串
-        
-        Args:
-            image: 图像数据 (numpy数组、PIL图像或字节数据)
-            
-        Returns:
-            base64编码的图像字符串
-        """
+        """将图像编码为base64字符串"""
         try:
             if isinstance(image, np.ndarray):
-                # numpy数组转PIL图像
                 if image.dtype != np.uint8:
-                    # 检查数组值范围来决定如何转换
-                    max_val = np.max(image)
+                    # 使用.item()确保获取标量值，避免数组布尔运算错误
+                    max_val = np.max(image).item()
+                    
                     if max_val <= 1.0:
                         image = (image * 255).astype(np.uint8)
                     else:
                         image = image.astype(np.uint8)
                 pil_image = Image.fromarray(image)
                 
-                # 转换为字节
                 buffer = BytesIO()
                 pil_image.save(buffer, format='JPEG', quality=85)
                 image_bytes = buffer.getvalue()
                 
             elif isinstance(image, Image.Image):
-                # PIL图像转字节
                 buffer = BytesIO()
                 image.save(buffer, format='JPEG', quality=85)
                 image_bytes = buffer.getvalue()
                 
             elif isinstance(image, bytes):
-                # 已经是字节数据
                 image_bytes = image
                 
             else:
                 raise ValueError(f"不支持的图像类型: {type(image)}")
             
-            # 编码为base64
             base64_string = base64.b64encode(image_bytes).decode('utf-8')
             return f"data:image/jpeg;base64,{base64_string}"
             
@@ -235,190 +276,350 @@ class LLMService:
             self.logger.error(f"图像编码失败: {str(e)}")
             raise
     
-    def create_multimodal_messages(self, system_prompt: str, user_prompt: str, 
-                                 image_data: Optional[Union[str, bytes, np.ndarray]] = None) -> List[BaseMessage]:
-        """
-        创建多模态消息
+    def create_simple_chain(self, 
+                           system_prompt: str = "",
+                           output_parser: Optional[Any] = None,
+                           **config) -> Runnable:
+        """创建简单的LCEL链"""
         
-        Args:
-            system_prompt: 系统提示词
-            user_prompt: 用户提示词
-            image_data: 图像数据 (可选)
-            
-        Returns:
-            消息列表
-        """
-        messages = []
-        
-        # 添加系统消息
+        # 创建提示模板
         if system_prompt:
-            messages.append(SystemMessage(content=system_prompt))
+            prompt = ChatPromptTemplate.from_messages([
+                ("system", system_prompt),
+                ("human", "{input}")
+            ])
+        else:
+            prompt = ChatPromptTemplate.from_messages([
+                ("human", "{input}")
+            ])
         
-        # 创建用户消息内容
-        user_content = []
+        # 配置LLM
+        llm_config = {}
+        if "temperature" in config:
+            llm_config["temperature"] = config["temperature"]
+        if "max_tokens" in config:
+            llm_config["max_tokens"] = config["max_tokens"]
+        if "model_name" in config:
+            llm_config["model_name"] = config["model_name"]
         
-        # 添加文本内容
-        if user_prompt:
-            user_content.append({
-                "type": "text",
-                "text": user_prompt
-            })
+        # 选择输出解析器
+        parser = output_parser or StrOutputParser()
         
-        # 添加图像内容
-        if image_data is not None:
+        # 构建LCEL链
+        chain = (
+            prompt 
+            | self.configurable_llm.with_config(configurable=llm_config)
+            | parser
+        )
+        
+        return chain
+    
+    def create_multimodal_chain(self,
+                               system_prompt: str = "",
+                               **config) -> Runnable:
+        """创建多模态LCEL链"""
+        
+        def format_multimodal_input(inputs: Dict) -> List[BaseMessage]:
+            """格式化多模态输入"""
             try:
-                # 检查图像数据类型
-                self.logger.debug(f"处理图像数据，类型: {type(image_data)}")
+                messages = []
                 
-                if isinstance(image_data, str) and image_data.startswith("data:image"):
-                    # 已经是base64格式
-                    image_url = image_data
-                    self.logger.debug("使用已有的base64图像数据")
-                else:
-                    # 需要编码
-                    self.logger.debug("开始编码图像数据为base64")
-                    image_url = self.encode_image_to_base64(image_data)
-                    self.logger.debug("图像编码完成")
+                if system_prompt:
+                    messages.append(SystemMessage(content=system_prompt))
                 
-                user_content.append({
-                    "type": "image_url",
-                    "image_url": {"url": image_url}
-                })
-                self.logger.debug("图像内容添加到消息中")
+                # 构建用户消息内容
+                user_content = []
+                
+                if inputs.get("text"):
+                    user_content.append({
+                        "type": "text",
+                        "text": inputs["text"]
+                    })
+                
+                if inputs.get("image") is not None:
+                    try:
+                        image_data = inputs["image"]
+                        self.logger.debug(f"处理图像数据，类型: {type(image_data)}")
+                        
+                        # 检查是否是字符串格式的base64数据
+                        if isinstance(image_data, str) and image_data.startswith("data:image"):
+                            image_url = image_data
+                            self.logger.debug("使用现有的base64图像数据")
+                        else:
+                            # 编码为base64
+                            self.logger.debug("开始编码图像为base64")
+                            image_url = self.encode_image_to_base64(image_data)
+                            self.logger.debug("图像编码完成")
+                        
+                        user_content.append({
+                            "type": "image_url",
+                            "image_url": {"url": image_url}
+                        })
+                        
+                    except Exception as e:
+                        self.logger.error(f"处理图像失败: {e}", exc_info=True)
+                        # 如果图像处理失败，只使用文本
+                        pass
+                
+                if user_content:
+                    messages.append(HumanMessage(content=user_content))
+                
+                self.logger.debug(f"多模态输入格式化完成，消息数量: {len(messages)}")
+                return messages
                 
             except Exception as e:
-                self.logger.error(f"处理图像数据失败: {str(e)}")
-                import traceback
-                self.logger.error(f"错误堆栈: {traceback.format_exc()}")
-                raise  # 重新抛出异常以便调试
+                self.logger.error(f"格式化多模态输入失败: {e}", exc_info=True)
+                raise
         
-        # 添加用户消息
-        if user_content:
-            messages.append(HumanMessage(content=user_content))
+        # 配置LLM
+        llm_config = {}
+        if "temperature" in config:
+            llm_config["temperature"] = config["temperature"]
+        if "max_tokens" in config:
+            llm_config["max_tokens"] = config["max_tokens"]
         
-        return messages
+        # 构建LCEL链
+        chain = (
+            RunnableLambda(format_multimodal_input)
+            | self.configurable_llm.with_config(configurable=llm_config)
+            | StrOutputParser()
+        )
+        
+        return chain
     
-    def parse_llm_response(self, response_text: str, expected_format: Optional[Dict] = None) -> Dict[str, Any]:
-        """
-        解析LLM响应
+    def create_conversational_chain(self,
+                                  system_prompt: str = "",
+                                  session_id: str = "default",
+                                  **config) -> Runnable:
+        """创建带历史记录的对话链"""
         
-        Args:
-            response_text: LLM响应文本
-            expected_format: 期望的响应格式
-            
-        Returns:
-            解析后的结果字典
-        """
+        # 创建提示模板，包含历史记录占位符
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt) if system_prompt else None,
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{input}")
+        ]).partial() if system_prompt else ChatPromptTemplate.from_messages([
+            MessagesPlaceholder(variable_name="history"),
+            ("human", "{input}")
+        ])
+        
+        # 配置LLM
+        llm_config = {}
+        if "temperature" in config:
+            llm_config["temperature"] = config["temperature"]
+        if "max_tokens" in config:
+            llm_config["max_tokens"] = config["max_tokens"]
+        
+        # 基础链
+        base_chain = (
+            prompt 
+            | self.configurable_llm.with_config(configurable=llm_config)
+            | StrOutputParser()
+        )
+        
+        # 包装历史记录管理
+        def get_session_history(session_id: str) -> BaseChatMessageHistory:
+            """获取会话历史"""
+            history = InMemoryChatMessageHistory()
+            # 从Redis加载历史消息
+            messages = self.memory_store.get_messages(session_id)
+            for msg in messages:
+                history.add_message(msg)
+            return history
+        
+        # 使用RunnableWithMessageHistory包装
+        conversational_chain = RunnableWithMessageHistory(
+            base_chain,
+            get_session_history,
+            input_messages_key="input",
+            history_messages_key="history"
+        )
+        
+        return conversational_chain
+    
+    def create_parallel_chain(self, **chains) -> Runnable:
+        """创建并行执行的链"""
+        return RunnableParallel(chains)
+    
+    async def astream_chain(self, 
+                           chain: Runnable, 
+                           inputs: Dict[str, Any],
+                           config: Optional[RunnableConfig] = None) -> AsyncGenerator[str, None]:
+        """异步流式执行链"""
         try:
-            # 尝试解析JSON响应
-            if expected_format and expected_format.get("type") == "json_object":
-                try:
-                    return json.loads(response_text)
-                except json.JSONDecodeError:
-                    # 如果不是有效JSON，尝试提取JSON部分
-                    import re
-                    json_match = re.search(r'\{.*\}', response_text, re.DOTALL)
-                    if json_match:
-                        return json.loads(json_match.group())
-                    else:
-                        # 返回文本格式
-                        return {"analysis": response_text}
-            else:
-                # 直接返回文本
-                return {"analysis": response_text}
+            async for chunk in chain.astream(inputs, config=config):
+                if isinstance(chunk, str):
+                    yield chunk
+                elif hasattr(chunk, 'content'):
+                    yield chunk.content
+                else:
+                    yield str(chunk)
+                    
+        except Exception as e:
+            self.logger.error(f"流式执行失败: {e}")
+            yield f"错误: {str(e)}"
+    
+    async def ainvoke_chain(self,
+                           chain: Runnable,
+                           inputs: Dict[str, Any],
+                           config: Optional[RunnableConfig] = None) -> str:
+        """异步执行链"""
+        try:
+            self.logger.debug(f"开始异步执行链，输入类型: {type(inputs)}")
+            
+            # 检查输入数据的类型，特别是图像数据
+            if "image" in inputs:
+                image_data = inputs["image"]
+                self.logger.debug(f"输入包含图像数据，类型: {type(image_data)}")
                 
-        except Exception as e:
-            self.logger.warning(f"解析LLM响应失败: {str(e)}")
-            return {"analysis": response_text, "parse_error": str(e)}
-    
-    def extract_confidence(self, analysis_result: Dict[str, Any]) -> float:
-        """
-        从分析结果中提取置信度
-        
-        Args:
-            analysis_result: 分析结果字典
+                # 确保图像数据不是numpy数组的布尔值
+                if isinstance(image_data, np.ndarray):
+                    self.logger.debug(f"图像数据是numpy数组，形状: {image_data.shape}, 数据类型: {image_data.dtype}")
+                    # 检查数组是否包含非数值数据
+                    if image_data.size == 0:
+                        self.logger.warning("图像数据为空数组")
+                        # 移除空的图像数据
+                        inputs = {k: v for k, v in inputs.items() if k != "image"}
+                        
+            self.logger.debug("开始调用chain.ainvoke")
+            result = await chain.ainvoke(inputs, config=config)
+            self.logger.debug(f"链执行完成，结果类型: {type(result)}")
             
-        Returns:
-            置信度 (0.0-1.0)
+            return result if isinstance(result, str) else str(result)
+        except Exception as e:
+            self.logger.error(f"异步执行失败: {e}", exc_info=True)
+            # 记录更多调试信息
+            self.logger.error(f"输入数据: {inputs}")
+            if config:
+                self.logger.error(f"配置: {config}")
+            raise
+    
+    async def acall_llm(self, skill_type: str = None, system_prompt: str = "", user_prompt: str = "", 
+                       user_prompt_template: str = "", response_format: Optional[Dict] = None,
+                       image_data: Optional[Union[str, bytes, np.ndarray]] = None,
+                       context: Optional[Dict[str, Any]] = None, use_backup: bool = False) -> LLMServiceResult:
+        """
+        异步LLM调用方法
         """
         try:
-            # 尝试多种可能的置信度字段名
-            confidence_fields = ["confidence", "score", "certainty", "probability"]
+            # 处理提示词模板
+            final_prompt = user_prompt
+            if user_prompt_template and context:
+                try:
+                    final_prompt = user_prompt_template.format(**context)
+                except KeyError as e:
+                    self.logger.warning(f"格式化提示词时缺少参数 {e}，使用原始提示词")
+                    final_prompt = user_prompt_template
             
-            for field in confidence_fields:
-                if field in analysis_result:
-                    value = analysis_result[field]
-                    if isinstance(value, (int, float)):
-                        # 如果值大于1，假设是百分比形式
-                        if float(value) > 1:
-                            return min(float(value) / 100.0, 1.0)
-                        else:
-                            return min(float(value), 1.0)
+            # 获取配置
+            llm_config = self.get_llm_config(skill_type, use_backup)
             
-            # 如果没有找到置信度字段，返回默认值
-            return 0.7
+            config = {
+                "temperature": llm_config["api_config"]["temperature"],
+                "max_tokens": llm_config["api_config"]["max_tokens"]
+            }
+            
+            # 选择链类型
+            if image_data is not None:
+                # 多模态链
+                chain = self.create_multimodal_chain(system_prompt=system_prompt, **config)
+                inputs = {"text": final_prompt, "image": image_data}
+            else:
+                # 简单文本链
+                output_parser = JsonOutputParser() if response_format and response_format.get("type") == "json_object" else StrOutputParser()
+                chain = self.create_simple_chain(system_prompt=system_prompt, output_parser=output_parser, **config)
+                inputs = {"input": final_prompt}
+            
+            # 异步执行
+            response = await chain.ainvoke(inputs)
+            
+            # 解析响应
+            if isinstance(response, dict):
+                analysis_result = response
+                response_text = json.dumps(response, ensure_ascii=False)
+            else:
+                response_text = str(response)
+                if response_format and response_format.get("type") == "json_object":
+                    try:
+                        analysis_result = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        analysis_result = {"analysis": response_text}
+                else:
+                    analysis_result = {"analysis": response_text}
+            
+            # 提取置信度
+            confidence = self.extract_confidence(analysis_result)
+            
+            self.logger.info(f"异步LLM调用成功，置信度: {confidence}")
+            
+            return LLMServiceResult(
+                success=True,
+                response=response_text,
+                confidence=confidence,
+                analysis_result=analysis_result
+            )
             
         except Exception as e:
-            self.logger.warning(f"提取置信度失败: {str(e)}")
-            return 0.5
+            error_msg = f"异步LLM调用失败: {str(e)}"
+            self.logger.error(error_msg)
+            return LLMServiceResult(
+                success=False,
+                error_message=error_msg
+            )
     
     def call_llm(self, skill_type: str = None, system_prompt: str = "", user_prompt: str = "", 
                  user_prompt_template: str = "", response_format: Optional[Dict] = None,
                  image_data: Optional[Union[str, bytes, np.ndarray]] = None,
                  context: Optional[Dict[str, Any]] = None, use_backup: bool = False) -> LLMServiceResult:
         """
-        调用LLM进行分析（后端自动管理大模型配置）
-        
-        Args:
-            skill_type: 技能类型，用于自动选择合适的模型
-            system_prompt: 系统提示词
-            user_prompt: 用户提示词
-            user_prompt_template: 用户提示词模板
-            response_format: 期望的响应格式
-            image_data: 图像数据 (可选)
-            context: 上下文信息 (可选)
-            use_backup: 是否使用备用配置
-            
-        Returns:
-            LLM调用结果
+        LLM调用方法
         """
         try:
-            # 自动获取LLM配置（后端管理）
-            llm_config = self.get_llm_config(skill_type, use_backup)
-            
-            provider = llm_config["provider"]
-            model_name = llm_config["model_name"]
-            api_config = llm_config["api_config"]
-            
-            # 创建LLM客户端
-            llm_client = self.create_llm_client(provider, model_name, api_config)
-            
-            # 处理用户提示词模板
+            # 处理提示词模板
             final_prompt = user_prompt
-            if user_prompt_template:
-                if context:
-                    try:
-                        final_prompt = user_prompt_template.format(**context)
-                    except KeyError as e:
-                        self.logger.warning(f"格式化提示词时缺少参数 {e}，使用原始提示词")
-                        final_prompt = user_prompt_template
-                else:
+            if user_prompt_template and context:
+                try:
+                    final_prompt = user_prompt_template.format(**context)
+                except KeyError as e:
+                    self.logger.warning(f"格式化提示词时缺少参数 {e}，使用原始提示词")
                     final_prompt = user_prompt_template
             
-            # 创建多模态消息
-            messages = self.create_multimodal_messages(
-                system_prompt=system_prompt,
-                user_prompt=final_prompt,
-                image_data=image_data
-            )
+            # 获取配置
+            llm_config = self.get_llm_config(skill_type, use_backup)
             
-            # 调用LLM
-            self.logger.info(f"调用LLM: {provider}/{model_name}")
-            response = llm_client.invoke(messages)
-            response_text = response.content
+            config = {
+                "temperature": llm_config["api_config"]["temperature"],
+                "max_tokens": llm_config["api_config"]["max_tokens"]
+            }
+            
+            # 选择链类型
+            if image_data is not None:
+                # 多模态链
+                chain = self.create_multimodal_chain(system_prompt=system_prompt, **config)
+                inputs = {"text": final_prompt, "image": image_data}
+            else:
+                # 简单文本链
+                output_parser = JsonOutputParser() if response_format and response_format.get("type") == "json_object" else StrOutputParser()
+                chain = self.create_simple_chain(system_prompt=system_prompt, output_parser=output_parser, **config)
+                inputs = {"input": final_prompt}
+            
+            # 同步执行（直接创建新的事件循环）
+            import asyncio
+            response = asyncio.run(chain.ainvoke(inputs))
             
             # 解析响应
-            analysis_result = self.parse_llm_response(response_text, response_format)
+            if isinstance(response, dict):
+                analysis_result = response
+                response_text = json.dumps(response, ensure_ascii=False)
+            else:
+                response_text = str(response)
+                if response_format and response_format.get("type") == "json_object":
+                    try:
+                        analysis_result = json.loads(response_text)
+                    except json.JSONDecodeError:
+                        analysis_result = {"analysis": response_text}
+                else:
+                    analysis_result = {"analysis": response_text}
             
             # 提取置信度
             confidence = self.extract_confidence(analysis_result)
@@ -440,21 +641,37 @@ class LLMService:
                 error_message=error_msg
             )
     
-    def validate_skill_config(self, skill_type: str = None) -> tuple[bool, Optional[str]]:
-        """
-        验证LLM配置是否有效（检查后端配置）
-        
-        Args:
-            skill_type: 技能类型
-            
-        Returns:
-            (是否有效, 错误信息)
-        """
+    def extract_confidence(self, analysis_result: Dict[str, Any]) -> float:
+        """从分析结果中提取置信度"""
         try:
-            # 获取当前配置
+            confidence_fields = ["confidence", "score", "certainty", "probability"]
+            
+            for field in confidence_fields:
+                if field in analysis_result:
+                    value = analysis_result[field]
+                    if isinstance(value, (int, float)):
+                        if float(value) > 1:
+                            return min(float(value) / 100.0, 1.0)
+                        else:
+                            return min(float(value), 1.0)
+            
+            return 0.7
+            
+        except Exception as e:
+            self.logger.warning(f"提取置信度失败: {str(e)}")
+            return 0.5
+    
+
+    
+
+    
+
+    
+    def validate_skill_config(self, skill_type: str = None) -> tuple[bool, Optional[str]]:
+        """验证LLM配置是否有效"""
+        try:
             llm_config = self.get_llm_config(skill_type)
             
-            # 检查主要配置
             if not llm_config.get("provider"):
                 return False, "缺少LLM提供商配置"
             
@@ -465,7 +682,6 @@ class LLMService:
             if not api_config.get("base_url"):
                 return False, "缺少LLM服务器地址配置"
             
-            # 检查提供商是否支持
             supported_providers = ["openai", "anthropic", "google", "azure", "ollama", "custom"]
             if llm_config["provider"] not in supported_providers:
                 return False, f"不支持的提供商: {llm_config['provider']}"

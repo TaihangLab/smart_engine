@@ -138,22 +138,42 @@ def _build_llm_system_prompt(base_system_prompt: str, output_parameters: Optiona
         # 添加到参数描述
         param_descriptions.append(f"- {param_name} ({param_type}): {param_desc}")
     
+    # 检测模型类型并调整提示词策略
+    from app.core.config import settings
+    model_name = getattr(settings, 'PRIMARY_LLM_MODEL', 'llava:latest').lower()
+    
+    # 根据模型类型调整提示词强度
+    if 'llava' in model_name or 'multimodal' in model_name:
+        # 多模态模型需要更强的指令
+        format_emphasis = "【🔥 重要】你是一个严格遵循指令的AI助手！"
+        instruction_prefix = "【🎯 必须严格执行】"
+    else:
+        # 文本模型使用标准指令
+        format_emphasis = "【重要】"
+        instruction_prefix = "【严格要求】"
+    
     # 构建增强的系统提示词
     enhanced_system_prompt = f"""{base_system_prompt}
 
-请严格按照以下JSON格式输出结果：
+{format_emphasis}你必须严格按照以下JSON格式输出结果，不能更改任何字段名称：
+
 ```json
 {json.dumps(json_schema, ensure_ascii=False, indent=2)}
 ```
 
-输出参数说明：
+输出参数详细说明：
 {chr(10).join(param_descriptions)}
 
-重要要求：
-1. 必须返回有效的JSON格式
-2. 参数名称必须完全匹配
-3. 数据类型必须正确（string、boolean、number等）
-4. 不要包含额外的解释文字，只返回JSON结果"""
+{instruction_prefix}：
+1. 必须返回有效的JSON格式，不能有语法错误
+2. 字段名称必须与上述格式完全一致，不能使用其他名称
+3. 数据类型必须严格正确（string、boolean、number等）
+4. 不要添加任何其他字段，只返回指定的字段
+5. 不要包含任何解释文字，只返回纯JSON结果
+6. 如果是中文字段名，必须保持中文，不能翻译成英文
+7. 如果无法确定某个字段的值，使用null表示，但不能省略字段
+
+【⚠️ 格式验证】：请确保你的输出严格符合上述JSON结构！违反格式要求的响应将被标记为错误。"""
     
     return enhanced_system_prompt
 
@@ -183,10 +203,33 @@ def _parse_json_response(response_text: str, output_parameters: Optional[List[Di
                 json_str = json_match.group()
             else:
                 # 如果找不到JSON，返回原始文本
-                return {"analysis": response_text}, {}
+                logger.warning(f"未找到JSON格式响应，原始文本: {response_text}")
+                return {"analysis": response_text, "format_error": "未找到JSON格式"}, {}
         
         # 解析JSON
         parsed_json = json.loads(json_str)
+        
+        # 验证响应格式是否符合预期
+        if output_parameters and isinstance(parsed_json, dict):
+            expected_fields = {param.get("name", "") for param in output_parameters}
+            actual_fields = set(parsed_json.keys())
+            
+            # 检查字段匹配度
+            missing_fields = expected_fields - actual_fields
+            extra_fields = actual_fields - expected_fields
+            
+            if missing_fields or extra_fields:
+                logger.warning(f"JSON字段不匹配 - 期望: {expected_fields}, 实际: {actual_fields}")
+                logger.warning(f"缺失字段: {missing_fields}, 额外字段: {extra_fields}")
+                
+                # 记录格式错误信息
+                parsed_json["_format_validation"] = {
+                    "expected_fields": list(expected_fields),
+                    "actual_fields": list(actual_fields),
+                    "missing_fields": list(missing_fields),
+                    "extra_fields": list(extra_fields),
+                    "match_rate": len(expected_fields & actual_fields) / len(expected_fields) if expected_fields else 0
+                }
         
         # 提取输出参数
         extracted_params = {}
@@ -195,14 +238,17 @@ def _parse_json_response(response_text: str, output_parameters: Optional[List[Di
                 param_name = param.get("name", "")
                 if param_name in parsed_json:
                     extracted_params[param_name] = parsed_json[param_name]
+                else:
+                    # 如果字段缺失，标记为null
+                    extracted_params[param_name] = None
         
         return parsed_json, extracted_params
         
     except json.JSONDecodeError as e:
-        logger.warning(f"JSON解析失败: {str(e)}")
+        logger.warning(f"JSON解析失败: {str(e)}, 原始文本: {response_text}")
         return {"analysis": response_text, "parse_error": str(e)}, {}
     except Exception as e:
-        logger.warning(f"响应解析异常: {str(e)}")
+        logger.warning(f"响应解析异常: {str(e)}, 原始文本: {response_text}")
         return {"analysis": response_text, "error": str(e)}, {}
 
 def _format_extracted_parameters(extracted_params: Dict[str, Any]) -> str:
@@ -984,8 +1030,12 @@ async def preview_test_llm_skill(
         # 构建增强的系统提示词（包含JSON格式要求）
         enhanced_system_prompt = _build_llm_system_prompt(system_prompt, parsed_output_params)
         
-        # 用户提示词保持纯粹
+        # 用户提示词保持纯粹，但添加多模态强化
         user_prompt_clean = prompt_template
+        
+        # 如果有输出参数，在用户提示词中再次强调格式要求
+        if parsed_output_params:
+            user_prompt_clean += "\n\n【格式提醒】请严格按照系统要求的JSON格式返回结果，不要使用其他字段名称。"
         
         # 智能检测任务类型并获取优化配置
         task_type = _detect_task_type(prompt_template, parsed_output_params)
@@ -1002,24 +1052,14 @@ async def preview_test_llm_skill(
                 "timeout": settings.LLM_TIMEOUT
             }
             
-            # 创建临时LLM客户端
-            llm_client = llm_service.create_llm_client(
-                provider=settings.PRIMARY_LLM_PROVIDER,
-                model_name=settings.PRIMARY_LLM_MODEL,
-                api_config=test_api_config
-            )
-            
-            # 创建多模态消息
-            messages = llm_service.create_multimodal_messages(
+            # 使用现代化多模态链
+            chain = llm_service.create_multimodal_chain(
                 system_prompt=enhanced_system_prompt,
-                user_prompt=user_prompt_clean,
-                image_data=frame
+                temperature=smart_config["temperature"],
+                max_tokens=smart_config["max_tokens"]
             )
-            
-            # 直接调用LLM客户端
-            response = llm_client.invoke(messages)
-            response_text = response.content
-            
+            # 调用链
+            response_text = await llm_service.ainvoke_chain(chain, {"text": user_prompt_clean, "image": frame})
             # 解析响应并提取输出参数
             analysis_result, extracted_params = _parse_json_response(response_text, parsed_output_params)
             
@@ -1120,27 +1160,20 @@ async def test_llm_connection(
             "timeout": settings.LLM_TIMEOUT
         }
         
-        # 创建LLM客户端
-        llm_client = llm_service.create_llm_client(
-            provider=settings.PRIMARY_LLM_PROVIDER,
-            model_name=settings.PRIMARY_LLM_MODEL,
-            api_config=test_api_config
-        )
-        
-        # 创建简单的文本消息（不包含图片）
-        messages = llm_service.create_multimodal_messages(
+        # 使用现代化简单链进行文本测试
+        chain = llm_service.create_simple_chain(
             system_prompt=system_prompt,
-            user_prompt=test_prompt,
-            image_data=None  # 不传图片
+            temperature=smart_config["temperature"],
+            max_tokens=smart_config["max_tokens"]
         )
         
-        # 调用LLM
+        # 调用链
         import time
         start_time = time.time()
-        response = llm_client.invoke(messages)
-        end_time = time.time()
         
-        response_text = response.content
+        response_text = await llm_service.ainvoke_chain(chain, {"input": test_prompt})
+        
+        end_time = time.time()
         response_time = round((end_time - start_time) * 1000, 2)  # 毫秒
         
         logger.info(f"LLM连接测试成功，响应时间: {response_time}ms")
