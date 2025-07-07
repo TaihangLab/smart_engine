@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=True, description="是否启用调试模式")
     LOG_LEVEL: str = Field(default="DEBUG", description="日志级别")
     
+    # 线程池配置
+    ALERT_GENERATION_POOL_SIZE: int = Field(default=10, description="预警生成线程池大小")
+    MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=5, description="消息处理线程池大小")
+    IMAGE_PROCESSING_POOL_SIZE: int = Field(default=8, description="图像处理线程池大小")
+    
     # Triton服务器配置
     TRITON_URL: str = Field(default="172.18.1.1:8201", description="Triton服务器地址")
     TRITON_MODEL_REPOSITORY: str = Field(default="/models", description="Triton模型仓库路径")
@@ -40,6 +45,16 @@ class Settings(BaseSettings):
     MYSQL_PASSWORD: str = Field(default="root", description="MySQL密码")
     MYSQL_DB: str = Field(default="smart_vision", description="MySQL数据库名")
     MYSQL_PORT: int = Field(default=3306, description="MySQL端口")
+    
+    # 数据库连接池配置
+    DB_POOL_SIZE: int = Field(default=50, description="数据库连接池大小")
+    DB_MAX_OVERFLOW: int = Field(default=100, description="数据库最大溢出连接数")
+    DB_POOL_TIMEOUT: int = Field(default=30, description="数据库连接池获取连接超时时间（秒）")
+    DB_POOL_RECYCLE: int = Field(default=3600, description="数据库连接回收时间（秒）")
+    DB_POOL_PRE_PING: bool = Field(default=True, description="数据库连接前预检查")
+    DB_ECHO: bool = Field(default=False, description="数据库SQL调试输出")
+    DB_AUTOCOMMIT: bool = Field(default=False, description="数据库自动提交")
+    DB_AUTOFLUSH: bool = Field(default=False, description="数据库自动刷新")
     
     # WVP配置
     WVP_API_URL: str = Field(default="http://192.168.1.107:18080", description="WVP API地址")
@@ -350,13 +365,13 @@ class Settings(BaseSettings):
 
     # 主要LLM服务配置（后端管理，前端不可见）- 使用Ollama
     PRIMARY_LLM_PROVIDER: str = Field(default="ollama", description="主要LLM提供商")
-    PRIMARY_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434", description="主要LLM服务器地址")
+    PRIMARY_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="主要LLM服务器地址（OpenAI兼容API）")
     PRIMARY_LLM_API_KEY: str = Field(default="ollama", description="主要LLM API密钥（Ollama不需要密钥）")
     PRIMARY_LLM_MODEL: str = Field(default="llava:latest", description="主要LLM模型名称")
 
     # 备用LLM服务配置（容错机制）- 同样使用Ollama的另一个模型
     BACKUP_LLM_PROVIDER: str = Field(default="ollama", description="备用LLM提供商")
-    BACKUP_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434", description="备用LLM服务器地址")
+    BACKUP_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="备用LLM服务器地址（OpenAI兼容API）")
     BACKUP_LLM_API_KEY: str = Field(default="ollama", description="备用LLM API密钥（Ollama不需要密钥）")
     BACKUP_LLM_MODEL: str = Field(default="qwen3:32b", description="备用LLM模型名称")
 
