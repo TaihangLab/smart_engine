@@ -210,6 +210,17 @@ class RedisClient:
             self.logger.error(f"Redis LREM操作失败: {str(e)}")
             return 0
     
+    def ltrim(self, key: str, start: int, end: int) -> bool:
+        """修剪列表，只保留指定范围内的元素"""
+        try:
+            if not self.ensure_connected():
+                return False
+            self.client.ltrim(key, start, end)
+            return True
+        except Exception as e:
+            self.logger.error(f"Redis LTRIM操作失败: {str(e)}")
+            return False
+    
     # ==================== 集合操作 ====================
     
     def sadd(self, key: str, *values: Any) -> int:
@@ -264,12 +275,15 @@ class RedisClient:
     
     # ==================== 哈希操作 ====================
     
-    def hset(self, key: str, field: str, value: Any) -> int:
+    def hset(self, key: str, field: str = None, value: Any = None, mapping: Dict[str, Any] = None) -> int:
         """设置哈希字段值"""
         try:
             if not self.ensure_connected():
                 return 0
-            return self.client.hset(key, field, value)
+            if mapping:
+                return self.client.hset(key, mapping=mapping)
+            else:
+                return self.client.hset(key, field, value)
         except Exception as e:
             self.logger.error(f"Redis HSET操作失败: {str(e)}")
             return 0
@@ -303,6 +317,68 @@ class RedisClient:
         except Exception as e:
             self.logger.error(f"Redis HGETALL操作失败: {str(e)}")
             return {}
+    
+    # ==================== 有序集合操作 ====================
+    
+    def zadd(self, key: str, mapping: Dict[str, Union[int, float]]) -> int:
+        """添加元素到有序集合"""
+        try:
+            if not self.ensure_connected():
+                return 0
+            return self.client.zadd(key, mapping)
+        except Exception as e:
+            self.logger.error(f"Redis ZADD操作失败: {str(e)}")
+            return 0
+    
+    def zrevrange(self, key: str, start: int, end: int, withscores: bool = False) -> List[str]:
+        """获取有序集合中的元素（按分数从高到低）"""
+        try:
+            if not self.ensure_connected():
+                return []
+            return self.client.zrevrange(key, start, end, withscores=withscores)
+        except Exception as e:
+            self.logger.error(f"Redis ZREVRANGE操作失败: {str(e)}")
+            return []
+    
+    def zrange(self, key: str, start: int, end: int, withscores: bool = False) -> List[str]:
+        """获取有序集合中的元素（按分数从低到高）"""
+        try:
+            if not self.ensure_connected():
+                return []
+            return self.client.zrange(key, start, end, withscores=withscores)
+        except Exception as e:
+            self.logger.error(f"Redis ZRANGE操作失败: {str(e)}")
+            return []
+    
+    def zrem(self, key: str, *values: Any) -> int:
+        """从有序集合中删除元素"""
+        try:
+            if not self.ensure_connected():
+                return 0
+            return self.client.zrem(key, *values)
+        except Exception as e:
+            self.logger.error(f"Redis ZREM操作失败: {str(e)}")
+            return 0
+    
+    def zcard(self, key: str) -> int:
+        """获取有序集合的元素个数"""
+        try:
+            if not self.ensure_connected():
+                return 0
+            return self.client.zcard(key)
+        except Exception as e:
+            self.logger.error(f"Redis ZCARD操作失败: {str(e)}")
+            return 0
+    
+    def zscore(self, key: str, value: Any) -> Optional[float]:
+        """获取有序集合中元素的分数"""
+        try:
+            if not self.ensure_connected():
+                return None
+            return self.client.zscore(key, value)
+        except Exception as e:
+            self.logger.error(f"Redis ZSCORE操作失败: {str(e)}")
+            return None
     
     # ==================== 高级操作 ====================
     
