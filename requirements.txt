@@ -31,3 +31,4 @@ langchain-openai==0.3.27
 # langchain-community==0.3.10
 langchain-core==0.3.66
 redis==5.2.1
+cryptography
