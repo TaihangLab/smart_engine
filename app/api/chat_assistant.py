@@ -80,6 +80,7 @@ class StreamChunk(BaseModel):
     created: int = Field(default_factory=lambda: int(time.time()), description="创建时间戳")
     model: str = Field(..., description="模型名称")
     choices: List[Dict[str, Any]] = Field(..., description="选择列表")
+    conversation_id: Optional[str] = Field(None, description="会话ID（仅在第一个chunk中包含）")
 
 
 class ConversationManager:
@@ -102,7 +103,7 @@ class ConversationManager:
                                  context_length: int = 10) -> List[ChatMessage]:
         """获取会话历史"""
         try:
-            # 从Redis内存存储获取消息
+            # 直接从LLM服务的内存存储获取消息
             messages = self.memory_store.get_messages(conversation_id)
             
             # 限制上下文长度
@@ -126,13 +127,14 @@ class ConversationManager:
                         timestamp=datetime.now()
                     ))
             
+            logger.info(f"获取会话历史成功: {conversation_id}, 消息数: {len(chat_messages)}")
             return chat_messages
             
         except Exception as e:
             logger.error(f"获取会话历史失败: {e}")
             return []
     
-    def save_conversation_metadata(self, conversation_id: str, title: str = None):
+    def save_conversation_metadata(self, conversation_id: str, title: str = None, user_id: str = "default"):
         """保存会话元数据"""
         try:
             # 生成会话标题
@@ -144,20 +146,27 @@ class ConversationManager:
                 "title": title,
                 "created_at": datetime.now().isoformat(),
                 "last_message_time": datetime.now().isoformat(),
-                "message_count": 0
+                "message_count": 0,
+                "user_id": user_id
             }
             
             # 保存到Redis
             key = f"{self.conversation_prefix}{conversation_id}"
             self.redis_client.setex(key, self.ttl, json.dumps(conversation_info))
             
-            # 添加到会话列表
+            # 添加到全局会话列表
             self.redis_client.zadd(self.conversation_list_key, {conversation_id: time.time()})
+            
+            # 添加到用户会话列表
+            user_conversations_key = f"{self.conversation_prefix}user_conversations:{user_id}"
+            self.redis_client.sadd(user_conversations_key, conversation_id)
+            
+            logger.info(f"保存会话元数据成功: {conversation_id}")
             
         except Exception as e:
             logger.error(f"保存会话元数据失败: {e}")
     
-    def update_conversation_metadata(self, conversation_id: str):
+    def update_conversation_metadata(self, conversation_id: str, user_id: str = "default"):
         """更新会话元数据"""
         try:
             key = f"{self.conversation_prefix}{conversation_id}"
@@ -167,11 +176,21 @@ class ConversationManager:
                 conversation_info = json.loads(conversation_data)
                 conversation_info["last_message_time"] = datetime.now().isoformat()
                 conversation_info["message_count"] = conversation_info.get("message_count", 0) + 1
+                conversation_info["user_id"] = conversation_info.get("user_id", user_id)  # 确保有用户ID
                 
                 self.redis_client.setex(key, self.ttl, json.dumps(conversation_info))
+            else:
+                # 如果元数据不存在，创建新的
+                self.save_conversation_metadata(conversation_id, user_id=user_id)
                 
-            # 更新会话列表中的时间戳
+            # 更新全局会话列表中的时间戳
             self.redis_client.zadd(self.conversation_list_key, {conversation_id: time.time()})
+            
+            # 确保会话在用户会话列表中
+            user_conversations_key = f"{self.conversation_prefix}user_conversations:{user_id}"
+            self.redis_client.sadd(user_conversations_key, conversation_id)
+            
+            logger.debug(f"更新会话元数据成功: {conversation_id}")
             
         except Exception as e:
             logger.error(f"更新会话元数据失败: {e}")
@@ -190,13 +209,44 @@ class ConversationManager:
                     
                     if conversation_data:
                         conversation_info = json.loads(conversation_data)
+                        current_title = conversation_info["title"]
+                        
+                        # 检查是否需要更新默认格式的标题
+                        if current_title.startswith("会话 ") and len(current_title) <= 12:
+                            # 如果标题还是默认格式，尝试生成有意义的标题
+                            messages = self.memory_store.get_messages(conversation_id)
+                            if messages and len(messages) >= 2:  # 有对话历史
+                                try:
+                                    generated_title = self.auto_generate_conversation_title(conversation_id)
+                                    # 更新元数据中的标题
+                                    conversation_info["title"] = generated_title
+                                    self.redis_client.setex(key, self.ttl, json.dumps(conversation_info))
+                                    current_title = generated_title
+                                    logger.info(f"更新会话列表中的标题: {conversation_id} -> {generated_title}")
+                                except Exception as e:
+                                    logger.warning(f"生成标题失败: {e}")
+                        
                         conversations.append(ConversationSummary(
                                 conversation_id=conversation_info["id"],
-                                title=conversation_info["title"],
+                                title=current_title,
                                 message_count=conversation_info.get("message_count", 0),
                                 last_message_time=datetime.fromisoformat(conversation_info["last_message_time"]),
                                 created_at=datetime.fromisoformat(conversation_info["created_at"])
                         ))
+                    else:
+                        # 如果元数据不存在，检查是否有消息历史
+                        messages = self.memory_store.get_messages(conversation_id)
+                        if messages:
+                            # 有消息历史但没有元数据，重新创建元数据
+                            generated_title = self.auto_generate_conversation_title(conversation_id)
+                            self.save_conversation_metadata(conversation_id, generated_title)
+                            conversations.append(ConversationSummary(
+                                conversation_id=conversation_id,
+                                title=generated_title,
+                                message_count=len(messages),
+                                last_message_time=datetime.now(),
+                                created_at=datetime.now()
+                            ))
                 except Exception as e:
                     logger.warning(f"解析会话数据失败: {e}")
                     continue
@@ -207,19 +257,24 @@ class ConversationManager:
             logger.error(f"获取会话列表失败: {e}")
             return []
     
-    def delete_conversation(self, conversation_id: str) -> bool:
+    def delete_conversation(self, conversation_id: str, user_id: str = "default") -> bool:
         """删除会话"""
         try:
-            # 删除内存历史
+            # 删除内存历史（使用LLM服务的内存存储）
             self.memory_store.clear(conversation_id)
             
             # 删除元数据
             key = f"{self.conversation_prefix}{conversation_id}"
             self.redis_client.delete(key)
             
-            # 从会话列表中移除
+            # 从全局会话列表中移除
             self.redis_client.zrem(self.conversation_list_key, conversation_id)
             
+            # 从用户会话列表中移除
+            user_conversations_key = f"{self.conversation_prefix}user_conversations:{user_id}"
+            self.redis_client.srem(user_conversations_key, conversation_id)
+            
+            logger.info(f"删除会话成功: {conversation_id}")
             return True
             
         except Exception as e:
@@ -334,18 +389,40 @@ class ConversationManager:
     def update_conversation_group(self, conversation_id: str, group_id: Optional[str], user_id: str = "default") -> bool:
         """更新会话分组"""
         try:
-            conv_key = f"{self.conversation_prefix}conversations:{conversation_id}"
+            # 使用正确的会话元数据键格式
+            conv_key = f"{self.conversation_prefix}{conversation_id}"
             
-            # 检查会话是否存在
-            if not self.redis_client.exists(conv_key):
+            # 检查会话是否存在（通过元数据或消息历史）
+            conversation_exists = False
+            
+            # 首先检查元数据是否存在
+            if self.redis_client.exists(conv_key):
+                conversation_exists = True
+                logger.debug(f"找到会话元数据: {conversation_id}")
+            else:
+                # 如果元数据不存在，检查是否有消息历史
+                messages = self.memory_store.get_messages(conversation_id)
+                if messages:
+                    conversation_exists = True
+                    logger.info(f"会话 {conversation_id} 有消息历史但无元数据，重新创建元数据")
+                    # 重新创建元数据
+                    self.save_conversation_metadata(conversation_id, self.auto_generate_conversation_title(conversation_id))
+            
+            if not conversation_exists:
                 logger.warning(f"会话不存在: {conversation_id}")
                 return False
+            
+            # 确保会话在用户会话列表中
+            user_conversations_key = f"{self.conversation_prefix}user_conversations:{user_id}"
+            self.redis_client.sadd(user_conversations_key, conversation_id)
             
             # 更新分组信息
             if group_id:
                 self.redis_client.hset(conv_key, "group_id", group_id)
+                logger.info(f"会话 {conversation_id} 移动到分组: {group_id}")
             else:
                 self.redis_client.hdel(conv_key, "group_id")
+                logger.info(f"会话 {conversation_id} 移动到无分组")
             
             self.redis_client.hset(conv_key, "updated_at", datetime.now().isoformat())
             
@@ -353,19 +430,48 @@ class ConversationManager:
             return True
             
         except Exception as e:
-            logger.error(f"更新会话分组失败: {e}")
+            logger.error(f"更新会话分组失败: {e}", exc_info=True)
             return False
     
     def get_conversations_by_group(self, group_id: Optional[str], user_id: str = "default") -> List[str]:
         """获取分组内的对话ID列表"""
         try:
-            user_key = f"{self.conversation_prefix}users:{user_id}"
-            conversation_ids = self.redis_client.smembers(user_key)
+            # 使用正确的用户会话列表键
+            user_conversations_key = f"{self.conversation_prefix}user_conversations:{user_id}"
+            
+            # 如果用户会话列表不存在，从会话列表中获取所有会话
+            conversation_ids = self.redis_client.smembers(user_conversations_key)
+            
+            # 如果用户会话列表为空，尝试从全局会话列表中获取
+            if not conversation_ids:
+                logger.info(f"用户 {user_id} 的会话列表为空，从全局会话列表获取")
+                all_conversation_ids = self.redis_client.zrange(self.conversation_list_key, 0, -1)
+                conversation_ids = set(all_conversation_ids)
+                
+                # 将所有会话添加到用户列表中（为了后续的一致性）
+                if conversation_ids:
+                    self.redis_client.sadd(user_conversations_key, *conversation_ids)
             
             group_conversations = []
             for conv_id in conversation_ids:
-                conv_key = f"{self.conversation_prefix}conversations:{conv_id}"
+                # 使用正确的会话元数据键格式
+                conv_key = f"{self.conversation_prefix}{conv_id}"
+                
+                # 检查会话是否存在
+                if not self.redis_client.exists(conv_key):
+                    # 如果元数据不存在，检查是否有消息历史
+                    messages = self.memory_store.get_messages(conv_id)
+                    if messages:
+                        # 重新创建元数据
+                        logger.info(f"为会话 {conv_id} 重新创建元数据")
+                        self.save_conversation_metadata(conv_id, self.auto_generate_conversation_title(conv_id))
+                    else:
+                        # 会话不存在，跳过
+                        continue
+                
                 conv_group = self.redis_client.hget(conv_key, "group_id")
+                if isinstance(conv_group, bytes):
+                    conv_group = conv_group.decode('utf-8')
                 
                 # 匹配分组条件
                 if group_id is None and not conv_group:
@@ -375,38 +481,77 @@ class ConversationManager:
                     # 指定分组
                     group_conversations.append(conv_id)
             
+            logger.debug(f"分组 {group_id} 中找到 {len(group_conversations)} 个会话")
             return group_conversations
             
         except Exception as e:
-            logger.error(f"获取分组对话失败: {e}")
+            logger.error(f"获取分组对话失败: {e}", exc_info=True)
             return []
 
     def auto_generate_conversation_title(self, conversation_id: str) -> str:
-        """自动生成对话标题"""
+        """自动生成会话标题"""
         try:
-            # 获取对话的第一条用户消息
-            messages = self.get_conversation_history(conversation_id, context_length=1)
+            # 获取会话的前几条消息
+            messages = self.get_conversation_history(conversation_id, context_length=3)
             
-            if messages and len(messages) > 0:
-                first_message = messages[0]
-                if first_message.role == "user":
-                    content = first_message.content.strip()
-                    # 生成标题（取前30个字符）
-                    title = content[:30] + ("..." if len(content) > 30 else "")
-                    
-                    # 更新会话标题
-                    conv_key = f"{self.conversation_prefix}conversations:{conversation_id}"
-                    self.redis_client.hset(conv_key, "title", title)
-                    self.redis_client.hset(conv_key, "updated_at", datetime.now().isoformat())
-                    
-                    logger.info(f"自动生成对话标题: {conversation_id} -> {title}")
-                    return title
+            if not messages:
+                return f"会话 {conversation_id[:8]}"
             
-            return "新的对话"
+            # 找到第一条用户消息
+            first_user_message = None
+            for msg in messages:
+                if msg.role == "user":
+                    first_user_message = msg.content
+                    break
+            
+            if first_user_message:
+                # 截取前30个字符作为标题
+                title = first_user_message[:30].strip()
+                if len(first_user_message) > 30:
+                    title += "..."
+                return title
+            else:
+                return f"会话 {conversation_id[:8]}"
+                
+        except Exception as e:
+            logger.error(f"自动生成标题失败: {e}")
+            return f"会话 {conversation_id[:8]}"
+
+    def update_conversation_title(self, conversation_id: str, new_title: str, user_id: str = "default") -> bool:
+        """更新会话标题"""
+        try:
+            # 验证标题长度
+            if not new_title or not new_title.strip():
+                logger.warning(f"标题不能为空: {conversation_id}")
+                return False
+                
+            new_title = new_title.strip()
+            if len(new_title) > 100:  # 限制标题长度
+                logger.warning(f"标题过长: {conversation_id}")
+                return False
+            
+            key = f"{self.conversation_prefix}{conversation_id}"
+            conversation_data = self.redis_client.get(key)
+            
+            if not conversation_data:
+                logger.warning(f"会话不存在: {conversation_id}")
+                return False
+            
+            # 更新标题
+            conversation_info = json.loads(conversation_data)
+            conversation_info["title"] = new_title
+            conversation_info["updated_at"] = datetime.now().isoformat()
+            conversation_info["user_id"] = conversation_info.get("user_id", user_id)  # 确保有用户ID
+            
+            # 保存更新后的数据
+            self.redis_client.setex(key, self.ttl, json.dumps(conversation_info))
+            
+            logger.info(f"更新会话标题成功: {conversation_id} -> {new_title}")
+            return True
             
         except Exception as e:
-            logger.error(f"自动生成对话标题失败: {e}")
-            return "新的对话"
+            logger.error(f"更新会话标题失败: {e}")
+            return False
 
 
 class ChatService:
@@ -464,22 +609,59 @@ class ChatService:
                             message: str,
                             system_prompt: Optional[str] = None,
                             **config) -> AsyncGenerator[str, None]:
-        """流式生成回复"""
+        """流式生成回复（不自动保存消息，避免重复）"""
         try:
-            # 使用对话链
-            chain = self.llm_service.create_conversational_chain(
-                system_prompt=system_prompt or self.default_system_prompt,
-                session_id=conversation_id,
-                **config
+            # 手动构建带历史的提示，避免LangChain自动保存消息
+            from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
+            from langchain_core.output_parsers import StrOutputParser
+            
+            # 获取历史消息
+            history_messages = conversation_manager.memory_store.get_messages(conversation_id)
+            
+            # 构建提示模板
+            if system_prompt:
+                prompt_messages = [
+                    ("system", system_prompt),
+                    *[(msg.__class__.__name__.lower().replace('message', ''), msg.content) for msg in history_messages],
+                    ("human", message)
+                ]
+            else:
+                prompt_messages = [
+                    *[(msg.__class__.__name__.lower().replace('message', ''), msg.content) for msg in history_messages],
+                    ("human", message)
+                ]
+            
+            prompt = ChatPromptTemplate.from_messages(prompt_messages)
+            
+            # 配置LLM
+            llm_config = {}
+            if "temperature" in config:
+                llm_config["temperature"] = config["temperature"]
+            if "max_tokens" in config:
+                llm_config["max_tokens"] = config["max_tokens"]
+            
+            # 创建不带历史管理的简单链
+            chain = (
+                prompt 
+                | self.llm_service.configurable_llm.with_config(configurable=llm_config)
+                | StrOutputParser()
             )
             
+            # 收集完整回复用于保存
+            full_response = ""
+            
             # 流式调用链
-            async for chunk in self.llm_service.astream_chain(
-                chain,
-                {"input": message},
-                config=RunnableConfig(configurable={"session_id": conversation_id})
-            ):
-                yield chunk
+            async for chunk in self.llm_service.astream_chain(chain, {}):
+                if chunk:
+                    full_response += chunk
+                    yield chunk
+            
+            # 手动保存助手回复
+            from langchain_core.messages import AIMessage
+            if full_response.strip():
+                assistant_message = AIMessage(content=full_response, id=str(uuid.uuid4()))
+                conversation_manager.memory_store.add_message(conversation_id, assistant_message)
+                logger.info(f"已保存助手回复: {full_response[:50]}...")
             
         except Exception as e:
             logger.error(f"流式生成回复失败: {e}")
@@ -504,9 +686,18 @@ async def chat_completion(request: ChatRequest):
         # 获取聊天配置
         config = chat_service.get_chat_config(request)
             
-        # 保存会话元数据
+        # 保存或更新会话元数据
         if not request.conversation_id:
             conversation_manager.save_conversation_metadata(conversation_id)
+            logger.info(f"创建新会话: {conversation_id}")
+        else:
+            # 确保已存在会话的元数据是最新的
+            conversation_manager.update_conversation_metadata(conversation_id)
+            logger.info(f"使用现有会话: {conversation_id}")
+        
+        # 记录当前会话的历史消息数量
+        current_messages = conversation_manager.get_conversation_history(conversation_id, context_length=100)
+        logger.info(f"会话 {conversation_id} 当前有 {len(current_messages)} 条历史消息")
         
         # 流式响应
         if request.stream:
@@ -521,7 +712,13 @@ async def chat_completion(request: ChatRequest):
             
             async def generate():
                 try:
-                    # 开始流式响应
+                    # 首先明确保存用户消息，确保即使被早期停止也不会丢失
+                    from langchain_core.messages import HumanMessage
+                    user_message = HumanMessage(content=request.message, id=str(uuid.uuid4()))
+                    conversation_manager.memory_store.add_message(conversation_id, user_message)
+                    logger.info(f"已保存用户消息: {request.message[:50]}...")
+                    
+                    # 开始流式响应，第一个chunk包含conversation_id
                     first_chunk = StreamChunk(
                         id=message_id,
                         model=model,
@@ -529,11 +726,12 @@ async def chat_completion(request: ChatRequest):
                             "index": 0,
                             "delta": {"role": "assistant", "content": ""},
                             "finish_reason": None
-                        }]
+                        }],
+                        conversation_id=conversation_id  # 在第一个chunk中包含会话ID
                     )
                     yield f"data: {first_chunk.json()}\n\n"
                     
-                    # 流式生成内容
+                    # 2. 简化的流式生成（LangChain自动保存所有消息）
                     async for chunk in chat_service.stream_response(
                         conversation_id=conversation_id,
                         message=request.message,
@@ -567,6 +765,24 @@ async def chat_completion(request: ChatRequest):
                     
                     # 更新会话元数据
                     conversation_manager.update_conversation_metadata(conversation_id)
+                    
+                    # 检查是否需要自动生成标题（仅当标题还是默认格式时）
+                    current_messages = conversation_manager.get_conversation_history(conversation_id, context_length=10)
+                    if len(current_messages) <= 2:  # 只有用户消息和助手回复
+                        try:
+                            # 获取当前标题，检查是否还是默认格式
+                            key = f"{conversation_manager.conversation_prefix}{conversation_id}"
+                            conversation_data = conversation_manager.redis_client.get(key)
+                            if conversation_data:
+                                conversation_info = json.loads(conversation_data)
+                                current_title = conversation_info.get("title", "")
+                                # 只有当标题是默认格式时才自动生成新标题
+                                if current_title.startswith("会话 ") and len(current_title) <= 12:
+                                    generated_title = conversation_manager.auto_generate_conversation_title(conversation_id)
+                                    conversation_manager.update_conversation_title(conversation_id, generated_title)
+                                    logger.info(f"为新会话自动生成标题: {conversation_id} -> {generated_title}")
+                        except Exception as e:
+                            logger.warning(f"自动生成标题失败: {e}")
                     
                 except Exception as e:
                     logger.error(f"流式响应失败: {e}")
@@ -603,6 +819,24 @@ async def chat_completion(request: ChatRequest):
             
             # 更新会话元数据
             conversation_manager.update_conversation_metadata(conversation_id)
+            
+            # 检查是否需要自动生成标题（仅当标题还是默认格式时）
+            current_messages = conversation_manager.get_conversation_history(conversation_id, context_length=10)
+            if len(current_messages) <= 2:  # 只有用户消息和助手回复
+                try:
+                    # 获取当前标题，检查是否还是默认格式
+                    key = f"{conversation_manager.conversation_prefix}{conversation_id}"
+                    conversation_data = conversation_manager.redis_client.get(key)
+                    if conversation_data:
+                        conversation_info = json.loads(conversation_data)
+                        current_title = conversation_info.get("title", "")
+                        # 只有当标题是默认格式时才自动生成新标题
+                        if current_title.startswith("会话 ") and len(current_title) <= 12:
+                            generated_title = conversation_manager.auto_generate_conversation_title(conversation_id)
+                            conversation_manager.update_conversation_title(conversation_id, generated_title)
+                            logger.info(f"为新会话自动生成标题: {conversation_id} -> {generated_title}")
+                except Exception as e:
+                    logger.warning(f"自动生成标题失败: {e}")
             
             # 构建响应
             assistant_message = ChatMessage(
@@ -652,11 +886,30 @@ async def get_conversation_messages(
 ):
     """获取会话消息"""
     try:
+        logger.info(f"请求获取会话消息: {conversation_id}, 限制: {limit}")
+        
+        # 直接从内存存储获取原始消息
+        raw_messages = conversation_manager.memory_store.get_messages(conversation_id)
+        logger.info(f"从Redis获取到 {len(raw_messages)} 条原始消息")
+        
+        # 获取格式化的消息
         messages = conversation_manager.get_conversation_history(conversation_id, limit)
+        logger.info(f"返回 {len(messages)} 条格式化消息")
+        
+        # 如果没有消息，检查Redis键
+        if not messages:
+            redis_key = f"{conversation_manager.memory_store.prefix}{conversation_id}"
+            exists = conversation_manager.redis_client.exists(redis_key)
+            logger.warning(f"没有找到消息，Redis键 {redis_key} 存在: {exists}")
+            
+            if exists:
+                raw_data = conversation_manager.redis_client.lrange(redis_key, 0, -1)
+                logger.info(f"Redis中有 {len(raw_data)} 条原始数据")
+        
         return messages
         
     except Exception as e:
-        logger.error(f"获取会话消息失败: {e}")
+        logger.error(f"获取会话消息失败: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取会话消息失败: {str(e)}")
 
 
@@ -1174,10 +1427,20 @@ async def get_group_conversations(
         # 获取对话详情
         conversations = []
         for conv_id in conversation_ids[:limit]:
-            conv_key = f"{conversation_manager.conversation_prefix}conversations:{conv_id}"
+            # 使用正确的键格式
+            conv_key = f"{conversation_manager.conversation_prefix}{conv_id}"
             conv_data = conversation_manager.redis_client.hgetall(conv_key)
             
             if conv_data:
+                # 处理Redis返回的字节数据
+                if isinstance(conv_data, dict):
+                    processed_data = {}
+                    for k, v in conv_data.items():
+                        key = k.decode('utf-8') if isinstance(k, bytes) else k
+                        value = v.decode('utf-8') if isinstance(v, bytes) else v
+                        processed_data[key] = value
+                    conv_data = processed_data
+                
                 conversations.append({
                     "conversation_id": conv_id,
                     "title": conv_data.get("title", "新的对话"),
@@ -1203,11 +1466,246 @@ async def auto_generate_title(conversation_id: str):
     """自动生成对话标题"""
     try:
         title = conversation_manager.auto_generate_conversation_title(conversation_id)
-        return {
-            "success": True,
-            "message": "标题生成成功",
-            "data": {"title": title}
-        }
+        # 保存生成的标题到会话元数据
+        success = conversation_manager.update_conversation_title(conversation_id, title)
+        if success:
+            return {
+                "success": True,
+                "message": "标题生成并保存成功",
+                "data": {"title": title}
+            }
+        else:
+            raise HTTPException(status_code=404, detail="会话不存在")
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"自动生成标题失败: {e}")
-        raise HTTPException(status_code=500, detail="自动生成标题失败") 
+        raise HTTPException(status_code=500, detail="自动生成标题失败")
+
+
+@router.put("/conversations/{conversation_id}/title")
+async def update_conversation_title(
+    conversation_id: str,
+    title: str = Form(..., description="新的会话标题", min_length=1, max_length=100)
+):
+    """更新会话标题"""
+    try:
+        success = conversation_manager.update_conversation_title(conversation_id, title)
+        if success:
+            return {
+                "success": True,
+                "message": "标题更新成功",
+                "data": {"title": title}
+            }
+        else:
+            raise HTTPException(status_code=404, detail="会话不存在或标题无效")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新会话标题失败: {e}")
+        raise HTTPException(status_code=500, detail="更新会话标题失败")
+
+
+@router.post("/conversations/{conversation_id}/stop-generation")
+async def stop_generation(
+    conversation_id: str,
+    message_id: str = Form(..., description="助手消息ID"),
+    partial_content: str = Form(default="", description="已生成的部分内容")
+):
+    """停止生成并保存部分内容（模仿Cursor的停止机制）"""
+    try:
+        # 检查是否已有这个消息ID的内容
+        existing_messages = conversation_manager.memory_store.get_messages(conversation_id)
+        message_exists = any(hasattr(msg, 'id') and msg.id == message_id for msg in existing_messages)
+        
+        if not message_exists:
+            # 保存停止时的部分内容
+            from langchain_core.messages import AIMessage
+            
+            if partial_content.strip():
+                final_content = partial_content + "\n\n[已停止生成]"
+            else:
+                final_content = "[生成已停止]"
+            
+            assistant_message = AIMessage(content=final_content, id=message_id)
+            conversation_manager.memory_store.add_message(conversation_id, assistant_message)
+            
+            # 更新会话元数据
+            conversation_manager.update_conversation_metadata(conversation_id)
+            
+            logger.info(f"用户手动停止生成，已保存部分内容到会话 {conversation_id}: {final_content[:50]}...")
+            
+            return {
+                "success": True,
+                "message": "停止生成并保存成功",
+                "data": {
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "content": final_content,
+                    "stopped_at": datetime.now().isoformat()
+                }
+            }
+        else:
+            return {
+                "success": True,
+                "message": "消息已存在，无需重复保存",
+                "data": {
+                    "conversation_id": conversation_id,
+                    "message_id": message_id,
+                    "status": "already_exists"
+                }
+            }
+            
+    except Exception as e:
+        logger.error(f"停止生成失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"停止生成失败: {str(e)}")
+
+
+@router.post("/conversations/{conversation_id}/save-message")
+async def save_message_to_conversation(
+    conversation_id: str,
+    role: str = Form(..., description="消息角色：user、assistant、system"),
+    content: str = Form(..., description="消息内容"),
+    message_id: Optional[str] = Form(None, description="消息ID（可选）")
+):
+    """保存消息到会话（用于手动停止等场景）"""
+    try:
+        # 验证角色
+        if role not in ["user", "assistant", "system"]:
+            raise HTTPException(status_code=400, detail="无效的消息角色")
+        
+        # 生成消息ID（如果没有提供）
+        if not message_id:
+            message_id = str(uuid.uuid4())
+        
+        # 检查消息是否已存在（去重逻辑）
+        existing_messages = conversation_manager.memory_store.get_messages(conversation_id)
+        for existing_msg in existing_messages:
+            if hasattr(existing_msg, 'id') and existing_msg.id == message_id:
+                logger.info(f"消息 {message_id} 已存在，跳过保存")
+                return {
+                    "success": True,
+                    "message": "消息已存在，跳过保存",
+                    "data": {
+                        "conversation_id": conversation_id,
+                        "message_id": message_id,
+                        "status": "already_exists"
+                    }
+                }
+        
+        # 创建消息对象
+        from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+        
+        if role == "user":
+            message_obj = HumanMessage(content=content, id=message_id)
+        elif role == "assistant":
+            message_obj = AIMessage(content=content, id=message_id)
+        else:
+            message_obj = SystemMessage(content=content, id=message_id)
+        
+        # 保存到内存存储
+        conversation_manager.memory_store.add_message(conversation_id, message_obj)
+        
+        # 更新会话元数据
+        conversation_manager.update_conversation_metadata(conversation_id)
+        
+        logger.info(f"消息已保存到会话 {conversation_id}: {role} - {content[:50]}...")
+        
+        return {
+            "success": True,
+            "message": "消息保存成功",
+            "data": {
+                "conversation_id": conversation_id,
+                "message_id": message_id,
+                "saved_at": datetime.now().isoformat(),
+                "status": "saved"
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"保存消息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"保存消息失败: {str(e)}")
+
+
+@router.post("/debug/test-redis")
+async def test_redis_connection():
+    """调试端点：测试Redis连接和消息存储"""
+    try:
+        test_session_id = f"test_{int(time.time())}"
+        
+        # 测试Redis连接
+        redis_ping = conversation_manager.redis_client.ping()
+        logger.info(f"Redis连接测试: {redis_ping}")
+        
+        # 测试消息存储
+        from langchain_core.messages import HumanMessage, AIMessage
+        
+        # 添加测试消息
+        test_human_msg = HumanMessage(content="这是一条测试消息")
+        test_ai_msg = AIMessage(content="这是AI的回复")
+        
+        conversation_manager.memory_store.add_message(test_session_id, test_human_msg)
+        conversation_manager.memory_store.add_message(test_session_id, test_ai_msg)
+        
+        # 获取消息验证
+        retrieved_messages = conversation_manager.memory_store.get_messages(test_session_id)
+        
+        # 清理测试数据
+        conversation_manager.memory_store.clear(test_session_id)
+        
+        return {
+            "success": True,
+            "data": {
+                "redis_ping": redis_ping,
+                "test_session_id": test_session_id,
+                "messages_stored": 2,
+                "messages_retrieved": len(retrieved_messages),
+                "redis_key_prefix": conversation_manager.memory_store.prefix,
+                "retrieved_content": [msg.content for msg in retrieved_messages]
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Redis测试失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+
+@router.get("/debug/redis-keys")
+async def debug_redis_keys():
+    """调试端点：查看Redis中的所有聊天相关键"""
+    try:
+        # 获取所有聊天历史键
+        chat_keys = []
+        for key in conversation_manager.redis_client.scan_iter(match=f"{conversation_manager.memory_store.prefix}*"):
+            key_str = key.decode('utf-8') if isinstance(key, bytes) else str(key)
+            chat_keys.append(key_str)
+        
+        # 获取会话元数据键
+        metadata_keys = []
+        for key in conversation_manager.redis_client.scan_iter(match=f"{conversation_manager.conversation_prefix}*"):
+            key_str = key.decode('utf-8') if isinstance(key, bytes) else str(key)
+            metadata_keys.append(key_str)
+        
+        # 获取会话列表
+        conversation_list = conversation_manager.redis_client.zrange(conversation_manager.conversation_list_key, 0, -1)
+        
+        return {
+            "success": True,
+            "data": {
+                "chat_history_keys": chat_keys,
+                "metadata_keys": metadata_keys,
+                "conversation_list": [item.decode('utf-8') if isinstance(item, bytes) else str(item) for item in conversation_list],
+                "memory_prefix": conversation_manager.memory_store.prefix,
+                "metadata_prefix": conversation_manager.conversation_prefix
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"获取Redis键失败: {e}", exc_info=True)
+        return {
+            "success": False,
+            "error": str(e)
+        } 

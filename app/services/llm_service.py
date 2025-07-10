@@ -135,6 +135,48 @@ class RedisMemoryStore:
             logger.error(f"清除会话历史失败: {e}")
 
 
+class RedisChatMessageHistory(BaseChatMessageHistory):
+    """Redis聊天消息历史实现，直接与Redis交互"""
+    
+    def __init__(self, session_id: str, memory_store: RedisMemoryStore):
+        self.session_id = session_id
+        self.memory_store = memory_store
+        self._messages = None
+        self.logger = logging.getLogger(__name__)
+    
+    @property
+    def messages(self) -> List[BaseMessage]:
+        """获取消息列表 - 每次都从Redis刷新"""
+        # 始终从Redis获取最新消息，不使用缓存
+        self._messages = self.memory_store.get_messages(self.session_id)
+        self.logger.debug(f"获取会话 {self.session_id} 的消息，共 {len(self._messages)} 条")
+        return self._messages
+    
+    def add_message(self, message: BaseMessage) -> None:
+        """添加消息"""
+        try:
+            # 添加到Redis
+            self.memory_store.add_message(self.session_id, message)
+            self.logger.info(f"消息已保存到Redis: 会话={self.session_id}, 类型={message.__class__.__name__}, 内容长度={len(message.content)}")
+            
+            # 清除缓存，强制下次从Redis重新加载
+            self._messages = None
+            
+        except Exception as e:
+            self.logger.error(f"保存消息到Redis失败: {e}", exc_info=True)
+            raise
+    
+    def clear(self) -> None:
+        """清除历史"""
+        try:
+            self.memory_store.clear(self.session_id)
+            self._messages = []
+            self.logger.info(f"已清除会话 {self.session_id} 的历史")
+        except Exception as e:
+            self.logger.error(f"清除会话历史失败: {e}", exc_info=True)
+            raise
+
+
 class LLMService:
     """
     现代化LLM服务
@@ -417,15 +459,10 @@ class LLMService:
             | StrOutputParser()
         )
         
-        # 包装历史记录管理
+        # 包装历史记录管理 - 使用直接与Redis交互的历史实现
         def get_session_history(session_id: str) -> BaseChatMessageHistory:
-            """获取会话历史"""
-            history = InMemoryChatMessageHistory()
-            # 从Redis加载历史消息
-            messages = self.memory_store.get_messages(session_id)
-            for msg in messages:
-                history.add_message(msg)
-            return history
+            """获取会话历史 - 返回直接与Redis交互的历史实例"""
+            return RedisChatMessageHistory(session_id, self.memory_store)
         
         # 使用RunnableWithMessageHistory包装
         conversational_chain = RunnableWithMessageHistory(
@@ -660,12 +697,6 @@ class LLMService:
         except Exception as e:
             self.logger.warning(f"提取置信度失败: {str(e)}")
             return 0.5
-    
-
-    
-
-    
-
     
     def validate_skill_config(self, skill_type: str = None) -> tuple[bool, Optional[str]]:
         """验证LLM配置是否有效"""
