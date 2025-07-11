@@ -320,7 +320,9 @@ class AlertService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         start_time: Optional[str] = None,
-        end_time: Optional[str] = None
+        end_time: Optional[str] = None,
+        skill_class_id: Optional[int] = None,
+        alert_id: Optional[int] = None
     ) -> List[Alert]:
         """获取报警列表，支持多种过滤条件"""
         query = db.query(Alert)
@@ -390,6 +392,14 @@ class AlertService:
             except ValueError:
                 logger.warning(f"无效的结束时间格式: {end_time}")
         
+        # 🆕 按技能类别ID过滤
+        if skill_class_id:
+            query = query.filter(Alert.skill_class_id == skill_class_id)
+        
+        # 🆕 按报警ID过滤
+        if alert_id:
+            query = query.filter(Alert.alert_id == alert_id)
+        
         # 🆕 按时间降序排列
         alerts = query.order_by(Alert.alert_time.desc()).offset(skip).limit(limit).all()
         return alerts
@@ -408,7 +418,9 @@ class AlertService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         start_time: Optional[str] = None,
-        end_time: Optional[str] = None
+        end_time: Optional[str] = None,
+        skill_class_id: Optional[int] = None,
+        alert_id: Optional[int] = None
     ) -> int:
         """获取报警总数，支持多种过滤条件"""
         query = db.query(Alert)
@@ -473,6 +485,14 @@ class AlertService:
                 query = query.filter(Alert.alert_time <= end_datetime)
             except ValueError:
                 pass
+        
+        # 按技能类别ID过滤
+        if skill_class_id:
+            query = query.filter(Alert.skill_class_id == skill_class_id)
+        
+        # 按报警ID过滤
+        if alert_id:
+            query = query.filter(Alert.alert_id == alert_id)
         
         return query.count()
 

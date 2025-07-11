@@ -91,7 +91,9 @@ async def get_realtime_alerts(
     start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
     start_time: Optional[str] = Query(None, description="开始时间 (ISO格式)"),
-    end_time: Optional[str] = Query(None, description="结束时间 (ISO格式)")
+    end_time: Optional[str] = Query(None, description="结束时间 (ISO格式)"),
+    skill_class_id: Optional[int] = Query(None, description="技能类别ID"),
+    alert_id: Optional[int] = Query(None, description="报警ID")
 ):
     """
     获取实时预警列表，支持分页和多维度过滤
@@ -106,6 +108,7 @@ async def get_realtime_alerts(
                f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, "
                f"task_id={task_id}, location={location}, status={status}, "
                f"start_date={start_date}, end_date={end_date}, start_time={start_time}, end_time={end_time}, "
+               f"skill_class_id={skill_class_id}, alert_id={alert_id}, "
                f"page={page}, limit={limit}")
     
     # 🚀 参数验证和转换
@@ -181,7 +184,9 @@ async def get_realtime_alerts(
         start_date=start_date,
         end_date=end_date,
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        skill_class_id=skill_class_id,
+        alert_id=alert_id
     )
     
     # 🆕 获取总数（应用相同的筛选条件）
@@ -198,7 +203,9 @@ async def get_realtime_alerts(
         start_date=start_date,
         end_date=end_date,
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        skill_class_id=skill_class_id,
+        alert_id=alert_id
     )
     
     # 计算总页数
@@ -233,6 +240,8 @@ async def get_realtime_alerts(
             "task_id": task_id,
             "location": location,
             "status": status,
+            "skill_class_id": skill_class_id,
+            "alert_id": alert_id,
             "date_range": {
                 "start_date": start_date,
                 "end_date": end_date,
