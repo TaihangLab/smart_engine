@@ -891,6 +891,7 @@ ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD=30
 
 # RTSP推流配置
 RTSP_STREAMING_ENABLED=false
+RTSP_STREAMING_BACKEND=simple  # 推流后端: simple(解决卡顿), pyav, ultra_simple, ffmpeg, hybrid
 RTSP_STREAMING_BASE_URL=rtsp://192.168.1.107/detection
 RTSP_STREAMING_SIGN=a9b7ba70783b617e9998dc4dd82eb3c5
 RTSP_STREAMING_DEFAULT_FPS=15.0
@@ -1291,10 +1292,41 @@ class MyCustomSkill(BaseSkill):
 
 ### RTSP推流配置体系
 
+#### 0. 推流器后端选择（重要更新）
+
+系统现在支持三种推流器后端，解决了FFmpeg subprocess的稳定性问题：
+
+| 推流器类型 | 配置值 | 稳定性 | 实时性 | 适用场景 |
+|-----------|--------|--------|--------|----------|
+| **🚀 极简PyAV（推荐）** | `simple` | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 解决卡顿问题、生产环境 |
+| **🚀 超简PyAV** | `ultra_simple` | ⭐⭐⭐⭐ | ⭐⭐⭐⭐⭐ | 终极解决卡顿 |
+| **标准PyAV** | `pyav` | ⭐⭐⭐⭐⭐ | ⭐⭐⭐ | 功能完整但可能卡顿 |
+| **混合推流器** | `hybrid` | ⭐⭐⭐⭐⭐ | ⭐⭐⭐⭐ | 关键业务、自动故障转移 |
+| **FFmpeg推流器** | `ffmpeg` | ⭐⭐⭐ | ⭐⭐⭐⭐ | 兼容模式、已知流畅 |
+
+```bash
+# 🚀 推流器后端选择 - 专门解决卡顿问题
+RTSP_STREAMING_BACKEND=simple  # 推荐设置
+
+# 极简PyAV推流器优势:
+# - 🚀 专门解决画面卡顿问题
+# - ⚡ 极简实时推流，无队列延迟
+# - 🎯 直接编码发送，模仿FFmpeg实时性
+# - 🛡️ 保持PyAV的稳定性和重连能力
+# - 📺 每帧立即刷新，确保流畅播放
+```
+
+> **重要提示**: 
+> - **解决卡顿**: 如果PyAV还卡顿，尝试 `RTSP_STREAMING_BACKEND=ultra_simple`
+> - **需要依赖**: 所有PyAV版本都需要 `pip install av`
+> - **快速回滚**: 如有问题可设置 `RTSP_STREAMING_BACKEND=ffmpeg` 立即回滚
+
 #### 1. 全局配置（.env文件）
 ```bash
 # 全局启用/禁用RTSP推流功能
 RTSP_STREAMING_ENABLED=true
+# 🚀 推流器后端选择（解决卡顿）
+RTSP_STREAMING_BACKEND=simple
 # RTSP服务器基础地址
 RTSP_STREAMING_BASE_URL=rtsp://192.168.1.107/detection
 # 验证签名

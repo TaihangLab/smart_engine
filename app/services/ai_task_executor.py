@@ -1050,20 +1050,37 @@ class AITaskExecutor:
                 if stream_fps != base_fps:
                     logger.info(f"任务 {task.id} 推流帧率已调整: {base_fps} -> {stream_fps} (限制范围: {settings.RTSP_STREAMING_MIN_FPS}-{settings.RTSP_STREAMING_MAX_FPS})")
                 
-                # 创建并启动RTSP推流器
-                rtsp_streamer = FFmpegRTSPStreamer(
-                    rtsp_url=rtsp_url, 
-                    fps=stream_fps, 
-                    width=stream_width, 
-                    height=stream_height,
-                    crf=settings.RTSP_STREAMING_QUALITY_CRF,
-                    max_bitrate=settings.RTSP_STREAMING_MAX_BITRATE,
-                    buffer_size=settings.RTSP_STREAMING_BUFFER_SIZE
-                )
-                if rtsp_streamer.start():
-                    logger.info(f"任务 {task.id} RTSP推流已启动: {rtsp_url} ({stream_width}x{stream_height}@{stream_fps}fps)")
+                # 🚀 根据配置选择推流器类型 - 支持PyAV和FFmpeg两种后端
+                rtsp_backend = getattr(settings, 'RTSP_STREAMING_BACKEND', 'pyav').lower()
+                
+                if rtsp_backend == "pyav":
+                    # 🚀 PyAV推流器（高性能实时推流）
+                    from app.services.pyav_rtsp_streamer import PyAVRTSPStreamer
+                    rtsp_streamer = PyAVRTSPStreamer(
+                        rtsp_url=rtsp_url,
+                        fps=stream_fps,
+                        width=stream_width,
+                        height=stream_height
+                    )
                 else:
-                    logger.error(f"任务 {task.id} RTSP推流启动失败")
+                    # 使用FFmpeg推流器（默认选择）
+                    rtsp_streamer = FFmpegRTSPStreamer(
+                        rtsp_url=rtsp_url, 
+                        fps=stream_fps, 
+                        width=stream_width, 
+                        height=stream_height,
+                        crf=settings.RTSP_STREAMING_QUALITY_CRF,
+                        max_bitrate=settings.RTSP_STREAMING_MAX_BITRATE,
+                        buffer_size=settings.RTSP_STREAMING_BUFFER_SIZE
+                    )
+                if rtsp_streamer.start():
+                    backend_name = {
+                        "pyav": "PyAV", 
+                        "ffmpeg": "FFmpeg"
+                    }.get(rtsp_backend, rtsp_backend)
+                    logger.info(f"任务 {task.id} RTSP推流已启动({backend_name}): {rtsp_url} ({stream_width}x{stream_height}@{stream_fps}fps)")
+                else:
+                    logger.error(f"任务 {task.id} RTSP推流启动失败({rtsp_backend}后端)")
                     rtsp_streamer = None
             
             # 启动异步帧处理器

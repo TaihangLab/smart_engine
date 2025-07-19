@@ -315,6 +315,7 @@ class Settings(BaseSettings):
 
     # RTSP推流配置
     RTSP_STREAMING_ENABLED: bool = Field(default=True, description="是否全局启用RTSP推流功能")
+    RTSP_STREAMING_BACKEND: str = Field(default="pyav", description="推流后端选择: 'pyav'(推荐，高性能), 'ffmpeg'(兼容模式)")
     RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://192.168.1.107/detection", description="RTSP推流基础地址")
     RTSP_STREAMING_SIGN: str = Field(default="a9b7ba70783b617e9998dc4dd82eb3c5", description="RTSP推流验证签名")
     RTSP_STREAMING_DEFAULT_FPS: float = Field(default=30.0, description="RTSP推流默认帧率")
