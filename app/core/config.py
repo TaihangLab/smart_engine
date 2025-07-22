@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     MINIO_ALERT_VIDEO_PREFIX: str = Field(default="alert-videos/", description="报警视频前缀")
 
     # RabbitMQ配置
-    RABBITMQ_HOST: str = Field(default="192.168.1.107", description="RabbitMQ服务器地址")
+    RABBITMQ_HOST: str = Field(default="127.0.0.1", description="RabbitMQ服务器地址")
     RABBITMQ_PORT: int = Field(default=5672, description="RabbitMQ端口")
     RABBITMQ_USER: str = Field(default="guest", description="RabbitMQ用户名")
     RABBITMQ_PASSWORD: str = Field(default="guest", description="RabbitMQ密码")
