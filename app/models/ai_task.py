@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, Float, ForeignKey, JSON, DateTime
 from sqlalchemy.orm import relationship
-from app.db.base_class import Base
+from app.db.base import Base
 from datetime import datetime, timezone, timedelta
 
 class AITask(Base):
@@ -29,11 +29,18 @@ class AITask(Base):
     skill_class_id = Column(Integer, ForeignKey("skill_classes.id"), nullable=False)  # 技能类ID
     skill_config = Column(JSON)  # 技能在此任务中的特定配置
     
+    # 复判配置
+    review_enabled = Column(Boolean, default=False)  # 是否启用复判
+    review_skill_class_id = Column(Integer, ForeignKey("review_skill_classes.id"), nullable=True)  # 复判技能类ID
+    review_confidence_threshold = Column(Integer, default=80)  # 复判置信度阈值（0-100）
+    review_conditions = Column(JSON, nullable=True)  # 复判触发条件，如特定预警等级、类型等
+    
     created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
     updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
 
     # 关系对象
     skill_class = relationship("SkillClass")
+    review_skill_class = relationship("ReviewSkillClass", foreign_keys=[review_skill_class_id])
 
     def __repr__(self):
         return f"<AITask(id={self.id}, name='{self.name}', type='{self.task_type}')>" 

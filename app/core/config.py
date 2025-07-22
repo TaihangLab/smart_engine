@@ -21,6 +21,11 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=True, description="是否启用调试模式")
     LOG_LEVEL: str = Field(default="DEBUG", description="日志级别")
     
+    # 线程池配置
+    ALERT_GENERATION_POOL_SIZE: int = Field(default=10, description="预警生成线程池大小")
+    MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=5, description="消息处理线程池大小")
+    IMAGE_PROCESSING_POOL_SIZE: int = Field(default=8, description="图像处理线程池大小")
+    
     # Triton服务器配置
     TRITON_URL: str = Field(default="172.18.1.1:8201", description="Triton服务器地址")
     TRITON_MODEL_REPOSITORY: str = Field(default="/models", description="Triton模型仓库路径")
@@ -41,6 +46,16 @@ class Settings(BaseSettings):
     MYSQL_DB: str = Field(default="smart_vision", description="MySQL数据库名")
     MYSQL_PORT: int = Field(default=3306, description="MySQL端口")
     
+    # 数据库连接池配置
+    DB_POOL_SIZE: int = Field(default=50, description="数据库连接池大小")
+    DB_MAX_OVERFLOW: int = Field(default=100, description="数据库最大溢出连接数")
+    DB_POOL_TIMEOUT: int = Field(default=30, description="数据库连接池获取连接超时时间（秒）")
+    DB_POOL_RECYCLE: int = Field(default=3600, description="数据库连接回收时间（秒）")
+    DB_POOL_PRE_PING: bool = Field(default=True, description="数据库连接前预检查")
+    DB_ECHO: bool = Field(default=False, description="数据库SQL调试输出")
+    DB_AUTOCOMMIT: bool = Field(default=False, description="数据库自动提交")
+    DB_AUTOFLUSH: bool = Field(default=False, description="数据库自动刷新")
+    
     # WVP配置
     WVP_API_URL: str = Field(default="http://192.168.1.107:18080", description="WVP API地址")
     WVP_USERNAME: str = Field(default="admin", description="WVP用户名")
@@ -57,6 +72,7 @@ class Settings(BaseSettings):
     MINIO_SECURE: bool = Field(default=False, description="MinIO是否使用HTTPS")
     MINIO_BUCKET: str = Field(default="visionai", description="MinIO存储桶名称")
     MINIO_SKILL_IMAGE_PREFIX: str = Field(default="skill-images/", description="技能图片前缀")
+    MINIO_LLM_SKILL_ICON_PREFIX: str = Field(default="skill-icons/", description="大模型技能图标前缀")
     MINIO_ALERT_IMAGE_PREFIX: str = Field(default="alert-images/", description="报警图片前缀")
     MINIO_ALERT_VIDEO_PREFIX: str = Field(default="alert-videos/", description="报警视频前缀")
 
@@ -75,144 +91,231 @@ class Settings(BaseSettings):
     RABBITMQ_MESSAGE_TTL: int = Field(default=86400000, description="主队列消息TTL（毫秒）- 24小时")
     RABBITMQ_MAX_RETRIES: int = Field(default=3, description="消息最大重试次数")
     
-    # 报警补偿服务配置
+    # 报警补偿服务配置 - 🆕 状态驱动补偿机制
     ALERT_COMPENSATION_INTERVAL: int = Field(default=30, description="补偿检查间隔（秒）")
     ALERT_MAX_RETRY_HOURS: int = Field(default=24, description="最大重试小时数")
-
     ALERT_MAX_COMPENSATION_COUNT: int = Field(default=20, description="单次最大补偿数量")
 
     # 死信队列重新处理配置
     DEAD_LETTER_MAX_RETRY_COUNT: int = Field(default=5, description="死信最大重试次数")
-    DEAD_LETTER_MAX_DEATH_COUNT: int = Field(default=3, description="最大死信次数")
-    DEAD_LETTER_HIGH_PRIORITY_LEVEL: int = Field(default=3, description="高优先级报警级别")
     DEAD_LETTER_REPROCESS_TIME_LIMIT: int = Field(default=86400, description="重新处理时间限制（秒）")
 
-    # Redis配置
-    # REDIS_HOST: str = os.getenv("REDIS_HOST", "127.0.0.1")
-    # REDIS_PORT: int = int(os.getenv("REDIS_PORT", "6379"))
-    # REDIS_DB: int = int(os.getenv("REDIS_DB", "0"))
-    # REDIS_PASSWORD: Optional[str] = os.getenv("REDIS_PASSWORD", "ruoyi123")
     
-    # 消息恢复配置
-    MESSAGE_RECOVERY_WINDOW_HOURS: int = Field(default=24, description="默认消息恢复时间窗口（小时）")
-    MESSAGE_RECOVERY_BATCH_SIZE: int = Field(default=100, description="消息恢复批处理大小")
-    MESSAGE_RECOVERY_MAX_RETRY: int = Field(default=3, description="消息恢复最大重试次数")
-    MESSAGE_RECOVERY_TIMEOUT_SECONDS: int = Field(default=30, description="消息恢复超时时间（秒）")
+    # ✅ 系统采用简化架构 - 无需恢复机制配置
 
-    # 消息一致性检查配置
-    CONSISTENCY_CHECK_INTERVAL_MINUTES: int = Field(default=60, description="消息一致性检查间隔（分钟）")
-    CONSISTENCY_CHECK_WINDOW_HOURS: int = Field(default=1, description="消息一致性检查时间窗口（小时）")
+    # 🚀 SSE高性能配置 - 专注性能优化
+    SSE_MAX_QUEUE_SIZE: int = Field(default=1000, description="客户端队列最大大小 - 高性能队列")
+    SSE_SEND_TIMEOUT: float = Field(default=2.0, description="消息发送超时时间（秒） - 性能优化")
+    SSE_BATCH_SEND_SIZE: int = Field(default=10, description="批量发送大小 - 批处理优化")
+    SSE_ENABLE_COMPRESSION: bool = Field(default=False, description="是否启用消息压缩 - 性能优化")
 
-    # 数据库恢复配置
-    DB_RECOVERY_ENABLED: bool = Field(default=True, description="是否启用数据库恢复")
-    DB_RECOVERY_MAX_MESSAGES: int = Field(default=1000, description="单次数据库恢复最大消息数")
+    # 🔧 增强补偿机制配置 - 企业级补偿架构
+    # 生产端补偿配置
+    ALERT_MAX_RETRIES: int = Field(default=3, description="预警消息最大重试次数")
+    ALERT_COMPENSATION_TIMEOUT_MINUTES: int = Field(default=5, description="补偿超时时间（分钟）")
+    COMPENSATION_BATCH_SIZE: int = Field(default=50, description="补偿批处理大小")
 
-    # 死信队列恢复配置
-    DEADLETTER_RECOVERY_ENABLED: bool = Field(default=True, description="是否启用死信队列恢复")
-    DEADLETTER_RECOVERY_MAX_RETRY_COUNT: int = Field(default=10, description="死信消息最大重试次数")
-    DEADLETTER_RECOVERY_MAX_DEATH_COUNT: int = Field(default=5, description="死信消息最大死亡次数")
+    # 通知端补偿配置
+    NOTIFICATION_COMPENSATION_INTERVAL: int = Field(default=60, description="通知补偿检查间隔（秒）")
+    SSE_ACK_TIMEOUT_SECONDS: int = Field(default=30, description="SSE客户端ACK超时时间（秒）")
+    NOTIFICATION_MAX_RETRIES: int = Field(default=3, description="通知最大重试次数")
 
-    # 性能优化配置
-    RECOVERY_MAX_CONCURRENT_CONNECTIONS: int = Field(default=10, description="恢复操作的并发连接数")
-    RECOVERY_SEND_TIMEOUT_SECONDS: int = Field(default=5, description="恢复消息发送超时（秒）")
-    RECOVERY_BATCH_SLEEP_MS: int = Field(default=100, description="恢复过程中的休眠间隔（毫秒）")
+    # 统一补偿管理配置
+    UNIFIED_COMPENSATION_INTERVAL: int = Field(default=120, description="统一补偿检查间隔（秒）")
+    MONITORING_INTERVAL: int = Field(default=300, description="监控数据收集间隔（秒）")
 
-    # 日志配置
-    RECOVERY_LOG_LEVEL: str = Field(default="INFO", description="恢复操作日志级别")
-    RECOVERY_DETAILED_LOGGING: bool = Field(default=False, description="是否启用恢复操作的详细日志")
+    # 邮件降级配置已移除 - 简化架构设计
 
-    # 监控和告警配置
-    RECOVERY_SUCCESS_RATE_THRESHOLD: int = Field(default=90, description="恢复成功率告警阈值（百分比）")
-    DEADLETTER_QUEUE_SIZE_THRESHOLD: int = Field(default=100, description="死信队列长度告警阈值")
-    DB_CONNECTION_CHECK_INTERVAL_MINUTES: int = Field(default=5, description="数据库连接检查间隔（分钟）")
+    # 补偿阈值告警配置
+    COMPENSATION_ALERT_THRESHOLDS: Dict[str, int] = Field(
+        default={
+            "pending_publish": 50,
+            "pending_notification": 30,
+            "dead_letter": 20
+        },
+        description="补偿告警阈值配置"
+    )
 
-    # 高级配置
-    RECOVERY_ENABLE_DEDUPLICATION: bool = Field(default=True, description="是否启用消息去重")
-    RECOVERY_MIN_ALERT_LEVEL: int = Field(default=1, description="消息重要性过滤级别")
-    RECOVERY_MESSAGE_TTL_HOURS: int = Field(default=72, description="恢复消息的有效期（小时）")
-    RECOVERY_ENABLE_STATISTICS: bool = Field(default=True, description="是否启用恢复统计信息收集")
+    # 🚀 零配置企业级补偿机制 - 安防预警实时通知系统
+    # ================================================================
+    # 🎯 设计架构：消息生成 → 入队 → 消费 → MySQL持久化 → SSE推送 全链路补偿
+    # 🔧 核心原则：状态驱动、分层补偿、自动恢复、零人工干预
 
-    # 测试和开发配置
-    RECOVERY_TEST_MODE: bool = Field(default=False, description="是否启用测试模式")
-    RECOVERY_SIMULATE_DELAY_MS: int = Field(default=0, description="模拟恢复延迟（毫秒）")
-    RECOVERY_MAX_TEST_MESSAGES: int = Field(default=50, description="最大测试消息数量")
+    # ✅ 全局补偿开关（零选择设计 - 企业级默认配置）
+    COMPENSATION_ENABLE: bool = Field(default=True, description="🎯 全局补偿机制总开关")
+    COMPENSATION_AUTO_START: bool = Field(default=True, description="🚀 系统启动时自动运行补偿服务")
+    COMPENSATION_ZERO_CONFIG: bool = Field(default=True, description="🔧 零配置模式，完全自动化")
 
-    # 安全配置
-    RECOVERY_API_KEY: Optional[str] = Field(default=None, description="恢复操作API密钥")
-    RECOVERY_ALLOWED_IPS: Optional[str] = Field(default=None, description="允许恢复操作的IP地址列表（逗号分隔）")
-    RECOVERY_RATE_LIMIT_PER_HOUR: int = Field(default=10, description="恢复操作频率限制（次/小时）")
+    # 📊 消息ID生成器配置（发布记录表支撑）
+    MESSAGE_ID_GENERATOR: str = Field(default="snowflake", description="🆔 消息ID生成器：snowflake/uuid/timestamp")
+    MESSAGE_UNIQUE_CHECK: bool = Field(default=True, description="🔒 消息唯一性检查")
 
-    # 启动恢复配置
-    STARTUP_RECOVERY_ENABLED: bool = Field(default=True, description="是否启用启动自动恢复")
-    STARTUP_RECOVERY_DELAY_SECONDS: int = Field(default=5, description="启动恢复延迟时间（秒）")
-    STARTUP_RECOVERY_DEPENDENCY_WAIT_SECONDS: int = Field(default=60, description="等待依赖服务超时时间（秒）")
-    STARTUP_RECOVERY_TIME_HOURS: int = Field(default=8, description="启动恢复时间窗口（小时）")
-    STARTUP_RECOVERY_MIN_DOWNTIME_HOURS: int = Field(default=1, description="触发启动恢复的最小停机时间（小时）")
+    # 🎯 第一层：生产端补偿配置（消息生成 → 队列）
+    # =================================================
+    PRODUCER_COMPENSATION_ENABLE: bool = Field(default=True, description="🚀 生产端补偿开关")
+    PRODUCER_CONFIRM_MODE: bool = Field(default=True, description="✅ Publisher-Confirm确认机制")
+    PRODUCER_CONFIRM_TIMEOUT: int = Field(default=10, description="⏰ 生产者确认超时（秒）")
+    PRODUCER_MAX_RETRIES: int = Field(default=5, description="🔄 生产端最大重试次数")
+    PRODUCER_RETRY_INTERVAL: int = Field(default=60, description="⏳ 生产端重试间隔（秒）")
+    PRODUCER_EXPONENTIAL_BACKOFF: bool = Field(default=True, description="📈 指数退避重试策略")
+    PRODUCER_BATCH_COMPENSATION: int = Field(default=30, description="📦 生产端批量补偿大小")
 
-    # SSE连接管理配置
-    SSE_HEARTBEAT_INTERVAL: int = Field(default=30, description="心跳间隔（秒）")
-    SSE_STALE_THRESHOLD: int = Field(default=300, description="不活跃连接阈值（秒）- 5分钟")
-    SSE_SUSPICIOUS_THRESHOLD: int = Field(default=600, description="可疑连接阈值（秒）- 10分钟")
-    SSE_DEAD_THRESHOLD: int = Field(default=1800, description="死连接阈值（秒）- 30分钟")
-    SSE_MAX_QUEUE_SIZE: int = Field(default=1000, description="客户端队列最大大小")
-    SSE_CLEANUP_INTERVAL: int = Field(default=60, description="连接清理检查间隔（秒）")
-    SSE_MAX_ERROR_COUNT: int = Field(default=5, description="最大错误次数")
-    SSE_SEND_TIMEOUT: float = Field(default=2.0, description="消息发送超时时间（秒）")
+    # ⚡ 第二层：消费端补偿配置（队列 → MySQL持久化）
+    # =====================================================
+    CONSUMER_COMPENSATION_ENABLE: bool = Field(default=True, description="⚡ 消费端补偿开关")
+    CONSUMER_MANUAL_ACK: bool = Field(default=True, description="👋 应用层ACK确认模式（确保消息处理完成后才确认）")
+    CONSUMER_IDEMPOTENT_MODE: bool = Field(default=True, description="🔒 消费幂等性检查")
+    CONSUMER_MAX_RETRIES: int = Field(default=3, description="🔄 消费端最大重试次数")
+    CONSUMER_RETRY_INTERVAL: int = Field(default=30, description="⏳ 消费端重试间隔（秒）")
+    CONSUMER_DLQ_ENABLE: bool = Field(default=True, description="💀 死信队列机制")
+    CONSUMER_DLQ_AUTO_REPROCESS: bool = Field(default=True, description="🔄 死信队列自动重处理")
 
-    # SSE环境特定配置
-    SSE_ENVIRONMENT: str = Field(default="production", description="SSE运行环境: production/development/security/highload")
+    # 📡 第三层：SSE通知端补偿配置（MySQL → 前端）
+    # ===============================================
+    SSE_COMPENSATION_ENABLE: bool = Field(default=True, description="📡 SSE通知端补偿开关")
+    SSE_NOTIFICATION_TRACKING: bool = Field(default=True, description="📊 SSE通知状态追踪")
+    SSE_CLIENT_ACK_REQUIRED: bool = Field(default=True, description="✅ 客户端ACK确认要求")
+    SSE_CLIENT_ACK_TIMEOUT: int = Field(default=30, description="⏰ 客户端ACK超时（秒）")
+    SSE_NOTIFICATION_MAX_RETRIES: int = Field(default=5, description="🔄 SSE通知最大重试次数")
+    SSE_NOTIFICATION_RETRY_INTERVAL: int = Field(default=15, description="⏳ SSE通知重试间隔（秒）")
+    SSE_BATCH_NOTIFICATION: int = Field(default=20, description="📦 SSE批量通知大小")
 
-    # 安防监控系统配置（environment=security时生效）
-    SSE_SECURITY_HEARTBEAT_INTERVAL: int = Field(default=15, description="安防系统心跳间隔")
-    SSE_SECURITY_STALE_THRESHOLD: int = Field(default=180, description="安防系统不活跃阈值")
-    SSE_SECURITY_SUSPICIOUS_THRESHOLD: int = Field(default=300, description="安防系统可疑连接阈值")
-    SSE_SECURITY_DEAD_THRESHOLD: int = Field(default=600, description="安防系统死连接阈值")
-    SSE_SECURITY_CLEANUP_INTERVAL: int = Field(default=30, description="安防系统清理间隔")
-    SSE_SECURITY_MAX_ERROR_COUNT: int = Field(default=3, description="安防系统最大错误次数")
-    SSE_SECURITY_SEND_TIMEOUT: float = Field(default=1.0, description="安防系统发送超时")
+    # 🎯 统一补偿调度核心配置（零配置自动运行）
+    # ============================================
+    UNIFIED_COMPENSATION_INTERVAL: int = Field(default=30, description="🕒 统一补偿调度间隔（秒）")
+    COMPENSATION_BATCH_SIZE: int = Field(default=50, description="📦 补偿批处理大小")
+    COMPENSATION_WORKER_THREADS: int = Field(default=3, description="🧵 补偿并发工作线程数")
+    COMPENSATION_EXECUTION_TIMEOUT: int = Field(default=300, description="⏰ 补偿执行总超时（秒）")
+    COMPENSATION_PARALLEL_PROCESSING: bool = Field(default=True, description="⚡ 并行处理模式")
 
-    # 高负载环境配置（environment=highload时生效）
-    SSE_HIGHLOAD_HEARTBEAT_INTERVAL: int = Field(default=60, description="高负载环境心跳间隔")
-    SSE_HIGHLOAD_MAX_QUEUE_SIZE: int = Field(default=500, description="高负载环境队列大小")
-    SSE_HIGHLOAD_CLEANUP_INTERVAL: int = Field(default=120, description="高负载环境清理间隔")
-    SSE_HIGHLOAD_SEND_TIMEOUT: float = Field(default=3.0, description="高负载环境发送超时")
+    # 🎪 智能降级配置已移除 - 简化架构设计
+    # ==================================
 
-    # 开发测试环境配置（environment=development时生效）
-    SSE_DEV_HEARTBEAT_INTERVAL: int = Field(default=5, description="开发环境心跳间隔")
-    SSE_DEV_STALE_THRESHOLD: int = Field(default=10, description="开发环境不活跃阈值")
-    SSE_DEV_SUSPICIOUS_THRESHOLD: int = Field(default=20, description="开发环境可疑连接阈值")
-    SSE_DEV_DEAD_THRESHOLD: int = Field(default=30, description="开发环境死连接阈值")
-    SSE_DEV_CLEANUP_INTERVAL: int = Field(default=10, description="开发环境清理间隔")
+    # 📈 全链路监控配置（零配置监控体系）
+    # ================================
+    COMPENSATION_MONITORING: bool = Field(default=True, description="📈 补偿全链路监控")
+    MONITORING_METRICS_INTERVAL: int = Field(default=60, description="📊 监控指标收集间隔（秒）")
+    MONITORING_ALERT_ENABLE: bool = Field(default=True, description="🚨 监控告警机制")
 
-    # SSE高级配置
-    SSE_ENABLE_CONNECTION_POOLING: bool = Field(default=False, description="是否启用连接池")
-    SSE_CONNECTION_POOL_SIZE: int = Field(default=50, description="连接池大小")
-    SSE_ENABLE_COMPRESSION: bool = Field(default=False, description="是否启用消息压缩")
-    SSE_BATCH_SEND_SIZE: int = Field(default=10, description="批量发送大小")
-    SSE_ENABLE_METRICS: bool = Field(default=True, description="是否启用连接指标收集")
-    SSE_METRICS_INTERVAL: int = Field(default=300, description="指标收集间隔（秒）")
+    # ⚠️ 智能告警阈值（企业级预设）
+    ALERT_THRESHOLDS: Dict[str, int] = Field(
+        default={
+            "pending_publish_messages": 100,    # 待发布消息积压阈值
+            "pending_consume_messages": 80,     # 待消费消息积压阈值
+            "pending_notification_count": 50,   # 待通知数量阈值
+            "dlq_message_count": 20,            # 死信队列消息阈值
+            "sse_timeout_count": 30,            # SSE超时次数阈值
+            "producer_failure_rate": 10,        # 生产者失败率阈值（%）
+            "consumer_failure_rate": 15,        # 消费者失败率阈值（%）
+            "notification_failure_rate": 20     # 通知失败率阈值（%）
+        },
+        description="🚨 智能告警阈值配置"
+    )
 
-    # SSE性能调优配置
-    SSE_ENABLE_BACKOFF: bool = Field(default=True, description="是否启用指数退避重连")
-    SSE_MAX_BACKOFF_TIME: int = Field(default=300, description="最大退避时间（秒）")
-    SSE_BACKOFF_MULTIPLIER: float = Field(default=1.5, description="退避时间倍数")
-    SSE_MIN_BACKOFF_TIME: int = Field(default=1, description="最小退避时间（秒）")
+    # 🧹 自动数据清理配置（零维护设计）
+    # ==============================
+    AUTO_DATA_CLEANUP: bool = Field(default=True, description="🧹 自动数据清理机制")
+    SUCCESS_LOG_RETENTION_HOURS: int = Field(default=24, description="✅ 成功日志保留时间（小时）")
+    FAILED_LOG_RETENTION_DAYS: int = Field(default=7, description="❌ 失败日志保留时间（天）")
+    CLEANUP_EXECUTION_INTERVAL: int = Field(default=6, description="🕒 清理任务执行间隔（小时）")
+    PERFORMANCE_LOG_RETENTION_DAYS: int = Field(default=3, description="📊 性能日志保留时间（天）")
 
-    # SSE监控和告警配置
-    SSE_ENABLE_HEALTH_CHECK: bool = Field(default=True, description="是否启用健康检查")
-    SSE_HEALTH_CHECK_INTERVAL: int = Field(default=60, description="健康检查间隔（秒）")
-    SSE_UNHEALTHY_THRESHOLD: float = Field(default=0.3, description="不健康连接比例阈值")
-    SSE_DEAD_CONNECTION_ALERT_THRESHOLD: int = Field(default=5, description="死连接告警阈值")
+    # 🔒 安全与性能限制配置
+    # ====================
+    COMPENSATION_RATE_LIMIT_ENABLE: bool = Field(default=True, description="启用补偿速率限制")
+    COMPENSATION_RATE_LIMIT_PER_SECOND: int = Field(default=10, description="补偿操作速率限制（每秒）")
+    COMPENSATION_CIRCUIT_BREAKER_ENABLE: bool = Field(default=True, description="启用补偿熔断器")
+    COMPENSATION_CIRCUIT_BREAKER_THRESHOLD: int = Field(default=5, description="熔断器错误阈值")
 
-    # SSE安全配置
-    SSE_ENABLE_RATE_LIMITING: bool = Field(default=True, description="是否启用连接频率限制")
-    SSE_MAX_CONNECTIONS_PER_IP: int = Field(default=10, description="每个IP最大连接数")
-    SSE_CONNECTION_RATE_LIMIT: int = Field(default=60, description="连接频率限制（次/分钟）")
-    SSE_ENABLE_IP_WHITELIST: bool = Field(default=False, description="是否启用IP白名单")
-    SSE_IP_WHITELIST: str = Field(default="", description="IP白名单（逗号分隔）")
+    # 🚨 业务连续性保障
+    BUSINESS_CONTINUITY_MODE: bool = Field(default=True, description="业务连续性模式")
+    CRITICAL_ALERT_PRIORITY_BOOST: bool = Field(default=True, description="关键告警优先级提升")
+    SYSTEM_HEALTH_MONITORING: bool = Field(default=True, description="系统健康状态监控")
+
+    # 📝 补偿日志配置
+    COMPENSATION_LOG_LEVEL: str = Field(default="INFO", description="补偿服务日志级别")
+    COMPENSATION_LOG_DETAILED: bool = Field(default=True, description="启用详细补偿日志")
+    COMPENSATION_PERFORMANCE_LOG: bool = Field(default=True, description="启用补偿性能日志")
+
+    # 🎯 消息ID生成器高级配置
+    # ========================
+    MESSAGE_ID_TYPE: str = Field(default="snowflake", description="消息ID类型：snowflake/uuid4/timestamp/custom")
+    MESSAGE_ID_SNOWFLAKE_WORKER_ID: Optional[int] = Field(default=None, description="Snowflake工作机器ID（自动生成）")
+    MESSAGE_ID_CUSTOM_PREFIX: str = Field(default="ALERT", description="自定义ID前缀")
+    MESSAGE_ID_INCLUDE_TIMESTAMP: bool = Field(default=True, description="自定义ID是否包含时间戳")
+    MESSAGE_ID_RANDOM_LENGTH: int = Field(default=8, description="自定义ID随机字符长度")
+
+    # 📊 补偿性能优化配置
+    # ==================
+    COMPENSATION_PERFORMANCE_MODE: bool = Field(default=True, description="启用性能优先模式")
+    COMPENSATION_STARTUP_DELAY: int = Field(default=10, description="补偿服务启动延迟（秒）")
+    COMPENSATION_DB_CONNECTION_POOL_SIZE: int = Field(default=10, description="补偿服务数据库连接池大小")
+    COMPENSATION_PARALLEL_WORKERS: int = Field(default=4, description="补偿并行工作线程数")
+
+    # 🔧 死信队列高级配置
+    # ==================
+    DEAD_LETTER_QUEUE_ENABLE: bool = Field(default=True, description="启用死信队列")
+    DEAD_LETTER_MAX_DEATH_COUNT: int = Field(default=3, description="最大死信次数")
+    DEAD_LETTER_REQUEUE_DELAY: int = Field(default=60, description="死信重新入队延迟（秒）")
+    DEAD_LETTER_RETENTION_HOURS: int = Field(default=168, description="死信保留时间（小时）- 7天")
+
+    # 🚀 数据库连接池高性能配置
+    # ==========================
+    DB_POOL_SIZE: int = Field(default=50, description="数据库连接池大小 - 高并发优化")
+    DB_MAX_OVERFLOW: int = Field(default=100, description="数据库连接池最大溢出连接数")
+    DB_POOL_TIMEOUT: int = Field(default=30, description="获取连接的超时时间（秒）")
+    DB_POOL_RECYCLE: int = Field(default=3600, description="连接回收时间（秒）- 1小时")
+    DB_POOL_PRE_PING: bool = Field(default=True, description="连接前预检查")
+    DB_ECHO: bool = Field(default=False, description="是否输出SQL调试信息")
+    DB_AUTOCOMMIT: bool = Field(default=False, description="自动提交事务")
+    DB_AUTOFLUSH: bool = Field(default=False, description="自动刷新会话")
+
+    # 🧵 线程池高性能配置  
+    # ===================
+    AI_TASK_EXECUTOR_POOL_SIZE: int = Field(default=20, description="AI任务执行线程池大小")
+    ALERT_GENERATION_POOL_SIZE: int = Field(default=15, description="预警生成线程池大小")
+    MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=10, description="消息处理线程池大小")
+    IMAGE_PROCESSING_POOL_SIZE: int = Field(default=8, description="图像处理线程池大小")
+
+    # 🚀 RabbitMQ连接池优化配置
+    # =========================
+    RABBITMQ_CONNECTION_POOL_SIZE: int = Field(default=20, description="RabbitMQ连接池大小")
+    RABBITMQ_CHANNEL_POOL_SIZE: int = Field(default=50, description="RabbitMQ通道池大小")
+    RABBITMQ_CONNECTION_HEARTBEAT: int = Field(default=600, description="心跳间隔（秒）")
+    RABBITMQ_CONNECTION_BLOCKED_TIMEOUT: int = Field(default=300, description="连接阻塞超时（秒）")
+    RABBITMQ_PUBLISH_CONFIRM: bool = Field(default=True, description="启用发布确认机制")
+    RABBITMQ_PREFETCH_COUNT: int = Field(default=20, description="消费者预取消息数量")
+    RABBITMQ_BATCH_SIZE: int = Field(default=10, description="批量处理消息数量")
+    RABBITMQ_BATCH_TIMEOUT: float = Field(default=2.0, description="批量处理超时时间（秒）")
+
+    # 🎪 通知渠道配置
+    # ==============
+    NOTIFICATION_CHANNEL_PRIORITY: List[str] = Field(
+        default=["sse", "websocket", "email", "sms"],
+        description="通知渠道优先级列表"
+    )
+    NOTIFICATION_FALLBACK_ENABLE: bool = Field(default=True, description="启用通知渠道降级")
+    NOTIFICATION_BATCH_SIZE: int = Field(default=20, description="批量通知大小")
+
+    # 🚨 健康检查配置
+    # ==============
+    HEALTH_CHECK_ENABLE: bool = Field(default=True, description="启用健康检查")
+    HEALTH_CHECK_INTERVAL: int = Field(default=60, description="健康检查间隔（秒）")
+    HEALTH_CHECK_TIMEOUT: int = Field(default=10, description="健康检查超时（秒）")
+    HEALTH_CHECK_THRESHOLDS: Dict[str, Any] = Field(
+        default={
+            "cpu_usage_percent": 80,
+            "memory_usage_percent": 85,
+            "disk_usage_percent": 90,
+            "pending_messages": 1000,
+            "error_rate_percent": 5
+        },
+        description="健康检查阈值配置"
+    )
 
     # RTSP推流配置
     RTSP_STREAMING_ENABLED: bool = Field(default=True, description="是否全局启用RTSP推流功能")
+    RTSP_STREAMING_BACKEND: str = Field(default="pyav", description="推流后端选择: 'pyav'(推荐，高性能), 'ffmpeg'(兼容模式)")
     RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://192.168.1.107/detection", description="RTSP推流基础地址")
     RTSP_STREAMING_SIGN: str = Field(default="a9b7ba70783b617e9998dc4dd82eb3c5", description="RTSP推流验证签名")
     RTSP_STREAMING_DEFAULT_FPS: float = Field(default=30.0, description="RTSP推流默认帧率")
@@ -221,10 +324,10 @@ class Settings(BaseSettings):
     RTSP_STREAMING_QUALITY_CRF: int = Field(default=23, description="RTSP推流视频质量参数(CRF)")
     RTSP_STREAMING_MAX_BITRATE: str = Field(default="2M", description="RTSP推流最大码率")
     RTSP_STREAMING_BUFFER_SIZE: str = Field(default="4M", description="RTSP推流缓冲区大小")
-    
+
     # 智能帧获取配置
     ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD: float = Field(default=30.0, description="连接开销阈值（秒），超过此值使用按需截图模式")
-    
+
     # 预警合并配置
     ALERT_MERGE_ENABLED: bool = Field(default=True, description="是否启用预警合并功能")
     ALERT_MERGE_WINDOW_SECONDS: float = Field(default=4.0, description="预警合并时间窗口（秒）")
@@ -234,12 +337,12 @@ class Settings(BaseSettings):
     ALERT_MERGE_IMMEDIATE_LEVELS: str = Field(default="1", description="立即发送的预警等级（逗号分隔，如'1,2'）")
     ALERT_MERGE_QUICK_SEND_THRESHOLD: int = Field(default=3, description="快速发送阈值（预警数量）")
     ALERT_MERGE_EMERGENCY_DELAY_SECONDS: float = Field(default=1.0, description="紧急预警最大延迟（秒）")
-    
+
     # 高级合并策略配置
     ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS: float = Field(default=30.0, description="1-2级预警最大合并持续时间（秒）")
     ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS: float = Field(default=15.0, description="3-4级预警最大合并持续时间（秒）")
     ALERT_MERGE_ADAPTIVE_WINDOW: bool = Field(default=True, description="是否启用自适应合并窗口")
-    
+
     # 预警视频录制配置
     ALERT_VIDEO_ENABLED: bool = Field(default=True, description="是否启用预警视频录制")
     ALERT_VIDEO_BUFFER_DURATION_SECONDS: float = Field(default=120.0, description="视频缓冲区时长（秒）")
@@ -250,52 +353,58 @@ class Settings(BaseSettings):
     ALERT_VIDEO_ENCODING_TIMEOUT_SECONDS: int = Field(default=45, description="视频编码超时时间（秒）")
     ALERT_VIDEO_WIDTH: int = Field(default=1280, description="预警视频宽度（像素）")
     ALERT_VIDEO_HEIGHT: int = Field(default=720, description="预警视频高度（像素）")
-    
+
+
+    # H.264 (AVC) 视频编码配置
+    ALERT_VIDEO_CODEC: str = Field(default="avc1", description="视频编码格式 (avc1=H.264)")
+    ALERT_VIDEO_BITRATE: int = Field(default=2000000, description="视频码率 (bps, 2Mbps默认)")
+    ALERT_VIDEO_GOP_SIZE: int = Field(default=30, description="GOP大小 (关键帧间隔)")
+
     # 针对高优先级预警的视频配置
     ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警前缓冲时间（秒）")
     ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警后缓冲时间（秒）")
 
-    def get_sse_config(self) -> dict:
-        """根据环境获取SSE配置"""
-        base_config = {
-            "heartbeat_interval": self.SSE_HEARTBEAT_INTERVAL,
-            "stale_threshold": self.SSE_STALE_THRESHOLD,
-            "suspicious_threshold": self.SSE_SUSPICIOUS_THRESHOLD,
-            "dead_threshold": self.SSE_DEAD_THRESHOLD,
-            "max_queue_size": self.SSE_MAX_QUEUE_SIZE,
-            "cleanup_interval": self.SSE_CLEANUP_INTERVAL,
-            "max_error_count": self.SSE_MAX_ERROR_COUNT,
-            "send_timeout": self.SSE_SEND_TIMEOUT,
-        }
+    # 主要LLM服务配置（后端管理，前端不可见）- 使用Ollama
+    PRIMARY_LLM_PROVIDER: str = Field(default="ollama", description="主要LLM提供商")
+    PRIMARY_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="主要LLM服务器地址（OpenAI兼容API）")
+    PRIMARY_LLM_API_KEY: str = Field(default="ollama", description="主要LLM API密钥（Ollama不需要密钥）")
+    PRIMARY_LLM_MODEL: str = Field(default="llava:latest", description="主要LLM模型名称")
 
-        # 根据环境覆盖配置
-        if self.SSE_ENVIRONMENT == "security":
-            base_config.update({
-                "heartbeat_interval": self.SSE_SECURITY_HEARTBEAT_INTERVAL,
-                "stale_threshold": self.SSE_SECURITY_STALE_THRESHOLD,
-                "suspicious_threshold": self.SSE_SECURITY_SUSPICIOUS_THRESHOLD,
-                "dead_threshold": self.SSE_SECURITY_DEAD_THRESHOLD,
-                "cleanup_interval": self.SSE_SECURITY_CLEANUP_INTERVAL,
-                "max_error_count": self.SSE_SECURITY_MAX_ERROR_COUNT,
-                "send_timeout": self.SSE_SECURITY_SEND_TIMEOUT,
-            })
-        elif self.SSE_ENVIRONMENT == "highload":
-            base_config.update({
-                "heartbeat_interval": self.SSE_HIGHLOAD_HEARTBEAT_INTERVAL,
-                "max_queue_size": self.SSE_HIGHLOAD_MAX_QUEUE_SIZE,
-                "cleanup_interval": self.SSE_HIGHLOAD_CLEANUP_INTERVAL,
-                "send_timeout": self.SSE_HIGHLOAD_SEND_TIMEOUT,
-            })
-        elif self.SSE_ENVIRONMENT == "development":
-            base_config.update({
-                "heartbeat_interval": self.SSE_DEV_HEARTBEAT_INTERVAL,
-                "stale_threshold": self.SSE_DEV_STALE_THRESHOLD,
-                "suspicious_threshold": self.SSE_DEV_SUSPICIOUS_THRESHOLD,
-                "dead_threshold": self.SSE_DEV_DEAD_THRESHOLD,
-                "cleanup_interval": self.SSE_DEV_CLEANUP_INTERVAL,
-            })
+    # 备用LLM服务配置（容错机制）- 同样使用Ollama的另一个模型
+    BACKUP_LLM_PROVIDER: str = Field(default="ollama", description="备用LLM提供商")
+    BACKUP_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="备用LLM服务器地址（OpenAI兼容API）")
+    BACKUP_LLM_API_KEY: str = Field(default="ollama", description="备用LLM API密钥（Ollama不需要密钥）")
+    BACKUP_LLM_MODEL: str = Field(default="qwen3:32b", description="备用LLM模型名称")
 
-        return base_config
+    # 专用场景模型配置（后端根据技能类型自动选择）
+    ANALYSIS_LLM_MODEL: str = Field(default="llava:latest", description="分析场景专用模型（视觉多模态）")
+    REVIEW_LLM_MODEL: str = Field(default="llava:latest", description="复判场景专用模型（视觉多模态）")
+    CHAT_LLM_MODEL: str = Field(default="qwen3:32b", description="对话场景专用模型（纯文本）")
+
+    # LLM通用参数
+    LLM_TEMPERATURE: float = Field(default=0.1, description="LLM温度参数")
+    LLM_MAX_TOKENS: int = Field(default=1000, description="LLM最大令牌数")
+    LLM_TIMEOUT: int = Field(default=60, description="LLM请求超时时间（秒）")
+
+    # LLM服务质量配置
+    LLM_RETRY_COUNT: int = Field(default=3, description="LLM请求重试次数")
+    LLM_RETRY_DELAY: float = Field(default=1.0, description="LLM请求重试延迟（秒）")
+    LLM_CONNECTION_POOL_SIZE: int = Field(default=10, description="LLM连接池大小")
+    LLM_ENABLE_CACHE: bool = Field(default=False, description="是否启用LLM响应缓存")
+    LLM_ENABLE_FALLBACK: bool = Field(default=True, description="是否启用备用LLM容错机制")
+
+    # Redis配置（用于复判队列）
+    REDIS_HOST: str = Field(default="127.0.0.1", description="Redis服务器地址")
+    REDIS_PORT: int = Field(default=6379, description="Redis端口")
+    REDIS_DB: int = Field(default=0, description="Redis数据库编号")
+    REDIS_PASSWORD: str = Field(default="", description="Redis密码")
+
+    # 预警复判队列配置
+    ALERT_REVIEW_MAX_WORKERS: int = Field(default=1, description="复判队列工作者数量")
+    ALERT_REVIEW_PROCESSING_TIMEOUT: int = Field(default=300, description="复判任务处理超时时间（秒）")
+    ALERT_REVIEW_RETRY_MAX_ATTEMPTS: int = Field(default=3, description="复判任务最大重试次数")
+    ALERT_REVIEW_COMPLETED_TTL: int = Field(default=86400, description="已完成复判任务缓存时间（秒）")
+    ALERT_REVIEW_QUEUE_ENABLED: bool = Field(default=True, description="是否启用复判队列服务")
 
     class Config:
         env_file = ".env"

@@ -2,6 +2,7 @@
 系统级API路由
 """
 from fastapi import APIRouter
+from sqlalchemy import text
 from app.services.triton_client import triton_client
 from app.core.config import settings
 
@@ -37,7 +38,7 @@ async def health_check():
     # 检查数据库连接
     try:
         db = next(get_db())
-        db.execute("SELECT 1")
+        db.execute(text("SELECT 1"))
         checks["database"] = True
         db.close()
     except Exception:

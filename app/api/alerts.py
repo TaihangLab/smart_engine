@@ -2,6 +2,7 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
+from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import asyncio
 import math
@@ -18,69 +19,61 @@ router = APIRouter()
 async def alert_stream(request: Request):
     """
     创建SSE连接，用于实时推送报警信息。
-    这个端点会保持连接打开，并在有新报警时通过SSE协议推送数据。
+    使用StreamingResponse实现更稳定的SSE流。
     """
     client_ip = request.client.host if request.client else "unknown"
     user_agent = request.headers.get("user-agent", "unknown")
     logger.info(f"收到SSE连接请求，客户端IP: {client_ip}")
     
-    # 注册客户端 - 使用连接管理器
+    # 注册客户端
     client_queue = await register_sse_client(client_ip, user_agent)
-    logger.info(f"已注册SSE客户端，客户端IP: {client_ip}")
-
-    # 创建响应对象并设置SSE必需的头部
-    response = Response(
+    client_id = getattr(client_queue, '_client_id', 'unknown')
+    logger.info(f"已注册SSE客户端，客户端ID: {client_id}")
+    
+    async def generate():
+        try:
+            # 发送连接成功消息
+            yield "data: {\"event\": \"connected\"}\n\n"
+            logger.info(f"SSE连接建立成功，客户端ID: {client_id}")
+            
+            while True:
+                try:
+                    # 检查客户端是否断开
+                    if await request.is_disconnected():
+                        logger.info(f"客户端断开连接，客户端ID: {client_id}")
+                        break
+                    
+                    # 等待消息，超时则发送心跳
+                    message = await asyncio.wait_for(client_queue.get(), timeout=10.0)
+                    yield message
+                    logger.debug(f"发送消息给客户端 {client_id}")
+                    
+                except asyncio.TimeoutError:
+                    # 发送心跳
+                    yield ": heartbeat\n\n"
+                    
+                except Exception as e:
+                    logger.error(f"SSE流生成错误: {e}")
+                    break
+                    
+        except Exception as e:
+            logger.error(f"SSE连接异常: {e}")
+        finally:
+            # 清理客户端
+            unregister_sse_client(client_queue)
+            logger.info(f"SSE客户端已清理，客户端ID: {client_id}")
+    
+    return StreamingResponse(
+        generate(),
         media_type="text/event-stream",
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Headers": "*",
+            "Access-Control-Allow-Methods": "GET, OPTIONS",
         }
     )
-    logger.debug(f"已创建SSE响应对象，客户端IP: {client_ip}")
-    
-    # 创建SSE流生成器
-    async def event_generator():
-        message_count = 0
-        heartbeat_count = 0
-        client_id = getattr(client_queue, '_client_id', 'unknown')
-        
-        try:
-            # 发送初始连接成功消息
-            logger.debug(f"发送SSE连接成功消息，客户端ID: {client_id}")
-            yield "data: {\"event\": \"connected\"}\n\n"
-            message_count += 1
-            
-            # 等待队列中的消息
-            while True:
-                if await request.is_disconnected():
-                    logger.info(f"检测到SSE客户端断开连接，客户端ID: {client_id}")
-                    break
-                
-                # 从队列获取消息，设置超时防止阻塞
-                try:
-                    message = await asyncio.wait_for(client_queue.get(), timeout=1.0)
-                    yield message
-                    message_count += 1
-                    logger.debug(f"已向SSE客户端发送消息，客户端ID: {client_id}, 消息计数: {message_count}")
-                except asyncio.TimeoutError:
-                    # 发送心跳保持连接
-                    yield ": heartbeat\n\n"
-                    heartbeat_count += 1
-                    logger.debug(f"发送SSE心跳，客户端ID: {client_id}")
-                    
-        except asyncio.CancelledError:
-            # 连接已取消
-            logger.info(f"SSE连接已取消，客户端ID: {client_id}")
-            pass
-        finally:
-            # 注销客户端
-            unregister_sse_client(client_queue)
-            logger.info(f"SSE客户端连接已关闭，客户端ID: {client_id}, 发送消息: {message_count}, 心跳: {heartbeat_count}")
-    
-    # 返回SSE响应
-    response.body_iterator = event_generator()
-    return response
 
 @router.get("/real-time", response_model=Dict[str, Any])  # 向后兼容的路由
 async def get_realtime_alerts(
@@ -98,7 +91,9 @@ async def get_realtime_alerts(
     start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
     end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
     start_time: Optional[str] = Query(None, description="开始时间 (ISO格式)"),
-    end_time: Optional[str] = Query(None, description="结束时间 (ISO格式)")
+    end_time: Optional[str] = Query(None, description="结束时间 (ISO格式)"),
+    skill_class_id: Optional[int] = Query(None, description="技能类别ID"),
+    alert_id: Optional[int] = Query(None, description="报警ID")
 ):
     """
     获取实时预警列表，支持分页和多维度过滤
@@ -113,6 +108,7 @@ async def get_realtime_alerts(
                f"alert_type={alert_type}, alert_level={alert_level}, alert_name={alert_name}, "
                f"task_id={task_id}, location={location}, status={status}, "
                f"start_date={start_date}, end_date={end_date}, start_time={start_time}, end_time={end_time}, "
+               f"skill_class_id={skill_class_id}, alert_id={alert_id}, "
                f"page={page}, limit={limit}")
     
     # 🚀 参数验证和转换
@@ -188,7 +184,9 @@ async def get_realtime_alerts(
         start_date=start_date,
         end_date=end_date,
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        skill_class_id=skill_class_id,
+        alert_id=alert_id
     )
     
     # 🆕 获取总数（应用相同的筛选条件）
@@ -205,7 +203,9 @@ async def get_realtime_alerts(
         start_date=start_date,
         end_date=end_date,
         start_time=start_time,
-        end_time=end_time
+        end_time=end_time,
+        skill_class_id=skill_class_id,
+        alert_id=alert_id
     )
     
     # 计算总页数
@@ -240,6 +240,8 @@ async def get_realtime_alerts(
             "task_id": task_id,
             "location": location,
             "status": status,
+            "skill_class_id": skill_class_id,
+            "alert_id": alert_id,
             "date_range": {
                 "start_date": start_date,
                 "end_date": end_date,
@@ -263,6 +265,107 @@ async def get_realtime_alerts(
     })
     
     return response_data
+
+@router.get("/sse/status", description="获取SSE连接状态")
+def get_sse_status():
+    """
+    获取SSE连接状态信息
+    """
+    try:
+        logger.info("收到获取SSE状态请求")
+        
+        # 获取连接管理器状态
+        from app.services.sse_connection_manager import sse_manager
+        
+        status_info = {
+            "success": True,
+            "sse_enabled": True,
+            "total_connections": len(connected_clients),
+            "manager_status": {
+                "is_running": sse_manager.is_running if hasattr(sse_manager, 'is_running') else True,
+                "start_time": getattr(sse_manager, 'start_time', None),
+                "total_messages_sent": getattr(sse_manager, 'total_messages_sent', 0),
+                "active_connections": getattr(sse_manager, 'active_connections', len(connected_clients))
+            },
+            "performance": {
+                "queue_size_limit": getattr(sse_manager, 'queue_size_limit', 1000),
+                "send_timeout": getattr(sse_manager, 'send_timeout', 2.0),
+                "batch_size": getattr(sse_manager, 'batch_size', 10)
+            }
+        }
+        
+        return status_info
+    except Exception as e:
+        logger.error(f"获取SSE状态失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取SSE状态失败: {str(e)}")
+
+@router.get("/statistics", description="获取报警统计信息")
+async def get_alert_statistics(
+    db: Session = Depends(get_db),
+    days: int = Query(7, ge=1, le=365, description="统计天数"),
+):
+    """
+    获取报警统计信息
+    """
+    try:
+        logger.info(f"收到获取报警统计请求，统计天数: {days}")
+        
+        # 计算时间范围
+        from datetime import datetime, timedelta
+        end_date = datetime.now()
+        start_date = end_date - timedelta(days=days)
+        
+        # 获取统计数据
+        stats = await alert_service.get_alert_statistics(
+            db=db,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        return {
+            "success": True,
+            "time_range": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "days": days
+            },
+            "statistics": stats
+        }
+    except Exception as e:
+        logger.error(f"获取报警统计失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取报警统计失败: {str(e)}")
+
+@router.get("/connected")
+def get_connected_clients():
+    """
+    获取当前连接的SSE客户端信息
+    """
+    try:
+        logger.info("收到获取连接客户端信息请求")
+        clients_info = []
+        
+        # connected_clients 是一个set，包含客户端队列对象
+        for client_queue in connected_clients:
+            client_info = {
+                "client_id": getattr(client_queue, '_client_id', f"client_{id(client_queue)}"),
+                "connection_time": getattr(client_queue, '_connection_time', None),
+                "queue_size": client_queue.qsize() if hasattr(client_queue, 'qsize') else 0,
+                "client_ip": getattr(client_queue, '_client_ip', 'unknown'),
+                "user_agent": getattr(client_queue, '_user_agent', 'unknown'),
+                "is_connected": True  # 如果在set中说明连接是活跃的
+            }
+            clients_info.append(client_info)
+        
+        return {
+            "success": True,
+            "total_clients": len(connected_clients),
+            "clients": clients_info
+        }
+    except Exception as e:
+        logger.error(f"获取连接客户端信息失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取连接客户端信息失败: {str(e)}")
+
+
 
 @router.get("/{alert_id}", response_model=AlertResponse)
 def get_alert(
@@ -337,14 +440,19 @@ def get_alert_process(
     logger.info(f"获取报警处理流程成功: ID={alert_id}, 步骤数: {process_summary['total_steps']}")
     return response
 
-@router.post("/test", description="发送测试报警（仅供测试使用）")
-def send_test_alert(
+@router.post("/test", description="发送测试报警（高性能优化版本）")
+async def send_test_alert(
     db: Session = Depends(get_db)
 ):
     """
-    使用AI任务执行器生成测试报警（仅用于测试）
+    🚀 高性能测试报警接口 - 异步处理优化
+    
+    优化策略：
+    1. 快速响应：接口立即返回，后台异步处理
+    2. 异步MinIO上传：避免IO阻塞
+    3. 数据库查询缓存：减少重复查询
     """
-    logger.info("收到发送测试报警请求")
+    logger.info("收到发送测试报警请求 - 高性能版本")
     
     try:
         # 导入必要的模块
@@ -353,49 +461,28 @@ def send_test_alert(
         import numpy as np
         import cv2
         import json
+        import asyncio
         from datetime import datetime
         
-        # 创建模拟的AITask对象
+        # 🚀 优化1：预构建轻量级模拟数据
         mock_task = AITask(
-            id=9999,  # 测试任务ID
-            name="测试报警任务",
-            description="用于测试报警功能的模拟任务",
-            status=True,
-            alert_level=1,
-            frame_rate=1.0,
+            id=9999, name="测试报警任务", description="高性能测试", status=True,
+            alert_level=1, frame_rate=1.0, task_type="detection", config='{}',
+            camera_id=123, skill_class_id=9999, skill_config='{}',
             running_period='{"enabled": true, "periods": [{"start": "00:00", "end": "23:59"}]}',
-            electronic_fence='{"enabled": true, "points": [[{"x": 100, "y": 80}, {"x": 500, "y": 80}, {"x": 500, "y": 350}, {"x": 100, "y": 350}]], "trigger_mode": "inside"}',
-            task_type="detection",
-            config='{}',
-            camera_id=123,
-            skill_class_id=9999,
-            skill_config='{}'
+            electronic_fence='{"enabled": true, "points": [[{"x": 100, "y": 80}, {"x": 500, "y": 80}, {"x": 500, "y": 350}, {"x": 100, "y": 350}]], "trigger_mode": "inside"}'
         )
         
-        # 创建模拟的报警数据（使用与示例一致的检测结果格式）
+        # 🚀 优化2：简化报警数据结构
         mock_alert_data = {
             "detections": [
-                {
-                    "bbox": [383, 113, 472, 317],  # [x1, y1, x2, y2] - 果蔬生鲜区域
-                    "confidence": 0.8241143226623535,
-                    "class_name": "果蔬生鲜"
-                },
-                {
-                    "bbox": [139, 105, 251, 308],  # [x1, y1, x2, y2] - 家居家纺区域
-                    "confidence": 0.8606756329536438,
-                    "class_name": "家居家纺"
-                },
-                {
-                    "bbox": [491, 125, 558, 301],  # [x1, y1, x2, y2] - 食品饮料区域
-                    "confidence": 0.6238403916358948,
-                    "class_name": "食品饮料"
-                }
+                {"bbox": [383, 113, 472, 317], "confidence": 0.82, "class_name": "果蔬生鲜"},
+                {"bbox": [139, 105, 251, 308], "confidence": 0.86, "class_name": "家居家纺"},
+                {"bbox": [491, 125, 558, 301], "confidence": 0.62, "class_name": "食品饮料"}
             ],
             "alert_info": {
-                "alert_triggered": True,
-                "alert_level": 1,
-                "alert_name": "商品区域检测报警",
-                "alert_type": "product_area_detection",
+                "alert_triggered": True, "alert_level": 1,
+                "alert_name": "商品区域检测报警", "alert_type": "product_area_detection",
                 "alert_description": "检测到多个商品区域有异常活动，请及时查看"
             }
         }
@@ -421,27 +508,41 @@ def send_test_alert(
         cv2.putText(mock_frame, timestamp_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(mock_frame, "摄像头ID: 123", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
-        logger.info("正在调用AI任务执行器生成测试报警...")
+        # 🚀 优化6：异步处理 - 立即返回响应，后台处理
+        task_id = f"test_{int(datetime.now().timestamp())}"
         
-        # 调用AI任务执行器的_generate_alert方法
-        result = task_executor._generate_alert(
-            task=mock_task,
-            alert_data=mock_alert_data,
-            frame=mock_frame,
-            db=db,
-            level=1
-        )
+        # 创建异步任务，不等待完成
+        async def process_alert_async():
+            try:
+                result = await asyncio.get_event_loop().run_in_executor(
+                    task_executor.alert_executor,  # 使用现有线程池
+                    task_executor._generate_alert_async_optimized,  # 新的优化方法
+                    mock_task, mock_alert_data, mock_frame, 1
+                )
+                if result:
+                    logger.info(f"✅ 异步测试报警处理完成: task_id={task_id}")
+                else:
+                    logger.warning(f"⚠️ 异步测试报警处理失败: task_id={task_id}")
+            except Exception as e:
+                logger.error(f"❌ 异步测试报警处理异常: task_id={task_id}, error={e}")
         
-        if result:
-            logger.info("测试报警生成成功")
-            return {
-                "message": "测试报警已生成并发送",
-                "alert_id": result.get("task_id", "unknown"),
-                "method": "ai_task_executor._generate_alert"
+        # 启动异步任务（fire-and-forget）
+        asyncio.create_task(process_alert_async())
+        
+        # 🚀 立即返回响应（不等待MinIO上传）
+        logger.info(f"✅ 测试报警请求已接收并进入异步处理队列: task_id={task_id}")
+        return {
+            "success": True,
+            "message": "测试报警已进入处理队列，正在后台异步处理",
+            "task_id": task_id,
+            "method": "async_optimized",
+            "optimization": {
+                "async_processing": True,
+                "database_cache": "摄像头和技能信息缓存5分钟",
+                "fast_response": "立即返回，后台处理",
+                "expected_improvement": "响应时间从数秒降至数十毫秒"
             }
-        else:
-            logger.error("测试报警生成失败")
-            raise HTTPException(status_code=500, detail="生成测试报警失败")
+        }
             
     except Exception as e:
         logger.error(f"发送测试报警失败: {str(e)}", exc_info=True)

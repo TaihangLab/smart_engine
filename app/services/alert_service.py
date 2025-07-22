@@ -320,7 +320,9 @@ class AlertService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         start_time: Optional[str] = None,
-        end_time: Optional[str] = None
+        end_time: Optional[str] = None,
+        skill_class_id: Optional[int] = None,
+        alert_id: Optional[int] = None
     ) -> List[Alert]:
         """获取报警列表，支持多种过滤条件"""
         query = db.query(Alert)
@@ -390,6 +392,14 @@ class AlertService:
             except ValueError:
                 logger.warning(f"无效的结束时间格式: {end_time}")
         
+        # 🆕 按技能类别ID过滤
+        if skill_class_id:
+            query = query.filter(Alert.skill_class_id == skill_class_id)
+        
+        # 🆕 按报警ID过滤
+        if alert_id:
+            query = query.filter(Alert.alert_id == alert_id)
+        
         # 🆕 按时间降序排列
         alerts = query.order_by(Alert.alert_time.desc()).offset(skip).limit(limit).all()
         return alerts
@@ -408,7 +418,9 @@ class AlertService:
         start_date: Optional[str] = None,
         end_date: Optional[str] = None,
         start_time: Optional[str] = None,
-        end_time: Optional[str] = None
+        end_time: Optional[str] = None,
+        skill_class_id: Optional[int] = None,
+        alert_id: Optional[int] = None
     ) -> int:
         """获取报警总数，支持多种过滤条件"""
         query = db.query(Alert)
@@ -473,6 +485,14 @@ class AlertService:
                 query = query.filter(Alert.alert_time <= end_datetime)
             except ValueError:
                 pass
+        
+        # 按技能类别ID过滤
+        if skill_class_id:
+            query = query.filter(Alert.skill_class_id == skill_class_id)
+        
+        # 按报警ID过滤
+        if alert_id:
+            query = query.filter(Alert.alert_id == alert_id)
         
         return query.count()
 
@@ -540,6 +560,106 @@ class AlertService:
             "today_alerts": today_alerts,
             "pending_alerts": pending_alerts,
             "daily_stats": daily_stats
+        }
+
+    async def get_alert_statistics(self, db: Session, start_date: datetime, end_date: datetime) -> Dict[str, Any]:
+        """获取指定时间范围的报警统计信息 - 异步版本"""
+        # 总报警数（指定时间范围内）
+        total_alerts = (
+            db.query(Alert)
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .count()
+        )
+        
+        # 各状态报警数统计（指定时间范围内）
+        status_counts = {}
+        for status in AlertStatus:
+            count = (
+                db.query(Alert)
+                .filter(Alert.alert_time >= start_date)
+                .filter(Alert.alert_time <= end_date)
+                .filter(Alert.status == int(status))
+                .count()
+            )
+            status_counts[AlertStatus.get_display_name(int(status))] = count
+        
+        # 各报警类型统计
+        from sqlalchemy import func
+        alert_type_stats = (
+            db.query(Alert.alert_type, func.count(Alert.alert_id).label('count'))
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .group_by(Alert.alert_type)
+            .all()
+        )
+        
+        type_counts = {type_name: count for type_name, count in alert_type_stats}
+        
+        # 各报警等级统计
+        level_stats = (
+            db.query(Alert.alert_level, func.count(Alert.alert_id).label('count'))
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .group_by(Alert.alert_level)
+            .all()
+        )
+        
+        level_counts = {f"等级{level}": count for level, count in level_stats}
+        
+        # 按天统计（时间范围内每日报警数）
+        days_between = (end_date.date() - start_date.date()).days
+        daily_stats = []
+        
+        for i in range(days_between + 1):
+            date = start_date.date() + timedelta(days=i)
+            day_start = datetime.combine(date, datetime.min.time())
+            day_end = datetime.combine(date, datetime.max.time())
+            
+            count = (
+                db.query(Alert)
+                .filter(Alert.alert_time >= day_start)
+                .filter(Alert.alert_time <= day_end)
+                .count()
+            )
+            
+            daily_stats.append({
+                "date": date.strftime("%Y-%m-%d"),
+                "count": count
+            })
+        
+        # 高频报警摄像头统计
+        camera_stats = (
+            db.query(Alert.camera_id, Alert.camera_name, func.count(Alert.alert_id).label('count'))
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .group_by(Alert.camera_id, Alert.camera_name)
+            .order_by(func.count(Alert.alert_id).desc())
+            .limit(10)
+            .all()
+        )
+        
+        camera_counts = [
+            {
+                "camera_id": camera_id,
+                "camera_name": camera_name or f"摄像头{camera_id}",
+                "count": count
+            }
+            for camera_id, camera_name, count in camera_stats
+        ]
+        
+        return {
+            "total_alerts": total_alerts,
+            "status_counts": status_counts,
+            "type_counts": type_counts,
+            "level_counts": level_counts,
+            "daily_stats": daily_stats,
+            "camera_stats": camera_counts,
+            "time_range": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat(),
+                "days": days_between + 1
+            }
         }
 
     async def _direct_broadcast(self, alert_data: Dict[str, Any]) -> None:

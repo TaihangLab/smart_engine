@@ -11,6 +11,7 @@ from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
 from app.services.rabbitmq_client import rabbitmq_client
+from app.models.ai_task import AITask
 
 logger = logging.getLogger(__name__)
 
@@ -191,8 +192,13 @@ class VideoBufferManager:
                 temp_video_path = temp_file.name
             
             try:
-                # 创建视频编码器
-                fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+                # 创建视频编码器 - 使用H.264 (AVC)编码
+                # H.264/AVC优势: 
+                # 1. 更好的压缩率，相同质量下文件更小
+                # 2. 广泛的设备和浏览器支持
+                # 3. 硬件加速编解码支持
+                # 4. 更好的流媒体传输性能
+                fourcc = cv2.VideoWriter_fourcc(*'avc1')  # 使用H.264 AVC编码
                 video_writer = cv2.VideoWriter(temp_video_path, fourcc, self.fps, (target_width, target_height))
                 
                 if not video_writer.isOpened():
@@ -338,11 +344,17 @@ class AlertMergeManager:
         self.video_height = settings.ALERT_VIDEO_HEIGHT
         self.video_encoding_timeout = settings.ALERT_VIDEO_ENCODING_TIMEOUT_SECONDS
         
+        # H.264编码配置
+        self.video_codec = getattr(settings, 'ALERT_VIDEO_CODEC', 'avc1')
+        self.video_bitrate = getattr(settings, 'ALERT_VIDEO_BITRATE', 2000000)
+        self.video_gop_size = getattr(settings, 'ALERT_VIDEO_GOP_SIZE', 30)
+        
         logger.info(f"预警合并管理器已初始化 - 合并功能: {'启用' if self.merge_enabled else '禁用'}, "
                    f"视频录制: {'启用' if self.video_enabled else '禁用'}, "
                    f"合并窗口: {self.merge_window}秒, 普通最大持续时间: {self.normal_max_duration}秒, "
                    f"关键最大持续时间: {self.critical_max_duration}秒, "
-                   f"最大延迟: {self.max_merge_delay}秒, 立即发送等级: {self.immediate_levels}")
+                   f"最大延迟: {self.max_merge_delay}秒, 立即发送等级: {self.immediate_levels}, "
+                   f"视频编码: {self.video_codec}, 码率: {self.video_bitrate}bps, GOP: {self.video_gop_size}")
     
     def get_or_create_video_buffer(self, task_id: int, fps: float = None) -> VideoBufferManager:
         """获取或创建视频缓冲管理器"""
@@ -359,7 +371,7 @@ class AlertMergeManager:
                     buffer_duration=self.video_buffer_duration,
                     fps=fps
                 )
-                logger.info(f"为任务 {task_id} 创建视频缓冲管理器 (缓冲时长: {self.video_buffer_duration}秒, FPS: {fps})")
+                logger.info(f"为任务 {task_id} 创建视频缓冲管理器 (缓冲时长: {self.video_buffer_duration}秒, FPS: {fps}, 编码格式: {self.video_codec})")
             return self.video_buffers[task_id]
     
     def add_frame_to_buffer(self, task_id: int, frame_bytes: bytes, width: int, height: int, fps: float = None):
@@ -625,6 +637,9 @@ class AlertMergeManager:
             if success:
                 logger.info(f"✅ 合并预警已发送: {alert_key}, 预警数量: {merged_alert.alert_count}, "
                            f"持续时间: {merged_alert.get_duration():.1f}秒, 视频: {'有' if video_object_name else '无'}")
+                
+                # 🔍 预警发送成功后，检查是否需要复判
+                self._check_and_trigger_review_after_alert(final_alert)
             else:
                 logger.error(f"❌ 发送合并预警失败: {alert_key}")
             
@@ -720,6 +735,9 @@ class AlertMergeManager:
             
             if success:
                 logger.info(f"✅ 1级预警已立即发送: task_id={task_id}, 视频异步生成中: {expected_video_object_name}")
+                
+                # 🔍 预警发送成功后，检查是否需要复判
+                self._check_and_trigger_review_after_alert(immediate_alert)
                 
                 # 🎬 异步生成视频（在后台进行）
                 self._schedule_async_video_generation(
@@ -865,6 +883,179 @@ class AlertMergeManager:
             return self.critical_max_duration
         else:  # 3-4级为普通预警
             return self.normal_max_duration
+    
+    def _check_and_trigger_review_after_alert(self, alert_data: Dict[str, Any]):
+        """
+        预警发送成功后检查是否需要复判
+        
+        Args:
+            alert_data: 预警数据
+        """
+        try:
+            task_id = alert_data.get("task_id")
+            if not task_id:
+                logger.warning("预警数据中缺少task_id，无法进行复判检查")
+                return
+            
+            # 异步检查复判，避免阻塞预警发送流程
+            import threading
+            review_thread = threading.Thread(
+                target=self._async_check_review,
+                args=(alert_data,),
+                daemon=True,
+                name=f"AlertReview-{task_id}-{int(time.time())}"
+            )
+            review_thread.start()
+            logger.debug(f"已启动预警复判检查线程: task_id={task_id}")
+            
+        except Exception as e:
+            logger.error(f"启动预警复判检查失败: {str(e)}")
+    
+    def _async_check_review(self, alert_data: Dict[str, Any]):
+        """
+        异步执行复判检查
+        
+        Args:
+            alert_data: 预警数据
+        """
+        try:
+            from app.db.session import get_db
+            from app.models.ai_task import AITask
+            from sqlalchemy.orm import Session
+            
+            task_id = alert_data.get("task_id")
+            logger.info(f"开始检查任务 {task_id} 是否需要复判")
+            
+            # 获取数据库会话
+            db: Session = next(get_db())
+            
+            try:
+                # 查询AI任务配置
+                ai_task = db.query(AITask).filter(AITask.id == task_id).first()
+                if not ai_task:
+                    logger.warning(f"AI任务不存在: {task_id}")
+                    return
+                
+                # 检查是否启用复判
+                if not ai_task.review_enabled:
+                    logger.debug(f"任务 {task_id} 未启用复判功能")
+                    return
+                
+                # 检查是否配置了复判技能
+                if not ai_task.review_llm_skill_class_id:
+                    logger.warning(f"任务 {task_id} 启用了复判但未配置复判技能")
+                    return
+                
+                # 检查复判条件
+                if not self._check_review_conditions_for_alert(alert_data, ai_task):
+                    logger.debug(f"任务 {task_id} 的预警不满足复判条件")
+                    return
+                
+                # 调用复判服务
+                logger.info(f"✅ 任务 {task_id} 满足复判条件，开始执行复判")
+                self._trigger_llm_review(alert_data, ai_task)
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"异步复判检查失败: {str(e)}")
+    
+    def _check_review_conditions_for_alert(self, alert_data: Dict[str, Any], ai_task: AITask) -> bool:
+        """
+        检查预警是否满足复判条件
+        
+        Args:
+            alert_data: 预警数据
+            ai_task: AI任务对象
+            
+        Returns:
+            是否满足复判条件
+        """
+        try:
+            conditions = ai_task.review_conditions
+            if not conditions:
+                return True  # 没有条件限制，默认都复判
+            
+            # 检查预警等级
+            if "alert_levels" in conditions:
+                alert_level = alert_data.get("alert_level", 4)
+                if alert_level not in conditions["alert_levels"]:
+                    logger.debug(f"预警等级 {alert_level} 不在复判条件中")
+                    return False
+            
+            # 检查预警类型
+            if "alert_types" in conditions:
+                alert_type = alert_data.get("alert_type", "")
+                if alert_type not in conditions["alert_types"]:
+                    logger.debug(f"预警类型 {alert_type} 不在复判条件中")
+                    return False
+            
+            # 检查摄像头ID
+            if "camera_ids" in conditions:
+                camera_id = alert_data.get("camera_id")
+                if camera_id not in conditions["camera_ids"]:
+                    logger.debug(f"摄像头 {camera_id} 不在复判条件中")
+                    return False
+            
+            # 检查时间范围（如果有）
+            if "time_range" in conditions:
+                from datetime import datetime
+                time_range = conditions["time_range"]
+                
+                # 使用预警时间或当前时间
+                alert_time_str = alert_data.get("alert_time")
+                if alert_time_str:
+                    alert_time = datetime.fromisoformat(alert_time_str.replace('Z', '+00:00')).time()
+                else:
+                    alert_time = datetime.now().time()
+                
+                start_time = datetime.strptime(time_range["start"], "%H:%M").time()
+                end_time = datetime.strptime(time_range["end"], "%H:%M").time()
+                
+                if not (start_time <= alert_time <= end_time):
+                    logger.debug(f"预警时间 {alert_time} 不在复判时间范围内")
+                    return False
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"检查复判条件失败: {str(e)}")
+            return False
+    
+    def _trigger_llm_review(self, alert_data: Dict[str, Any], ai_task: AITask):
+        """
+        触发LLM复判（使用队列服务）
+        
+        Args:
+            alert_data: 预警数据
+            ai_task: AI任务对象
+        """
+        try:
+            from app.services.alert_review_queue_service import alert_review_queue_service
+            
+            # 调用队列服务添加复判任务
+            import asyncio
+            
+            # 创建新的事件循环（因为在线程中）
+            try:
+                loop = asyncio.get_event_loop()
+            except RuntimeError:
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+            
+            # 将复判任务加入队列
+            success = loop.run_until_complete(
+                alert_review_queue_service.enqueue_review_task(alert_data, ai_task)
+            )
+            
+            if success:
+                logger.info(f"🎯 任务 {ai_task.id} 的预警复判任务已加入队列")
+            else:
+                logger.error(f"❌ 任务 {ai_task.id} 的预警复判任务加入队列失败")
+                
+        except Exception as e:
+            logger.error(f"触发LLM复判失败: {str(e)}")
 
 
 # 创建全局预警合并管理器实例

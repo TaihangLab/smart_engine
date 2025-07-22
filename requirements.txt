@@ -12,6 +12,7 @@ pytest==8.3.4
 python-dotenv==1.1.0
 python_jose==3.3.0
 Requests==2.32.3
+httpx==0.28.1
 SQLAlchemy==2.0.25
 tritonclient[all]==2.41.0
 uvicorn==0.34.2
@@ -23,3 +24,13 @@ scipy==1.16.0
 scikit-image==0.25.2
 lap==0.5.12
 filterpy==1.4.5
+langchain==0.3.26
+langchain-openai==0.3.27
+# langchain-anthropic==0.2.5
+# langchain-google-genai==2.0.5
+# langchain-community==0.3.10
+langchain-core==0.3.66
+redis==5.2.1
+cryptography
+# PyAV - 高稳定性RTSP推流
+av>=15.0.0
