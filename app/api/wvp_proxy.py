@@ -26,8 +26,8 @@ async def wvp_proxy(request: Request, path: str):
         转发后的响应
     """
     try:
-        # 构建完整的WVP URL
-        wvp_url = f"{settings.WVP_API_URL}/api/{path}"
+        # 构建完整的WVP URL - 直接原样转发
+        wvp_url = f"{settings.WVP_API_URL}/{path}"
         
         # 获取请求参数
         query_params = dict(request.query_params)
@@ -59,12 +59,18 @@ async def wvp_proxy(request: Request, path: str):
         if 'access-token' in wvp_client.session.headers:
             forwarded_headers['access-token'] = wvp_client.session.headers['access-token']
         
-        logger.info(f"代理WVP请求: {request.method} {wvp_url}")
-        logger.debug(f"查询参数: {query_params}")
-        logger.debug(f"转发头: {forwarded_headers}")
+        # 生产环境减少日志输出以提升性能
+        if settings.DEBUG:
+            logger.info(f"代理WVP请求: {request.method} {wvp_url}")
+            logger.debug(f"查询参数: {query_params}")
+            logger.debug(f"转发头: {forwarded_headers}")
         
-        # 使用httpx异步客户端转发请求
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        # 使用httpx异步客户端转发请求，优化性能配置
+        async with httpx.AsyncClient(
+            timeout=10.0,  # 降低超时时间
+            limits=httpx.Limits(max_keepalive_connections=50, max_connections=100),  # 连接池优化
+            http2=True  # 启用HTTP/2支持
+        ) as client:
             response = await client.request(
                 method=request.method,
                 url=wvp_url,
@@ -74,8 +80,9 @@ async def wvp_proxy(request: Request, path: str):
                 follow_redirects=True
             )
             
-            # 检查响应状态
-            logger.info(f"WVP响应状态: {response.status_code}")
+            # 检查响应状态（仅在调试模式下记录）
+            if settings.DEBUG:
+                logger.info(f"WVP响应状态: {response.status_code}")
             
             # 处理认证失败的情况
             if response.status_code == 401:
