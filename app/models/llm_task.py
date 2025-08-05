@@ -18,13 +18,15 @@ class LLMTask(Base):
     name = Column(String(128), nullable=False)
     description = Column(Text, nullable=True)
     
-    # 关联的技能类
-    skill_class_id = Column(Integer, ForeignKey("llm_skill_classes.id"), nullable=False)
+    # 关联的技能类业务ID
+    skill_id = Column(String(128), ForeignKey("llm_skill_classes.skill_id"), nullable=False)
+    
     
     # 任务配置
     camera_id = Column(Integer, nullable=True)  # 摄像头ID，可选
     frame_rate = Column(Integer, default=30)    # 帧率（每分钟处理次数）
     status = Column(Boolean, default=True)
+    alert_level = Column(Integer, default=0)  # 预警等级
     
     # 运行时段配置
     running_period = Column(JSON, nullable=True)
@@ -49,12 +51,12 @@ class LLMTaskCreate(BaseModel):
     """创建LLM任务的请求模型"""
     name: str = Field(..., description="任务名称")
     description: Optional[str] = Field(None, description="任务描述")
-    skill_class_id: int = Field(..., description="技能类ID")
+    skill_id: str = Field(..., description="技能类业务ID")
     camera_id: Optional[int] = Field(None, description="摄像头ID")
     frame_rate: int = Field(30, ge=1, le=3600, description="帧率（每分钟处理次数）")
     status: bool = Field(True, description="是否启用")
+    alert_level: int = Field(0, ge=0, le=4, description="预警等级 (0:默认, 1:最高, 2:高, 3:中, 4:低)")
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行时段配置")
-    custom_config: Optional[Dict[str, Any]] = Field(None, description="自定义配置")
 
 
 class LLMTaskUpdate(BaseModel):
@@ -64,6 +66,7 @@ class LLMTaskUpdate(BaseModel):
     camera_id: Optional[int] = Field(None, description="摄像头ID")
     frame_rate: Optional[int] = Field(None, ge=1, le=3600, description="帧率（每分钟处理次数）")
     status: Optional[bool] = Field(None, description="是否启用")
+    alert_level: Optional[int] = Field(None, ge=0, le=4, description="预警等级 (0:默认, 1:最高, 2:高, 3:中, 4:低)")
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行时段配置")
     custom_config: Optional[Dict[str, Any]] = Field(None, description="自定义配置")
 
@@ -77,6 +80,7 @@ class LLMTaskResponse(BaseModel):
     camera_id: Optional[int]
     frame_rate: int
     status: bool
+    alert_level: int
     running_period: Optional[Dict[str, Any]]
     custom_config: Optional[Dict[str, Any]]
     created_at: datetime
