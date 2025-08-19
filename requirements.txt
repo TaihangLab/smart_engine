@@ -34,3 +34,4 @@ redis==5.2.1
 cryptography
 # PyAV - 高稳定性RTSP推流
 av>=15.0.0
+psutil==7.0.0
