@@ -15,10 +15,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 7  # 一级预警：7名及以上
-    LEVEL_2 = 4  # 二级预警：4-6名
-    LEVEL_3 = 2  # 三级预警：2-3名
-    LEVEL_4 = 1  # 四级预警：1名
+    unhelmetPersonCount = 5
 
 class HelmetDetectorSkill(BaseSkill):
     """安全帽检测技能
@@ -45,29 +42,9 @@ class HelmetDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
-            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
-            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
-            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+            "un_helmet_person_count": AlertThreshold.unhelmetPersonCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到LEVEL_1: {AlertThreshold.LEVEL_1}名及以上工人未佩戴安全帽时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到LEVEL_2: {AlertThreshold.LEVEL_2}名工人未佩戴安全帽时触发。"
-            },
-            {
-                "level": 3,
-                "description": f"当检测到LEVEL_3: {AlertThreshold.LEVEL_3}名工人未佩戴安全帽时触发。"
-            },
-            {
-                "level": 4,
-                "description": f"当检测到LEVEL_4: {AlertThreshold.LEVEL_4}名工人未佩戴安全帽时触发。"
-            }
-        ]
+        "alert_definitions":  f"当检测到: {AlertThreshold.unhelmetPersonCount}名及以上工人未佩戴安全帽时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -92,10 +69,7 @@ class HelmetDetectorSkill(BaseSkill):
         self.input_width, self.input_height = params.get("input_size")
         
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
-        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
-        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
-        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
+        self.un_helmet_person_count = params["un_helmet_person_count"]
         
         self.log("info", f"初始化安全帽检测器: model={self.model_name}")
 
@@ -289,70 +263,86 @@ class HelmetDetectorSkill(BaseSkill):
                 })
 
         return results
-            
 
     def analyze_safety(self, detections):
-        """分析安全状况，检查是否有人头未戴安全帽
-        
+        """分析安全状况，检查是否有人未戴安全帽
+
         Args:
             detections: 检测结果
-            
+
         Returns:
             Dict: 分析结果，包含预警信息
         """
-        helmet_count = 0
-        head_count = 0
+        # 统计各类别数量
+        helmet_count = 0  # 已佩戴安全帽的人数
+        no_helmet_count = 0  # 未佩戴安全帽的人数
+
+        # 分类检测结果
         for det in detections:
             class_name = det.get('class_name', '')
-            if class_name == 'helmet':
+            if class_name == 'helmet':  # 已佩戴安全帽
                 helmet_count += 1
-            elif class_name == 'no_helmet':
-                head_count += 1
+            elif class_name == 'no_helmet':  # 未佩戴安全帽
+                no_helmet_count += 1
 
-        total_heads = helmet_count + head_count
-        safety_ratio = helmet_count / total_heads if total_heads > 0 else 1.0
-        is_safe = head_count == 0
+        # 计算总人数（佩戴 + 未佩戴）
+        total_heads = helmet_count + no_helmet_count
 
+        # 计算安全率：安全帽佩戴率
+        if total_heads > 0:
+            safety_ratio = min(helmet_count / total_heads, 1.0)  # 最大为1.0
+            is_safe = no_helmet_count == 0
+        else:
+            safety_ratio = 1.0  # 没有人头时认为安全
+            is_safe = True
+
+        # 可能未佩戴安全帽的人数
+        unsafe_count = no_helmet_count
+        safe_count = helmet_count
+
+        # 确定预警信息
         alert_triggered = False
-        alert_level = 0
+        # alert_level = 0
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if head_count > 0:
+        if unsafe_count > 0:
             alert_triggered = True
-            if head_count >= self.level_1_threshold:
-                alert_level = 1
-            elif self.level_2_threshold <= head_count < self.level_1_threshold:
-                alert_level = 2
-            elif self.level_3_threshold <= head_count < self.level_2_threshold:
-                alert_level = 3
-            else:
-                alert_level = 4
-
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
-            severity = level_names.get(alert_level, "严重")
+            # # 如需启用分级，可参考以下注释并在类中定义阈值：
+            # if unsafe_count >= self.level_1_threshold:
+            #     alert_level = 1
+            # elif self.level_2_threshold <= unsafe_count < self.level_1_threshold:
+            #     alert_level = 2
+            # elif self.level_3_threshold <= unsafe_count < self.level_2_threshold:
+            #     alert_level = 3
+            # else:
+            #     alert_level = 4
 
             alert_name = "未戴安全帽"
             alert_type = "安全生产预警"
-            alert_description = f"检测到{head_count}名工人未佩戴安全帽（共检测到{total_heads}名工人），属于{severity}违规行为。建议立即通知现场安全员进行处理。"
+            alert_description = f"检测到{unsafe_count}名工人未佩戴安全帽（共检测到{total_heads}名工人），建议立即通知现场安全员进行处理。"
+
 
         result = {
-            "total_heads": total_heads,
-            "safe_count": helmet_count,
-            "unsafe_count": head_count,
-            "safety_ratio": safety_ratio,
-            "is_safe": is_safe,
+            "total_heads": total_heads,  # 检测到的总人头数
+            "safe_count": safe_count,  # 佩戴安全帽人数
+            "unsafe_count": unsafe_count,  # 未佩戴安全帽人数
+            "safety_ratio": safety_ratio,  # 佩戴率
+            "is_safe": is_safe,  # 是否整体安全
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                # "alert_level": alert_level,             # 预警等级（如启用）
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
-        self.log("info", f"安全分析: 共检测到 {total_heads} 个人头，其中 {helmet_count} 个戴安全帽，{head_count} 个未戴安全帽，预警等级: {alert_level}")
+        self.log(
+            "info",
+            f"安全分析: 共检测到 {total_heads} 个人头，{safe_count} 个戴安全帽，{unsafe_count} 个未戴安全帽"
+        )
         return result
 
     def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
