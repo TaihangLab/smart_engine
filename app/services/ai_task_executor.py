@@ -1348,17 +1348,16 @@ class AITaskExecutor:
                     # 检查技能返回的预警信息
                     alert_info_data = safety_metrics.get("alert_info", {})
                     alert_triggered = alert_info_data.get("alert_triggered", False)
-                    skill_alert_level = alert_info_data.get("alert_level", 0)
-                    
-                    # 只有当技能触发预警且预警等级达到或超过任务配置的预警等级时才生成预警
-                    # 注意：1级为最高预警，4级为最低预警，所以数字越小预警等级越高
-                    if alert_triggered and skill_alert_level <= task.alert_level:
+                    # skill_alert_level = alert_info_data.get("alert_level", 0)
+                    alert_level = task.alert_level
+
+                    if alert_triggered:  #and skill_alert_level <= task.alert_level:
                         # 🚀 异步生成预警，不阻塞视频处理
                         # 传递完整的data，包含detections数据
-                        self._schedule_alert_generation(task, data, frame.copy(), skill_alert_level)
-                        logger.info(f"任务 {task.id} 触发预警（异步处理中）: 技能预警等级={skill_alert_level}, 任务预警等级阈值={task.alert_level}")
+                        self._schedule_alert_generation(task, data, frame.copy(), alert_level)
+                        logger.info(f"任务 {task.id} 触发预警（异步处理中）: 任务预警等级阈值={task.alert_level}")
                     elif alert_triggered:
-                        logger.debug(f"任务 {task.id} 预警被过滤: 技能预警等级={skill_alert_level} > 任务预警等级阈值={task.alert_level}")
+                        logger.debug(f"任务 {task.id} 预警被过滤")
             
             # 可以添加其他类型任务的处理逻辑
             

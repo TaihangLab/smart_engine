@@ -251,24 +251,6 @@ def _parse_json_response(response_text: str, output_parameters: Optional[List[Di
         logger.warning(f"响应解析异常: {str(e)}, 原始文本: {response_text}")
         return {"analysis": response_text, "error": str(e)}, {}
 
-def _format_extracted_parameters(extracted_params: Dict[str, Any]) -> str:
-    """
-    格式化提取的参数为可读字符串
-    
-    Args:
-        extracted_params: 提取的参数字典
-        
-    Returns:
-        格式化的参数字符串
-    """
-    if not extracted_params:
-        return "未提取到输出参数"
-    
-    formatted_lines = []
-    for key, value in extracted_params.items():
-        formatted_lines.append(f"{key}: {value}")
-    
-    return "\n".join(formatted_lines)
 
 def get_skill_icon_url(skill_icon: Optional[str]) -> Optional[str]:
     """
@@ -817,7 +799,7 @@ def delete_llm_skill_class(skill_id: str, db: Session = Depends(get_db)):
 def get_llm_tasks(
     page: int = Query(1, description="当前页码", ge=1),
     limit: int = Query(10, description="每页数量", ge=1, le=100),
-    skill_class_id: Optional[int] = Query(None, description="技能类ID过滤"),
+    skill_id: Optional[str] = Query(None, description="技能类业务ID过滤"),
     status: Optional[bool] = Query(None, description="状态过滤"),
     name: Optional[str] = Query(None, description="名称搜索"),
     db: Session = Depends(get_db)
@@ -829,8 +811,8 @@ def get_llm_tasks(
         query = db.query(LLMTask)
         
         # 应用过滤条件
-        if skill_class_id:
-            query = query.filter(LLMTask.skill_class_id == skill_class_id)
+        if skill_id:
+            query = query.filter(LLMTask.skill_class_id == skill_id)
         
         if status is not None:
             query = query.filter(LLMTask.status == status)
@@ -852,11 +834,12 @@ def get_llm_tasks(
                 "id": task.id,
                 "name": task.name,
                 "description": task.description,
-                "skill_class_id": task.skill_class_id,
-                "skill_class_name": task.skill_class.skill_name if task.skill_class else "",
+                "skill_id": task.skill_id,
+                "skill_name": task.skill_class.skill_name if task.skill_class else "",
                 "camera_id": task.camera_id,
                 "frame_rate": task.frame_rate,
                 "status": task.status,
+                "alert_level": task.alert_level if task.alert_level is not None else 0,
                 "running_period": task.running_period,
                 "created_at": task.created_at.isoformat(),
                 "updated_at": task.updated_at.isoformat()
@@ -889,23 +872,22 @@ def create_llm_task(
     """
     try:
         # 检查技能类是否存在
-        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.id == task_data.skill_class_id).first()
+        skill_class = db.query(LLMSkillClass).filter(LLMSkillClass.skill_id == task_data.skill_id).first()
         if not skill_class:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"LLM技能类不存在: ID={task_data.skill_class_id}"
+                detail=f"LLM技能类不存在: 业务ID={task_data.skill_id}"
             )
         
         # 创建LLM任务
         task = LLMTask(
             name=task_data.name,
             description=task_data.description,
-            skill_class_id=task_data.skill_class_id,
+            skill_class_id=task_data.skill_id,
             camera_id=task_data.camera_id,
             frame_rate=task_data.frame_rate,
             status=task_data.status,
             running_period=task_data.running_period,
-            custom_config=task_data.custom_config
         )
         
         db.add(task)

@@ -79,8 +79,8 @@ class Settings(BaseSettings):
     # RabbitMQ配置
     RABBITMQ_HOST: str = Field(default="127.0.0.1", description="RabbitMQ服务器地址")
     RABBITMQ_PORT: int = Field(default=5672, description="RabbitMQ端口")
-    RABBITMQ_USER: str = Field(default="guest", description="RabbitMQ用户名")
-    RABBITMQ_PASSWORD: str = Field(default="guest", description="RabbitMQ密码")
+    RABBITMQ_USER: str = Field(default="admin", description="RabbitMQ用户名")
+    RABBITMQ_PASSWORD: str = Field(default="admin", description="RabbitMQ密码")
     RABBITMQ_ALERT_EXCHANGE: str = Field(default="alert_exchange", description="报警交换机名称")
     RABBITMQ_ALERT_QUEUE: str = Field(default="alert_queue", description="报警队列名称")
     RABBITMQ_ALERT_ROUTING_KEY: str = Field(default="alert", description="报警路由键")
