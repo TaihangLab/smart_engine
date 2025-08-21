@@ -1,5 +1,5 @@
 """
-煤矿工人行为检测技能 - 基于Triton推理服务器
+明火烟雾检测技能 - 基于Triton推理服务器
 """
 import cv2
 import numpy as np
@@ -11,48 +11,43 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 class AlertThreshold():
     """预警阈值枚举"""
-    HIGH_RISK = 1  # 高风险阈值设置
-    MILD_RISK = 1  # 中风险阈值设置
+    LEVEL_1 = 1  # 一级预警：1处及以上
 
-class MinerDetectorSkill(BaseSkill):
-    """煤矿工人行为检测技能
 
-    使用YOLO模型检测人员煤矿工人行为佩戴情况，基于triton_client全局单例
+class FireDetectorSkill(BaseSkill):
+    """明火烟雾检测技能
+
+    使用YOLO模型检测明火烟雾情况，基于triton_client全局单例
     """
 
     # 默认配置
     DEFAULT_CONFIG = {
         "type": "detection",  # 技能类型：检测类
-        "name": "miner_detector",  # 技能唯一标识符
-        "name_zh": "煤矿工人行为检测",  # 技能中文名称
+        "name": "fire_detector",  # 技能唯一标识符
+        "name_zh": "明火烟雾检测",  # 技能中文名称
         "version": "1.0",  # 技能版本
-        "description": "使用YOLO模型检测煤矿工人行为穿戴关人员佩戴情况",  # 技能描述
+        "description": "使用YOLO模型检测明火烟雾情况",  # 技能描述
         "status": True,  # 技能状态（是否启用）
-        "required_models": ["yolo11_miner"],  # 所需模型
+        "required_models": ["yolo11_fire"],  # 所需模型
         "params": {
-            "classes": ["walking", "sitting","standing","operation","stoop","lean_against"," tumble","climb_over"],
+            "classes": ["smoke","fire"],
             "conf_thres": 0.5,
             "iou_thres": 0.45,
             "max_det": 300,
             "input_size": [640, 640],
-            "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
+            "enable_default_sort_tracking": False,  # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "HIGH_RISK_THRESHOLD": AlertThreshold.HIGH_RISK,
-            "MILD_RISK_THRESHOLD": AlertThreshold.MILD_RISK,
+            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1
 
         },
         "alert_definitions": [
             {
                 "level": 1,
-                "description": f"当检测到HIGH_RISK:{AlertThreshold.HIGH_RISK}名及以上人员存在危险行为（如跌倒、攀爬）时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到MILD_RISK:{AlertThreshold.MILD_RISK}名及以上人员存在可疑行为（如弯腰、靠墙）时触发。"
-            },
-
+                "description": f"当检测到{AlertThreshold.LEVEL_1}处及以上明火烟雾时触发。"
+            }
         ]
     }
 
@@ -76,13 +71,10 @@ class MinerDetectorSkill(BaseSkill):
         self.model_name = self.required_models[0]
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
-
         # 预警阈值配置
-        self.high_risk_threshold = params["HIGH_RISK_THRESHOLD"]
-        self.mild_risk_threshold = params["MILD_RISK_THRESHOLD"]
+        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
 
-
-        self.log("info", f"初始化煤矿工人行为检测检测器: model={self.model_name}")
+        self.log("info", f"初始化明火烟雾检测器: model={self.model_name}, classes={self.classes}")
 
     def get_required_models(self) -> List[str]:
         """
@@ -97,14 +89,14 @@ class MinerDetectorSkill(BaseSkill):
     def process(self, input_data: Union[np.ndarray, str, Dict[str, Any], Any],
                 fence_config: Dict = None) -> SkillResult:
         """
-        处理输入数据，检测图像中的煤矿工人行为
+        处理输入数据，检测图像中的明火烟雾情况
 
         Args:
             input_data: 输入数据，支持numpy数组、图像路径或包含参数的字典
             fence_config: 电子围栏配置（可选）
 
         Returns:
-            检测结果，带有煤矿工人行为检测的特定分析
+            检测结果，带有明火烟雾检测的特定分析
         """
         # 1. 解析输入
         image = None
@@ -162,7 +154,7 @@ class MinerDetectorSkill(BaseSkill):
             results = self.postprocess(outputs, image)
 
             # 3. 可选的跟踪功能（根据配置决定）
-            # 煤矿工人行为检测通常需要跟踪来避免重复计数和分析人员行为
+
             if self.config.get("params", {}).get("enable_default_sort_tracking", True):
                 results = self.add_tracking_ids(results)
 
@@ -277,41 +269,26 @@ class MinerDetectorSkill(BaseSkill):
         return results
 
     def analyze_safety(self, detections):
-        """
-        分析煤矿工人行为，识别并预警异常行为情况
-        - 安全行为（正常）：walking, sitting, standing, operation
-        - 轻度异常行为：stoop, lean_against
-        - 高风险行为：tumble, climb_over
+        """分析明火烟雾情况，识别并预警明火烟雾行为
+        模型只检测明火烟雾，检测到fire或smoke标签即预警
 
         Args:
-            detections: List[Dict] 模型检测结果，包含 'class_name'
+            detections: 检测结果
 
         Returns:
             Dict: 分析结果，包括统计数量与预警信息
         """
-        normal_behaviors = {"walking", "sitting", "standing", "operation"}
-        mild_risky_behaviors = {"stoop", "lean_against"}
-        high_risky_behaviors = {"climb_over", "tumble"}
+        fire_count = 0
 
-        total_persons = 0
-        normal_count = 0
-        mild_risk_count = 0
-        high_risk_count = 0
-
+        # 统计明火烟雾数量
         for det in detections:
             class_name = det.get("class_name", "")
-            total_persons += 1
-            if class_name in normal_behaviors:
-                normal_count += 1
-            elif class_name in mild_risky_behaviors:
-                mild_risk_count += 1
-            elif class_name in high_risky_behaviors:
-                high_risk_count += 1
+            if class_name == ["smoke","fire"]:
+                fire_count += 1
 
-        unsafe_count = mild_risk_count + high_risk_count
-        safety_ratio = normal_count / total_persons if total_persons > 0 else 1.0
-        is_safe = unsafe_count == 0
-        alert_triggered = unsafe_count > 0
+        # 计算安全指标
+        is_safe = fire_count == 0
+        alert_triggered = fire_count > 0
 
         alert_level = 0
         alert_name = ""
@@ -319,32 +296,22 @@ class MinerDetectorSkill(BaseSkill):
         alert_description = ""
 
         if alert_triggered:
-            # 风险等级按高风险人数优先判断
-            if high_risk_count >= self.high_risk_threshold:
+            # 根据明火烟雾数量确定预警等级,大于等于一个即为严重预警
+            if fire_count >= self.level_1_threshold:
                 alert_level = 1  # 严重
-            elif mild_risk_count >= self.mild_risk_threshold:
-                alert_level = 2  # 中等
-            else:
-                alert_level = 0  # 不构成风险
 
-            level_names = {1: "严重", 2: "中等"}
+            level_names = {1: "严重"}
             severity = level_names.get(alert_level, "严重")
 
-            alert_name = "煤矿工人异常行为"
-            alert_type = "作业行为预警"
+            alert_name = "明火烟雾预警"
+            alert_type = "安全生产预警"
             alert_description = (
-                f"检测到 {mild_risk_count} 名人员存在可疑行为（如弯腰、靠墙），"
-                f"{high_risk_count} 名存在危险行为（如跌倒、攀爬），"
-                f"共检测到 {total_persons} 人，属于 {severity} 级预警，请及时处理。"
+                f"检测到 {fire_count} 处明火烟雾，"
+                f"属于 {severity} 级预警，请立即处理。"
             )
 
         result = {
-            "total_persons": total_persons,
-            "normal_count": normal_count,
-            "mild_risk_count": mild_risk_count,
-            "high_risk_count": high_risk_count,
-            "unsafe_count": unsafe_count,
-            "safety_ratio": safety_ratio,
+            "fire_count": fire_count,
             "is_safe": is_safe,
             "alert_info": {
                 "alert_triggered": alert_triggered,
@@ -357,8 +324,7 @@ class MinerDetectorSkill(BaseSkill):
 
         self.log(
             "info",
-            f"煤矿工人行为分析：总人数={total_persons}，正常={normal_count}，"
-            f"轻度异常={mild_risk_count}，严重异常={high_risk_count}，预警等级={alert_level}"
+            f"明火烟雾检测分析：检测到明火烟雾数量={fire_count}，预警等级={alert_level}"
         )
 
         return result
@@ -367,40 +333,38 @@ class MinerDetectorSkill(BaseSkill):
         """
         获取检测对象的关键点（用于围栏判断）
 
+
         Args:
-            detection: 检测结果
+            detection: 检测结果字典，应包含"bbox"键
 
         Returns:
-            检测点坐标 (x, y)，如果无法获取则返回None
+            头部中心点坐标 (x, y)，如果无法获取则返回None
         """
         bbox = detection.get("bbox", [])
-        class_name = detection.get("class_name", "")
 
         if len(bbox) >= 4:
             # bbox格式: [x1, y1, x2, y2]
-            center_x = (bbox[0] + bbox[2]) / 2
+            center_x = (bbox[0] + bbox[2]) / 2  # 计算x中心点
+            head_y = bbox[1]  # 使用上边(y1)作为头部位置
 
-            # 根据类别确定关键点
-            if class_name in ["walking", "sitting","standing","stoop","lean_against"," tumble","climb_over"]:
-                # 其他行为类别：使用底部中心点（人员脚部位置）
-                key_y = bbox[3]  # 使用底边作为关键点
-            else:
-                # 操作类别：使用中心点
-                key_y = (bbox[1] + bbox[3]) / 2
+            # 可选：可以稍微向下偏移一点，避免取到太靠上的位置
+            # head_y = bbox[1] + (bbox[3] - bbox[1]) * 0.1  # 从上往下10%处
 
-            return (center_x, key_y)
+            return (center_x, head_y)
         return None
+
 
 # 测试代码
 if __name__ == "__main__":
     # 创建检测器 - 传入配置参数会自动调用_initialize()
-    detector = MinerDetectorSkill(MinerDetectorSkill.DEFAULT_CONFIG)
+    detector = FireDetectorSkill(FireDetectorSkill.DEFAULT_CONFIG)
 
-    # # 测试图像检测
+    # 测试图像检测
     # test_image = np.zeros((640, 640, 3), dtype=np.uint8)
     # cv2.rectangle(test_image, (100, 100), (400, 400), (0, 0, 255), -1)
-    image_path = "F:/0001475.jpg"
+    image_path = r"F:/fire3.jpg"
     image = cv2.imread(image_path)
+
     # 执行检测
     result = detector.process(image)
 

@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     DB_AUTOFLUSH: bool = Field(default=False, description="数据库自动刷新")
     
     # WVP配置
-    WVP_API_URL: str = Field(default="http://192.168.1.107:18080", description="WVP API地址")
+    WVP_API_URL: str = Field(default="http://192.168.27.143:18080", description="WVP API地址")
     WVP_USERNAME: str = Field(default="admin", description="WVP用户名")
     WVP_PASSWORD: str = Field(default="admin", description="WVP密码")
     
@@ -65,8 +65,8 @@ class Settings(BaseSettings):
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
     
     # MinIO配置
-    MINIO_ENDPOINT: str = Field(default="192.168.1.107", description="MinIO服务器地址")
-    MINIO_PORT: int = Field(default=9000, description="MinIO端口")
+    MINIO_ENDPOINT: str = Field(default="192.168.27.143", description="MinIO服务器地址")
+    MINIO_PORT: int = Field(default=9100, description="MinIO端口")
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", description="MinIO访问密钥")
     MINIO_SECRET_KEY: str = Field(default="minioadmin", description="MinIO秘密密钥")
     MINIO_SECURE: bool = Field(default=False, description="MinIO是否使用HTTPS")
@@ -316,7 +316,7 @@ class Settings(BaseSettings):
     # RTSP推流配置
     RTSP_STREAMING_ENABLED: bool = Field(default=True, description="是否全局启用RTSP推流功能")
     RTSP_STREAMING_BACKEND: str = Field(default="pyav", description="推流后端选择: 'pyav'(推荐，高性能), 'ffmpeg'(兼容模式)")
-    RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://192.168.1.107/detection", description="RTSP推流基础地址")
+    RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://192.168.27.143/detection", description="RTSP推流基础地址")
     RTSP_STREAMING_SIGN: str = Field(default="a9b7ba70783b617e9998dc4dd82eb3c5", description="RTSP推流验证签名")
     RTSP_STREAMING_DEFAULT_FPS: float = Field(default=30.0, description="RTSP推流默认帧率")
     RTSP_STREAMING_MAX_FPS: float = Field(default=30.0, description="RTSP推流最大帧率")
