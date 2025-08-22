@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    unhelmetPersonCount = 5
+    unhelmetPersonCount = 1
 
 class HelmetDetectorSkill(BaseSkill):
     """安全帽检测技能
@@ -307,7 +307,7 @@ class HelmetDetectorSkill(BaseSkill):
         alert_type = ""
         alert_description = ""
 
-        if unsafe_count > 0:
+        if unsafe_count >= self.un_helmet_person_count:
             alert_triggered = True
             # # 如需启用分级，可参考以下注释并在类中定义阈值：
             # if unsafe_count >= self.level_1_threshold:

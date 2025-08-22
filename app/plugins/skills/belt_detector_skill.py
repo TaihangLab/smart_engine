@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    unbeltedPersonCount = 5  #
+    unbeltedPersonCount = 1  #
 
 
 class BeltDetectorSkill(BaseSkill):
@@ -321,7 +321,7 @@ class BeltDetectorSkill(BaseSkill):
         alert_type = ""
         alert_description = ""
         
-        if unsafe_count > 0:
+        if unsafe_count >= self.un_belted_person_count:
             alert_triggered = True
             # # 根据未佩戴安全带的高空作业人员数量确定预警等级（1级最高，4级最低）
             # if unsafe_count >= self.un_belted_person_count:
