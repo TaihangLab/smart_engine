@@ -14,8 +14,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    HIGH_RISK = 1
-    MILD_RISK = 1
+    anomalyCount = 1  # 异常数量阈值
 
 
 class ConveyorAnomalyDetectorSkill(BaseSkill):
@@ -39,19 +38,9 @@ class ConveyorAnomalyDetectorSkill(BaseSkill):
             "max_det": 300,
             "input_size": [640, 640],
             "enable_default_sort_tracking": False,
-            "HIGH_RISK_THRESHOLD": AlertThreshold.HIGH_RISK,
-            "MILD_RISK_THRESHOLD": AlertThreshold.MILD_RISK,
+            "anomaly_count": AlertThreshold.anomalyCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到HIGH_RISK:{AlertThreshold.HIGH_RISK}个及以上严重异常（如裂纹、破洞）时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到MILD_RISK:{AlertThreshold.MILD_RISK}个及以上轻度异常（如异物、堵塞）时触发。"
-            },
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.anomalyCount}个及以上传送带异常时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -64,8 +53,7 @@ class ConveyorAnomalyDetectorSkill(BaseSkill):
         self.required_models = self.config.get("required_models")
         self.model_name = self.required_models[0]
         self.input_width, self.input_height = params.get("input_size")
-        self.high_risk_threshold = params["HIGH_RISK_THRESHOLD"]
-        self.mild_risk_threshold = params["MILD_RISK_THRESHOLD"]
+        self.anomaly_count = params["anomaly_count"]
         self.log("info", f"初始化传送带异常检测器: model={self.model_name}")
 
     def get_required_models(self) -> List[str]:
@@ -192,58 +180,75 @@ class ConveyorAnomalyDetectorSkill(BaseSkill):
         return results
 
     def analyze_safety(self, detections):
-        normal = 0
-        mild = 0
-        severe = 0
+        """分析传送带异常情况，识别并预警异常行为
 
+        Args:
+            detections: 检测结果
+
+        Returns:
+            Dict: 分析结果，包括统计数量与预警信息
+        """
+        # 统计各类异常数量
+        foreign_count = 0  # 异物
+        block_count = 0    # 堵塞
+        crack_count = 0    # 裂纹
+        hole_count = 0     # 破洞
+
+        # 分类检测结果
         for det in detections:
-            class_name = det.get("class_name", "")
-            if class_name in ["foreign", "block"]:
-                mild += 1
-            elif class_name in ["crack", "hole"]:
-                severe += 1
-            else:
-                normal += 1
+            class_name = det.get('class_name', '')
+            if class_name == 'foreign':  # 异物
+                foreign_count += 1
+            elif class_name == 'block':  # 堵塞
+                block_count += 1
+            elif class_name == 'crack':  # 裂纹
+                crack_count += 1
+            elif class_name == 'hole':   # 破洞
+                hole_count += 1
 
-        total = mild + severe
-        safety_ratio = 0.0 if total == 0 else 1.0 - total / (total + normal)
-        alert_triggered = total > 0
-        alert_level = 0
+        # 计算总异常数量
+        total_anomalies = foreign_count + block_count + crack_count + hole_count
+
+        # 计算安全率：无异常率
+        if total_anomalies > 0:
+            safety_ratio = 0.0  # 有异常时安全率为0
+            is_safe = False
+        else:
+            safety_ratio = 1.0  # 无异常时认为安全
+            is_safe = True
+
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            if severe >= self.high_risk_threshold:
-                alert_level = 1
-            elif mild >= self.mild_risk_threshold:
-                alert_level = 2
-
-            severity = {1: "严重", 2: "中等"}.get(alert_level, "严重")
+        if total_anomalies >= self.anomaly_count:
+            alert_triggered = True
             alert_name = "传送带异常预警"
             alert_type = "设备状态监测"
-            alert_description = (
-                f"检测到 {mild} 处轻度异常（异物/堵塞），"
-                f"{severe} 处严重异常（裂纹/破洞），"
-                f"共计 {total} 项异常，属于 {severity} 级预警，请立即检查处理。"
-            )
+            alert_description = f"检测到{total_anomalies}处传送带异常（异物:{foreign_count}，堵塞:{block_count}，裂纹:{crack_count}，破洞:{hole_count}），建议立即检查处理。"
 
         result = {
-            "total_anomalies": total,
-            "mild_risk_count": mild,
-            "high_risk_count": severe,
-            "safety_ratio": safety_ratio,
-            "is_safe": total == 0,
+            "total_anomalies": total_anomalies,  # 总异常数量
+            "foreign_count": foreign_count,      # 异物数量
+            "block_count": block_count,          # 堵塞数量
+            "crack_count": crack_count,          # 裂纹数量
+            "hole_count": hole_count,            # 破洞数量
+            "safety_ratio": safety_ratio,        # 安全率
+            "is_safe": is_safe,                  # 是否整体安全
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,            # 预警名称
+                "alert_type": alert_type,            # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
-        self.log("info", f"传送带异常分析：轻度={mild}, 严重={severe}, 总异常={total}, 预警等级={alert_level}")
+        self.log(
+            "info",
+            f"传送带异常分析: 共检测到 {total_anomalies} 处异常，异物={foreign_count}，堵塞={block_count}，裂纹={crack_count}，破洞={hole_count}，是否触发预警={alert_triggered}"
+        )
         return result
 
     def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:

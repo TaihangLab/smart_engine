@@ -13,10 +13,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 1  # 一级预警：7名及以上
-    LEVEL_2 = 4  # 二级预警：4-6名
-    LEVEL_3 = 2  # 三级预警：2-3名
-    LEVEL_4 = 1  # 四级预警：1名
+    phoneCount = 1  # 手机设备数量阈值
 
 class PhoneDetectorSkill(BaseSkill):
     """手机检测技能
@@ -41,29 +38,9 @@ class PhoneDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
-            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
-            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
-            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+            "phone_count": AlertThreshold.phoneCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到LEVEL_1:{AlertThreshold.LEVEL_1}个及以上手机设备时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到LEVEL_2:{AlertThreshold.LEVEL_2}个手机设备时触发。"
-            },
-            {
-                "level": 3,
-                "description": f"当检测到LEVEL_3:{AlertThreshold.LEVEL_3}个手机设备时触发。"
-            },
-            {
-                "level": 4,
-                "description": f"当检测到LEVEL_4:{AlertThreshold.LEVEL_4}个手机设备时触发。"
-            }
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.phoneCount}个及以上手机设备时触发, 可在上方齿轮中进行设置。"
     }
     def _initialize(self) -> None:
         """初始化技能"""
@@ -86,10 +63,7 @@ class PhoneDetectorSkill(BaseSkill):
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
-        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
-        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
-        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
+        self.phone_count = params["phone_count"]
 
         self.log("info", f"初始化手机检测器: model={self.model_name}, classes={self.classes}")
 
@@ -306,49 +280,33 @@ class PhoneDetectorSkill(BaseSkill):
 
         # 计算指标
         has_phone = phone_count > 0
-        alert_triggered = phone_count > 0
 
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            # 根据手机数量确定预警等级
-            if phone_count >= self.level_1_threshold:
-                alert_level = 1  # 严重
-            elif self.level_2_threshold <= phone_count < self.level_1_threshold:
-                alert_level = 2  # 中等
-            elif self.level_3_threshold <= phone_count < self.level_2_threshold:
-                alert_level = 3  # 轻微
-            else:
-                alert_level = 4  # 极轻
-
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
-            severity = level_names.get(alert_level, "严重")
-
+        if phone_count >= self.phone_count:
+            alert_triggered = True
             alert_name = "手机设备检测预警"
             alert_type = "设备监控预警"
-            alert_description = (
-                f"检测到 {phone_count} 部手机设备，"
-                f"属于 {severity} 级监控提醒，请关注相关区域。"
-            )
+            alert_description = f"检测到{phone_count}部手机设备，建议立即通知现场安全员进行处理。"
 
         result = {
             "phone_count": phone_count,
             "has_phone": has_phone,
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
-            f"手机检测分析: 检测到手机数量={phone_count}，预警等级={alert_level}"
+            f"手机检测分析: 检测到手机数量={phone_count}，是否触发预警={alert_triggered}"
         )
 
         return result

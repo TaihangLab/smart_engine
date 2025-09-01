@@ -13,10 +13,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 20  # 一级预警：7名及以上
-    LEVEL_2 = 15  # 二级预警：4-6名
-    LEVEL_3 = 6  # 三级预警：2-3名
-    LEVEL_4 = 1  # 四级预警：1名
+    crowdPersonCount = 6  # 聚集人数阈值
 
 class CrowdDetectorSkill(BaseSkill):
     """人员聚集检测技能
@@ -41,29 +38,9 @@ class CrowdDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
-            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
-            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
-            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+            "crowd_person_count": AlertThreshold.crowdPersonCount
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到LEVEL_1:{AlertThreshold.LEVEL_1}名及以上人员聚集时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到LEVEL_2:{AlertThreshold.LEVEL_2}名人员聚集时触发。"
-            },
-            {
-                "level": 3,
-                "description": f"当检测到LEVEL_3:{AlertThreshold.LEVEL_3}名人员聚集时触发。"
-            },
-            {
-                "level": 4,
-                "description": f"当检测到LEVEL_4:{AlertThreshold.LEVEL_4}名及以上人员聚集时触发。"
-            }
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.crowdPersonCount}名及以上人员聚集时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -87,10 +64,7 @@ class CrowdDetectorSkill(BaseSkill):
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
-        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
-        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
-        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
+        self.crowd_person_count = params["crowd_person_count"]
 
         self.log("info", f"初始化人员聚集检测器: model={self.model_name}, classes={self.classes}")
 
@@ -287,24 +261,24 @@ class CrowdDetectorSkill(BaseSkill):
         return results
 
     def analyze_safety(self, detections):
-        """
-        分析人员聚集情况，识别并预警人员密度过高的情况
+        """分析人员聚集情况，识别并预警人员密度过高的情况
 
         Args:
-            detections: List[Dict] 检测结果，包含 class_name 字段
+            detections: 检测结果
 
         Returns:
-            Dict: 安全分析与预警结果
+            Dict: 分析结果，包含预警信息
         """
-        head_count = 0
-        person_count = 0
-
         # 统计各类检测数量
+        head_count = 0  # 头部检测数量
+        person_count = 0  # 人员检测数量
+
+        # 分类检测结果
         for det in detections:
             class_name = det.get('class_name', '')
-            if class_name == 'head':
+            if class_name == 'head':  # 头部检测
                 head_count += 1
-            elif class_name == 'person':
+            elif class_name == 'person':  # 人员检测
                 person_count += 1
 
         # 计算总人数（以头部检测为主，人员检测为辅助）
@@ -319,29 +293,23 @@ class CrowdDetectorSkill(BaseSkill):
         elif person_count > 0:
             total_people = person_count
 
-        # 判断是否存在聚集风险
-        is_safe = total_people <= 5  # 5人以下认为安全
-        alert_triggered = total_people > 0
+        # 计算安全率：非聚集率
+        if total_people > 0:
+            # 聚集密度评估：人数越多，安全率越低
+            safety_ratio = max(0, 1.0 - (total_people / 20.0))  # 假设20人为极高密度
+            is_safe = total_people < self.crowd_person_count
+        else:
+            safety_ratio = 1.0  # 无人时认为安全
+            is_safe = True
 
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            # 根据人员总数确定预警等级
-            if total_people >= self.level_1_threshold:
-                alert_level = 1  # 严重
-            elif self.level_2_threshold <= total_people < self.level_1_threshold:
-                alert_level = 2  # 中等
-            elif self.level_3_threshold <= total_people < self.level_2_threshold:
-                alert_level = 3  # 轻微
-            else:
-                alert_level = 4  # 极轻
-
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
-            severity = level_names.get(alert_level, "严重")
-
+        if total_people >= self.crowd_person_count:
+            alert_triggered = True
             alert_name = "人员聚集预警"
             alert_type = "公共安全预警"
             
@@ -354,32 +322,27 @@ class CrowdDetectorSkill(BaseSkill):
             elif person_count > 0:
                 detection_info = f"（人员检测：{person_count}人）"
 
-            alert_description = (
-                f"检测到 {total_people} 名人员聚集{detection_info}，"
-                f"属于 {severity} 级聚集风险，请注意疏导和管控。"
-            )
+            alert_description = f"检测到{total_people}名人员聚集{detection_info}，建议立即疏导和管控。"
 
         result = {
-            "head_count": head_count,
-            "person_count": person_count,
-            "total_people": total_people,
-            "is_safe": is_safe,
-            "crowd_density": self._calculate_density_level(total_people),
+            "head_count": head_count,  # 头部检测数量
+            "person_count": person_count,  # 人员检测数量
+            "total_people": total_people,  # 总人数
+            "safety_ratio": safety_ratio,  # 安全率
+            "is_safe": is_safe,  # 是否整体安全
+            "crowd_density": self._calculate_density_level(total_people),  # 聚集密度等级
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
-            f"人员聚集分析: 头部={head_count}人，人员={person_count}人，"
-            f"总计={total_people}人，预警等级={alert_level}"
+            f"人员聚集分析: 头部={head_count}人，人员={person_count}人，总计={total_people}人，是否触发预警={alert_triggered}"
         )
-
         return result
 
     def _calculate_density_level(self, total_people):

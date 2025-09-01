@@ -13,8 +13,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    HIGH_RISK = 1  # 高风险阈值设置
-    MILD_RISK = 1  # 中风险阈值设置
+    abnormalBehaviorCount = 1  # 异常行为人数阈值
 
 class MinerDetectorSkill(BaseSkill):
     """煤矿工人行为检测技能
@@ -39,21 +38,9 @@ class MinerDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "HIGH_RISK_THRESHOLD": AlertThreshold.HIGH_RISK,
-            "MILD_RISK_THRESHOLD": AlertThreshold.MILD_RISK,
-
+            "abnormal_behavior_count": AlertThreshold.abnormalBehaviorCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到HIGH_RISK:{AlertThreshold.HIGH_RISK}名及以上人员存在危险行为（如跌倒、攀爬）时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到MILD_RISK:{AlertThreshold.MILD_RISK}名及以上人员存在可疑行为（如弯腰、靠墙）时触发。"
-            },
-
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.abnormalBehaviorCount}名及以上人员存在异常行为（如弯腰、靠墙、跌倒、攀爬）时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -78,8 +65,7 @@ class MinerDetectorSkill(BaseSkill):
         self.input_width, self.input_height = params.get("input_size")
 
         # 预警阈值配置
-        self.high_risk_threshold = params["HIGH_RISK_THRESHOLD"]
-        self.mild_risk_threshold = params["MILD_RISK_THRESHOLD"]
+        self.abnormal_behavior_count = params["abnormal_behavior_count"]
 
 
         self.log("info", f"初始化煤矿工人行为检测检测器: model={self.model_name}")
@@ -311,32 +297,18 @@ class MinerDetectorSkill(BaseSkill):
         unsafe_count = mild_risk_count + high_risk_count
         safety_ratio = normal_count / total_persons if total_persons > 0 else 1.0
         is_safe = unsafe_count == 0
-        alert_triggered = unsafe_count > 0
 
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            # 风险等级按高风险人数优先判断
-            if high_risk_count >= self.high_risk_threshold:
-                alert_level = 1  # 严重
-            elif mild_risk_count >= self.mild_risk_threshold:
-                alert_level = 2  # 中等
-            else:
-                alert_level = 0  # 不构成风险
-
-            level_names = {1: "严重", 2: "中等"}
-            severity = level_names.get(alert_level, "严重")
-
+        if unsafe_count >= self.abnormal_behavior_count:
+            alert_triggered = True
             alert_name = "煤矿工人异常行为"
             alert_type = "作业行为预警"
-            alert_description = (
-                f"检测到 {mild_risk_count} 名人员存在可疑行为（如弯腰、靠墙），"
-                f"{high_risk_count} 名存在危险行为（如跌倒、攀爬），"
-                f"共检测到 {total_persons} 人，属于 {severity} 级预警，请及时处理。"
-            )
+            alert_description = f"检测到{mild_risk_count}名人员存在可疑行为（如弯腰、靠墙），{high_risk_count}名存在危险行为（如跌倒、攀爬）（共检测到{total_persons}人），建议立即通知现场安全员进行处理。"
 
         result = {
             "total_persons": total_persons,
@@ -347,18 +319,17 @@ class MinerDetectorSkill(BaseSkill):
             "safety_ratio": safety_ratio,
             "is_safe": is_safe,
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
             f"煤矿工人行为分析：总人数={total_persons}，正常={normal_count}，"
-            f"轻度异常={mild_risk_count}，严重异常={high_risk_count}，预警等级={alert_level}"
+            f"轻度异常={mild_risk_count}，严重异常={high_risk_count}，是否触发预警={alert_triggered}"
         )
 
         return result

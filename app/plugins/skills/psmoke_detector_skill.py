@@ -13,10 +13,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 7  # 一级预警：7名及以上
-    LEVEL_2 = 4  # 二级预警：4-6名
-    LEVEL_3 = 2  # 三级预警：2-3名
-    LEVEL_4 = 1  # 四级预警：1名
+    smokingPersonCount = 1  # 吸烟人数阈值
 
 
 class PSmokeDetectorSkill(BaseSkill):
@@ -42,29 +39,9 @@ class PSmokeDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True, # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
-            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
-            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
-            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+            "smoking_person_count": AlertThreshold.smokingPersonCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到LEVEL_1:{AlertThreshold.LEVEL_1}名及以上人员吸烟时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到LEVEL_2:{AlertThreshold.LEVEL_2}名人员吸烟时触发。"
-            },
-            {
-                "level": 3,
-                "description": f"当检测到LEVEL_3:{AlertThreshold.LEVEL_3}名人员吸烟时触发。"
-            },
-            {
-                "level": 4,
-                "description": f"当检测到LEVEL_4:{AlertThreshold.LEVEL_4}名人员吸烟时触发。"
-            }
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.smokingPersonCount}名及以上人员吸烟时触发, 可在上方齿轮中进行设置。"
     }
     def _initialize(self) -> None:
         """初始化技能"""
@@ -87,10 +64,7 @@ class PSmokeDetectorSkill(BaseSkill):
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
-        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
-        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
-        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
+        self.smoking_person_count = params["smoking_person_count"]
 
         self.log("info", f"初始化吸烟检测器: model={self.model_name}, classes={self.classes}")
 
@@ -307,49 +281,33 @@ class PSmokeDetectorSkill(BaseSkill):
 
         # 计算安全指标
         is_safe = smoking_count == 0
-        alert_triggered = smoking_count > 0
 
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            # 根据吸烟人数确定预警等级
-            if smoking_count >= self.level_1_threshold:
-                alert_level = 1  # 严重
-            elif self.level_2_threshold <= smoking_count < self.level_1_threshold:
-                alert_level = 2  # 中等
-            elif self.level_3_threshold <= smoking_count < self.level_2_threshold:
-                alert_level = 3  # 轻微
-            else:
-                alert_level = 4  # 极轻
-
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
-            severity = level_names.get(alert_level, "严重")
-
+        if smoking_count >= self.smoking_person_count:
+            alert_triggered = True
             alert_name = "人员吸烟预警"
             alert_type = "公共安全预警"
-            alert_description = (
-                f"检测到 {smoking_count} 名人员正在吸烟，"
-                f"属于 {severity} 级安全隐患，请立即处理并提醒禁烟。"
-            )
+            alert_description = f"检测到{smoking_count}名人员正在吸烟，建议立即通知现场安全员进行处理。"
 
         result = {
             "smoking_count": smoking_count,
             "is_safe": is_safe,
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
-            f"吸烟检测分析: 检测到吸烟人数={smoking_count}，预警等级={alert_level}"
+            f"吸烟检测分析: 检测到吸烟人数={smoking_count}, 是否触发预警={alert_triggered}"
         )
 
         return result

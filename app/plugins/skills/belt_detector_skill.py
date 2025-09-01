@@ -357,7 +357,7 @@ class BeltDetectorSkill(BaseSkill):
             }
         }
         
-        self.log("info", f"安全分析: 检测到 {badge_count} 个监工，{high_risk_persons} 个高空作业人员，{ground_count} 个地面作业人员，{safebelt_count} 个安全带，可能有 {unsafe_count} 人未佩戴安全带")
+        self.log("info", f"安全分析: 检测到 {badge_count} 个监工，{high_risk_persons} 个高空作业人员，{ground_count} 个地面作业人员，{safebelt_count} 个安全带，可能有 {unsafe_count} 人未佩戴安全带, 是否触发预警={alert_triggered}")
         return result
 
     def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:

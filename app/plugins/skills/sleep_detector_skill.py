@@ -13,7 +13,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 1  # 一级预警：1名及以上
+    sleepPersonCount = 1  # 睡岗人数阈值
 
 class SleepDetectorSkill(BaseSkill):
     """睡岗检测技能
@@ -38,15 +38,10 @@ class SleepDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": False, # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1
+            "sleep_person_count": AlertThreshold.sleepPersonCount
 
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到{AlertThreshold.LEVEL_1}名及以上人员睡觉时触发。"
-            }
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.sleepPersonCount}名及以上人员睡觉时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -70,7 +65,7 @@ class SleepDetectorSkill(BaseSkill):
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
+        self.sleep_person_count = params["sleep_person_count"]
 
         self.log("info", f"初始化睡岗检测器: model={self.model_name}, classes={self.classes}")
 
@@ -286,44 +281,33 @@ class SleepDetectorSkill(BaseSkill):
 
         # 计算安全指标
         is_safe = sleep_count == 0
-        alert_triggered = sleep_count > 0
 
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            # 根据睡岗人数确定预警等级,大于等于一人即为严重预警
-            if sleep_count >= self.level_1_threshold:
-                alert_level = 1  # 严重
-
-
-            level_names = {1: "严重"}
-            severity = level_names.get(alert_level, "严重")
-
+        if sleep_count >= self.sleep_person_count:
+            alert_triggered = True
             alert_name = "人员睡岗预警"
             alert_type = "岗位纪律预警"
-            alert_description = (
-                f"检测到 {sleep_count} 名人员睡岗，"
-                f"属于 {severity} 级预警，请立即处理。"
-            )
+            alert_description = f"检测到{sleep_count}名人员睡岗，建议立即通知现场安全员进行处理。"
 
         result = {
             "sleep_count": sleep_count,
             "is_safe": is_safe,
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
-            f"睡岗检测分析：检测到睡岗人数={sleep_count}，预警等级={alert_level}"
+            f"睡岗检测分析：检测到睡岗人数={sleep_count}，是否触发预警={alert_triggered}"
         )
 
         return result

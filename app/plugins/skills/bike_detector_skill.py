@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 1  # 一级预警：1辆及以上
+    vehicleCount = 1  # 非机动车数量阈值
 
 
 class BikeDetectorSkill(BaseSkill):
@@ -39,16 +39,10 @@ class BikeDetectorSkill(BaseSkill):
             "max_det": 300,
             "input_size": [640, 640],
             "enable_default_sort_tracking": False,  # 默认启用SORT跟踪，用于人员行为分析
-            # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1
-
+            # 预警车辆数量阈值配置
+            "vehicle_count": AlertThreshold.vehicleCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到{AlertThreshold.LEVEL_1}辆及以上非机动车闯入时触发。"
-            }
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.vehicleCount}辆及以上非机动车闯入时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -72,7 +66,7 @@ class BikeDetectorSkill(BaseSkill):
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
+        self.vehicle_count = params["vehicle_count"]
 
         self.log("info", f"初始化非机动车闯入检测器: model={self.model_name}, classes={self.classes}")
 
@@ -287,43 +281,33 @@ class BikeDetectorSkill(BaseSkill):
 
         # 计算安全指标
         is_safe = vehicle_count == 0
-        alert_triggered = vehicle_count > 0
 
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            # 根据闯入数量确定预警等级，大于等于1辆即为严重预警
-            if vehicle_count >= self.level_1_threshold:
-                alert_level = 1  # 严重
-
-            level_names = {1: "严重"}
-            severity = level_names.get(alert_level, "严重")
-
+        if vehicle_count >= self.vehicle_count:
+            alert_triggered = True
             alert_name = "非机动车闯入预警"
             alert_type = "区域安全预警"
-            alert_description = (
-                f"检测到 {vehicle_count} 辆非机动车闯入禁行区域，"
-                f"属于 {severity} 级预警，请立即处理。"
-            )
+            alert_description = f"检测到{vehicle_count}辆非机动车闯入禁行区域，建议立即通知现场安全员进行处理。"
 
         result = {
             "vehicle_count": vehicle_count,
             "is_safe": is_safe,
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
-            f"非机动车闯入检测分析：检测到非机动车数量={vehicle_count}，预警等级={alert_level}"
+            f"非机动车闯入检测分析：检测到非机动车数量={vehicle_count}，是否触发预警={alert_triggered}"
         )
 
         return result

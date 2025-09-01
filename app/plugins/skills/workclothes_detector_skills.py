@@ -14,10 +14,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 7  # 一级预警：7名及以上
-    LEVEL_2 = 4  # 二级预警：4-6名
-    LEVEL_3 = 2  # 三级预警：2-3名
-    LEVEL_4 = 1  # 四级预警：1名
+    unclothedPersonCount = 1  # 未穿着工作服人数阈值
 
 class WorkDetectorSkill(BaseSkill):
     DEFAULT_CONFIG = {
@@ -36,29 +33,9 @@ class WorkDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员安全带佩戴分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
-            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
-            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
-            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+            "un_clothed_person_count": AlertThreshold.unclothedPersonCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到LEVEL_1:{AlertThreshold.LEVEL_1}名及以上工人未规范穿着或未穿着工作服时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到LEVEL_2:{AlertThreshold.LEVEL_2}名工人未规范穿着或未穿着工作服时触发。"
-            },
-            {
-                "level": 3,
-                "description": f"当检测到LEVEL_3:{AlertThreshold.LEVEL_3}名工人未规范穿着或未穿着工作服时触发。"
-            },
-            {
-                "level": 4,
-                "description": f"当检测到LEVEL_4:{AlertThreshold.LEVEL_4}名工人未规范穿着或未穿着工作服时触发。"
-            }
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.unclothedPersonCount}名及以上工人未规范穿着或未穿着工作服时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -82,10 +59,7 @@ class WorkDetectorSkill(BaseSkill):
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
-        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
-        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
-        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
+        self.un_clothed_person_count = params["un_clothed_person_count"]
         self.log("info", f"初始化工作服检测器: model={self.model_name}")
 
     def get_required_models(self) -> List[str]:
@@ -298,31 +272,17 @@ class WorkDetectorSkill(BaseSkill):
             safety_ratio = 1.0
             is_safe = True
 
-        alert_triggered = non_compliant_persons > 0
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            if non_compliant_persons >= self.level_1_threshold:
-                alert_level = 1  # 最高预警：6人及以上未穿工作服
-            elif self.level_2_threshold <= non_compliant_persons < self.level_1_threshold:
-                alert_level = 2  # 高级预警：3人以上未穿工作服
-            elif self.level_3_threshold <= non_compliant_persons < self.level_2_threshold:
-                alert_level = 3
-            else :
-                alert_level = 4  # 极轻预警：1人未穿工作服
-
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
-            severity = level_names.get(alert_level, "严重")
-
+        if non_compliant_persons >= self.un_clothed_person_count:
+            alert_triggered = True
             alert_name = "穿戴不合规工作服"
             alert_type = "安全生产预警"
-            alert_description = (
-                f"检测到{non_compliant_persons}名人员穿戴不合规工作服（共检测到{person_count}人），"
-                f"属于{severity}违规行为。建议立即处理。"
-            )
+            alert_description = f"检测到{non_compliant_persons}名人员穿戴不合规工作服（共检测到{person_count}人），建议立即通知现场安全员进行处理。"
 
         result = {
             "total_persons": person_count,
@@ -331,17 +291,16 @@ class WorkDetectorSkill(BaseSkill):
             "safety_ratio": safety_ratio,
             "is_safe": is_safe,
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description,
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
-            f"工作服安全分析: 总人数={person_count}, 合规={compliant_persons}, 不合规={non_compliant_persons}, 预警等级={alert_level}"
+            f"工作服安全分析: 总人数={person_count}, 合规={compliant_persons}, 不合规={non_compliant_persons}, 是否触发预警={alert_triggered}"
         )
 
         return result

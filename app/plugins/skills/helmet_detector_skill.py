@@ -341,7 +341,7 @@ class HelmetDetectorSkill(BaseSkill):
 
         self.log(
             "info",
-            f"安全分析: 共检测到 {total_heads} 个人头，{safe_count} 个戴安全帽，{unsafe_count} 个未戴安全帽"
+            f"安全分析: 共检测到 {total_heads} 个人头，{safe_count} 个戴安全帽，{unsafe_count} 个未戴安全帽, 是否触发预警={alert_triggered}"
         )
         return result
 

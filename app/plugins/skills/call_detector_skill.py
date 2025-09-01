@@ -13,10 +13,8 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 7  # 一级预警：7名及以上
-    LEVEL_2 = 4  # 二级预警：4-6名
-    LEVEL_3 = 2  # 三级预警：2-3名
-    LEVEL_4 = 1  # 四级预警：1名
+    callPersonCount = 1  # 打电话人数阈值
+
 
 class CallPlayDetectorSkill(BaseSkill):
     """打电话检测技能
@@ -41,29 +39,9 @@ class CallPlayDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True,  # 默认启用SORT跟踪，用于人员安全带佩戴分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
-            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
-            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
-            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+            "call_person_count": AlertThreshold.callPersonCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到LEVEL_1: {AlertThreshold.LEVEL_1}名及以上人员打电话时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到LEVEL_2: {AlertThreshold.LEVEL_2}名人员打电话时触发。"
-            },
-            {
-                "level": 3,
-                "description": f"当检测到LEVEL_3: {AlertThreshold.LEVEL_3}名人员打电话时触发。"
-            },
-            {
-                "level": 4,
-                "description": f"当检测到LEVEL_4: {AlertThreshold.LEVEL_4}名人员打电话时触发。"
-            }
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.callPersonCount}名及以上人员打电话时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -87,10 +65,7 @@ class CallPlayDetectorSkill(BaseSkill):
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
-        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
-        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
-        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
+        self.call_person_count = params["call_person_count"]
 
         self.log("info", f"初始化打电话检测器: model={self.model_name}, classes={self.classes}")
 
@@ -309,52 +284,35 @@ class CallPlayDetectorSkill(BaseSkill):
 
         total_violations = call_count + playphone_count
         is_safe = call_count == 0
-        alert_triggered = call_count > 0
 
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            # 根据违规总人数确定预警等级
-            if call_count >= self.level_1_threshold:
-                alert_level = 1  # 严重
-            elif self.level_2_threshold <= call_count < self.level_1_threshold:
-                alert_level = 2  # 中等
-            elif self.level_3_threshold <= call_count < self.level_2_threshold:
-                alert_level = 3  # 轻微
-            else:
-                alert_level = 4  # 极轻
-
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
-            severity = level_names.get(alert_level, "严重")
-
+        if call_count >= self.call_person_count:
+            alert_triggered = True
             alert_name = "人员打电话预警"
             alert_type = "工作纪律预警"
-            
-            # 构建详细的预警描述
-            if call_count > 0:
-                alert_description = (
-                    f"检测到 {call_count} 名人员正在打电话，"
-                    f"属于 {severity} 级违规，请及时提醒整改。"
-                )
+            alert_description = f"检测到{call_count}名人员正在打电话，建议立即通知现场安全员进行处理。"
 
         result = {
             "call_count": call_count,
+            "playphone_count": playphone_count,
+            "total_violations": total_violations,
             "is_safe": is_safe,
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
-            f"手机使用检测分析: 打电话={call_count}人，预警等级={alert_level}"
+            f"手机使用检测分析: 打电话={call_count}人，玩手机={playphone_count}人，是否触发预警={alert_triggered}"
         )
 
         return result

@@ -13,10 +13,7 @@ logger = logging.getLogger(__name__)
 
 class AlertThreshold():
     """预警阈值枚举"""
-    LEVEL_1 = 7  # 
-    LEVEL_2 = 4  # 
-    LEVEL_3 = 2  # 
-    LEVEL_4 = 1  # 
+    unreflectivePersonCount = 1  # 未穿反光衣人数阈值
 
 class ReflectiveDetectorSkill(BaseSkill):
     """反光衣穿戴检测技能
@@ -41,29 +38,9 @@ class ReflectiveDetectorSkill(BaseSkill):
             "input_size": [640, 640],
             "enable_default_sort_tracking": True , # 默认启用SORT跟踪，用于人员行为分析
             # 预警人数阈值配置
-            "LEVEL_1_THRESHOLD": AlertThreshold.LEVEL_1,
-            "LEVEL_2_THRESHOLD": AlertThreshold.LEVEL_2,
-            "LEVEL_3_THRESHOLD": AlertThreshold.LEVEL_3,
-            "LEVEL_4_THRESHOLD": AlertThreshold.LEVEL_4
+            "un_reflective_person_count": AlertThreshold.unreflectivePersonCount,
         },
-        "alert_definitions": [
-            {
-                "level": 1,
-                "description": f"当检测到LEVEL_1: {AlertThreshold.LEVEL_1}名及以上人员未穿着反光衣时触发。"
-            },
-            {
-                "level": 2,
-                "description": f"当检测到LEVEL_2: {AlertThreshold.LEVEL_2}名人员未穿着反光衣时触发。"
-            },
-            {
-                "level": 3,
-                "description": f"当检测到LEVEL_3: {AlertThreshold.LEVEL_3}名人员未穿着反光衣时触发。"
-            },
-            {
-                "level": 4,
-                "description": f"当检测到LEVEL_4: {AlertThreshold.LEVEL_4}名人员未穿着反光衣时触发。"
-            }
-        ]
+        "alert_definitions": f"当检测到: {AlertThreshold.unreflectivePersonCount}名及以上人员未穿着反光衣时触发, 可在上方齿轮中进行设置。"
     }
 
     def _initialize(self) -> None:
@@ -87,10 +64,7 @@ class ReflectiveDetectorSkill(BaseSkill):
         # 输入尺寸
         self.input_width, self.input_height = params.get("input_size")
         # 预警阈值配置
-        self.level_1_threshold = params["LEVEL_1_THRESHOLD"]
-        self.level_2_threshold = params["LEVEL_2_THRESHOLD"]
-        self.level_3_threshold = params["LEVEL_3_THRESHOLD"]
-        self.level_4_threshold = params["LEVEL_4_THRESHOLD"]
+        self.un_reflective_person_count = params["un_reflective_person_count"]
         self.log("info", f"初始化救生衣检测器: model={self.model_name}")
 
     def get_required_models(self) -> List[str]:
@@ -308,32 +282,18 @@ class ReflectiveDetectorSkill(BaseSkill):
         total_persons = vest_count + no_vest_count
         safety_ratio = vest_count / total_persons if total_persons > 0 else 1.0
         is_safe = no_vest_count == 0
-        alert_triggered = no_vest_count > 0
 
-        alert_level = 0
+        # 确定预警信息
+        alert_triggered = False
         alert_name = ""
         alert_type = ""
         alert_description = ""
 
-        if alert_triggered:
-            if no_vest_count >= self.level_1_threshold:
-                alert_level = 1  # 严重
-            elif self.level_2_threshold <= no_vest_count < self.level_1_threshold:
-                alert_level = 2  # 中等
-            elif self.level_3_threshold <= no_vest_count < self.level_2_threshold:
-                alert_level = 3  # 轻微
-            else:
-                alert_level = 4  # 极轻
-
-            level_names = {1: "严重", 2: "中等", 3: "轻微", 4: "极轻"}
-            severity = level_names.get(alert_level, "严重")
-
+        if no_vest_count >= self.un_reflective_person_count:
+            alert_triggered = True
             alert_name = "未穿戴反光衣"
             alert_type = "作业安全预警"
-            alert_description = (
-                f"检测到 {no_vest_count} 名人员未穿戴反光衣（共检测到 {total_persons} 人），"
-                f"属于 {severity} 级违规行为。请及时提醒并整改。"
-            )
+            alert_description = f"检测到{no_vest_count}名人员未穿戴反光衣（共检测到{total_persons}人），建议立即通知现场安全员进行处理。"
 
         result = {
             "total_persons": total_persons,
@@ -342,18 +302,17 @@ class ReflectiveDetectorSkill(BaseSkill):
             "safety_ratio": safety_ratio,
             "is_safe": is_safe,
             "alert_info": {
-                "alert_triggered": alert_triggered,
-                "alert_level": alert_level,
-                "alert_name": alert_name,
-                "alert_type": alert_type,
-                "alert_description": alert_description
+                "alert_triggered": alert_triggered,  # 是否触发预警
+                "alert_name": alert_name,  # 预警名称
+                "alert_type": alert_type,  # 预警类型
+                "alert_description": alert_description  # 预警描述
             }
         }
 
         self.log(
             "info",
-            f"反光衣穿戴分析: 共检测到 {total_persons} 人，已穿戴={vest_count}，未穿戴={no_vest_count}，"
-            f"预警等级={alert_level}"
+            f"反光衣穿戴分析: 共检测到 {total_persons} 人，已穿戴={vest_count}，未穿戴={no_vest_count}，是否触发预警={alert_triggered}"
+            
         )
 
         return result
