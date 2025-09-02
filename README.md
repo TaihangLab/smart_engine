@@ -753,7 +753,7 @@ git clone <repository-url>
 cd smart_engine
 
 # 创建虚拟环境（推荐使用conda）
-conda create -n smart_engine python=3.9
+conda create -n smart_engine python=3.10.11
 conda activate smart_engine
 
 # 安装依赖

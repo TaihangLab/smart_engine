@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     DB_AUTOFLUSH: bool = Field(default=False, description="数据库自动刷新")
     
     # WVP配置
-    WVP_API_URL: str = Field(default="http://192.168.27.143:18080", description="WVP API地址")
+    WVP_API_URL: str = Field(default="http://192.168.0.16:18080", description="WVP API地址")
     WVP_USERNAME: str = Field(default="admin", description="WVP用户名")
     WVP_PASSWORD: str = Field(default="admin", description="WVP密码")
     
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
     
     # MinIO配置
-    MINIO_ENDPOINT: str = Field(default="192.168.27.143", description="MinIO服务器地址")
+    MINIO_ENDPOINT: str = Field(default="192.168.0.16", description="MinIO服务器地址")
     MINIO_PORT: int = Field(default=9100, description="MinIO端口")
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", description="MinIO访问密钥")
     MINIO_SECRET_KEY: str = Field(default="minioadmin", description="MinIO秘密密钥")
