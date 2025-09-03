@@ -66,7 +66,7 @@ class Settings(BaseSettings):
     
     # MinIO配置
     MINIO_ENDPOINT: str = Field(default="192.168.0.16", description="MinIO服务器地址")
-    MINIO_PORT: int = Field(default=9100, description="MinIO端口")
+    MINIO_PORT: int = Field(default=9000, description="MinIO端口")
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", description="MinIO访问密钥")
     MINIO_SECRET_KEY: str = Field(default="minioadmin", description="MinIO秘密密钥")
     MINIO_SECURE: bool = Field(default=False, description="MinIO是否使用HTTPS")
