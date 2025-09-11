@@ -1324,5 +1324,37 @@ class WVPClient:
             logger.error(f"获取全局通道截图时出错: {str(e)}")
             return None
 
+    def get_channel_snap_stream(self, channel_id: int) -> Optional[bytes]:
+        """
+        一步到位获取全局通道截图图片（新接口）
+        :param channel_id: 全局通道ID
+        :return: 图片字节数据
+        """
+        url = f"{self.base_url}/api/common/channel/snap/stream"
+        try:
+            logger.info(f"一步到位获取全局通道截图: channel_id={channel_id}")
+            
+            params = {"channelId": channel_id}
+            
+            response = self.session.get(url, params=params)
+            logger.info(f"一步到位获取全局通道截图响应状态: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"一步到位获取全局通道截图失败，状态码: {response.status_code}")
+                return None
+            
+            # 检查Content-Type是否为图片
+            content_type = response.headers.get('Content-Type', '')
+            if not content_type.startswith('image/'):
+                logger.warning(f"响应Content-Type不是图片类型: {content_type}")
+                
+            image_data = response.content
+            logger.info(f"成功一步到位获取全局通道截图，数据大小: {len(image_data)} 字节")
+            return image_data
+            
+        except requests.exceptions.RequestException as e:
+            logger.error(f"一步到位获取全局通道截图时出错: {str(e)}")
+            return None
+
 # 创建全局WVP客户端实例
 wvp_client = WVPClient() 

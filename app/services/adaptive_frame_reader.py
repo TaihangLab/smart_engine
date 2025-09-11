@@ -13,7 +13,6 @@ import cv2
 import numpy as np
 import time
 import logging
-import re
 import threading
 import weakref
 from typing import Optional, Dict, Any, Tuple, Set
@@ -285,31 +284,16 @@ class SharedFrameReader:
                 self.stats["avg_request_time"] = total_time / self.stats["total_requests"]
     
     def _get_snapshot_frame(self) -> Optional[np.ndarray]:
-        """通过WVP全局通道截图接口获取帧"""
+        """通过WVP一步到位截图接口获取帧"""
         try:
-            # 第一步：请求全局通道截图
-            filename = wvp_client.request_channel_snap(self.camera_id)
-            
-            if not filename:
-                logger.warning(f"摄像头 {self.camera_id} 截图请求失败")
-                return None
-            
-            # 第二步：从文件名提取时间戳
-            mark = self._extract_timestamp_from_filename(filename)
-            if not mark:
-                logger.warning(f"摄像头 {self.camera_id} 无法从文件名提取时间戳: {filename}")
-                mark = time.strftime("%Y%m%d%H%M%S")
-            
-            logger.debug(f"摄像头 {self.camera_id} 截图文件名: {filename}, 提取mark: {mark}")
-            
-            # 第三步：获取截图数据
-            image_data = wvp_client.get_channel_snap(self.camera_id, mark)
+            # 直接获取截图数据
+            image_data = wvp_client.get_channel_snap_stream(self.camera_id)
             
             if not image_data:
-                logger.warning(f"摄像头 {self.camera_id} 获取截图数据失败，mark: {mark}")
+                logger.warning(f"摄像头 {self.camera_id} 一步到位截图请求失败")
                 return None
             
-            # 第四步：将字节数据转换为OpenCV格式
+            # 将字节数据转换为OpenCV格式
             frame = self._bytes_to_opencv_image(image_data)
             if frame is not None:
                 logger.debug(f"摄像头 {self.camera_id} 成功获取截图，尺寸: {frame.shape}")
@@ -320,24 +304,6 @@ class SharedFrameReader:
             
         except Exception as e:
             logger.error(f"摄像头 {self.camera_id} 获取截图失败: {str(e)}")
-            return None
-    
-    def _extract_timestamp_from_filename(self, filename: str) -> Optional[str]:
-        """从文件名中提取时间戳"""
-        try:
-            pattern = r'(\d+)(?=\.[^.]*$)'
-            match = re.search(pattern, filename)
-            
-            if match:
-                timestamp = match.group(1)
-                logger.debug(f"从文件名 '{filename}' 提取时间戳: {timestamp}")
-                return timestamp
-            else:
-                logger.warning(f"无法从文件名 '{filename}' 中提取最后的数字序列")
-                return None
-                
-        except Exception as e:
-            logger.error(f"提取时间戳时出错: {str(e)}")
             return None
     
     def _bytes_to_opencv_image(self, image_data: bytes) -> Optional[np.ndarray]:
