@@ -429,10 +429,18 @@ class SystemStartupService:
         
         # 关闭任务执行器
         try:
-            task_executor.scheduler.shutdown()
-            logger.info("✅ AI任务执行器调度器已关闭")
+            task_executor.shutdown()
+            logger.info("✅ AI任务执行器已关闭")
         except Exception as e:
-            logger.error(f"❌ 关闭AI任务执行器调度器失败: {str(e)}")
+            logger.error(f"❌ 关闭AI任务执行器失败: {str(e)}")
+        
+        # 关闭全局帧读取器管理池
+        try:
+            from app.services.adaptive_frame_reader import frame_reader_manager
+            frame_reader_manager.shutdown()
+            logger.info("✅ 全局帧读取器管理池已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭全局帧读取器管理池失败: {str(e)}")
     
     def _update_service_status(self, service_name: str, status: str, message: str):
         """更新服务状态"""

@@ -125,6 +125,7 @@ class LLMTaskProcessor:
     
     def _execute_llm_task(self) -> bool:
         """执行单次LLM任务分析"""
+        frame_reader = None
         try:
             # 获取摄像头最新帧
             if not self.task.camera_id:
@@ -132,7 +133,19 @@ class LLMTaskProcessor:
                 return False
             
             # 使用自适应帧读取器获取最新帧
-            frame_reader = AdaptiveFrameReader(self.task.camera_id)
+            # 计算默认帧间隔（LLM任务通常不需要高频率）
+            frame_interval = getattr(self.task, 'frame_interval', 60.0)  # 默认60秒间隔
+            
+            frame_reader = AdaptiveFrameReader(
+                camera_id=self.task.camera_id,
+                frame_interval=frame_interval,
+                connection_overhead_threshold=settings.ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD
+            )
+            
+            if not frame_reader.start():
+                logger.error(f"LLM任务 {self.task_id} 无法启动帧读取器")
+                return False
+            
             frame = frame_reader.get_latest_frame()
             
             if frame is None:
@@ -196,6 +209,13 @@ class LLMTaskProcessor:
         except Exception as e:
             logger.error(f"LLM任务 {self.task_id} 执行异常: {str(e)}", exc_info=True)
             return False
+        finally:
+            # 确保帧读取器被正确释放
+            if frame_reader:
+                try:
+                    frame_reader.stop()
+                except Exception as e:
+                    logger.error(f"LLM任务 {self.task_id} 释放帧读取器失败: {str(e)}")
     
     def _process_llm_result(self, llm_response: Dict[str, Any], frame: np.ndarray):
         """处理LLM分析结果，根据预警条件生成预警"""

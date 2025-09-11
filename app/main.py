@@ -4,6 +4,8 @@
 import logging
 import sys
 import os
+import signal
+import asyncio
 import uvicorn
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -41,6 +43,57 @@ logging.getLogger('app.plugins.skills').setLevel(log_level)
 logging.getLogger('app.services.adaptive_frame_reader').setLevel(log_level)
 
 logger = logging.getLogger(__name__)
+
+# 全局应用实例引用
+app_instance = None
+
+def signal_handler(signum, frame):
+    """信号处理器 - 优雅关闭应用"""
+    logger.info(f"🛑 接收到信号 {signum}，开始优雅关闭...")
+    
+    try:
+        from app.services.system_startup import system_startup_service
+        
+        # 在新的事件循环中运行关闭操作
+        try:
+            # 创建新的事件循环
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            # 运行关闭操作
+            loop.run_until_complete(system_startup_service.shutdown_system())
+            loop.close()
+            
+        except Exception as loop_error:
+            logger.warning(f"异步关闭失败，尝试同步关闭: {str(loop_error)}")
+            
+            # 如果异步关闭失败，尝试直接调用关闭方法
+            try:
+                # 导入必要的服务并直接关闭
+                from app.services.ai_task_executor import task_executor
+                from app.services.llm_task_executor import llm_task_executor
+                from app.services.adaptive_frame_reader import frame_reader_manager
+                
+                task_executor.shutdown()
+                llm_task_executor.stop()
+                frame_reader_manager.shutdown()
+                
+                logger.info("✅ 同步关闭完成")
+                
+            except Exception as sync_error:
+                logger.error(f"同步关闭也失败: {str(sync_error)}")
+            
+        logger.info("✅ 应用已优雅关闭")
+        
+    except Exception as e:
+        logger.error(f"❌ 关闭过程中出现异常: {str(e)}")
+    finally:
+        # 强制退出
+        os._exit(0)
+
+# 注册信号处理器
+signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
+signal.signal(signal.SIGTERM, signal_handler)  # 终止信号
 
 # 创建FastAPI应用 - 集成零配置补偿架构
 app = FastAPI(

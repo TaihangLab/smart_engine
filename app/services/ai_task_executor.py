@@ -2089,6 +2089,57 @@ class AITaskExecutor:
                 
         except Exception as e:
             logger.error(f"执行任务清理时出错: {str(e)}")
+    
+    def shutdown(self):
+        """优雅关闭AI任务执行器"""
+        logger.info("🛑 开始关闭AI任务执行器...")
+        
+        try:
+            # 停止所有正在运行的任务
+            running_task_ids = list(self.running_tasks.keys())
+            for task_id in running_task_ids:
+                try:
+                    self._stop_task_thread(task_id)
+                    logger.info(f"✅ 已停止任务 {task_id}")
+                except Exception as e:
+                    logger.error(f"❌ 停止任务 {task_id} 失败: {str(e)}")
+            
+            # 停止调度器
+            if hasattr(self, 'scheduler') and self.scheduler.running:
+                self.scheduler.shutdown(wait=True)
+                logger.info("✅ 任务调度器已关闭")
+            
+            # 关闭线程池
+            try:
+                if hasattr(self, 'alert_executor'):
+                    self.alert_executor.shutdown(wait=True)
+                    logger.info("✅ 预警生成线程池已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭预警生成线程池失败: {str(e)}")
+            
+            try:
+                if hasattr(self, 'message_executor'):
+                    self.message_executor.shutdown(wait=True)
+                    logger.info("✅ 消息处理线程池已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭消息处理线程池失败: {str(e)}")
+            
+            try:
+                if hasattr(self, 'image_executor'):
+                    self.image_executor.shutdown(wait=True)
+                    logger.info("✅ 图像处理线程池已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭图像处理线程池失败: {str(e)}")
+            
+            # 清理状态
+            self.running_tasks.clear()
+            self.stop_event.clear()
+            self.task_jobs.clear()
+            
+            logger.info("✅ AI任务执行器已完全关闭")
+            
+        except Exception as e:
+            logger.error(f"❌ 关闭AI任务执行器时出现异常: {str(e)}")
 
 # 创建全局任务执行器实例
 task_executor = AITaskExecutor() 
