@@ -11,6 +11,7 @@ from app.services.alert_service import alert_service
 from app.services.wvp_client import wvp_client
 from app.services.ai_task_executor import task_executor
 from app.services.alert_merge_manager import alert_merge_manager
+from app.services.adaptive_frame_reader import frame_reader_manager
 
 logger = logging.getLogger(__name__)
 
@@ -120,4 +121,84 @@ async def get_task_performance(task_id: int):
         "task_id": task_id,
         "status": "running",
         "message": "任务性能详细报告功能待实现"
-    } 
+    }
+
+@router.get("/frame-readers/stats")
+def get_frame_reader_stats():
+    """
+    获取帧读取器管理池统计信息
+    
+    返回所有摄像头的共享帧读取器状态，包括：
+    - 订阅者数量
+    - 连接模式（持续连接/按需截图）
+    - 性能统计
+    - 资源使用情况
+    """
+    try:
+        # 获取所有共享读取器的统计信息
+        reader_stats = frame_reader_manager.get_all_stats()
+        
+        # 获取管理器自身的统计信息
+        manager_stats = frame_reader_manager.get_manager_stats()
+        
+        return {
+            "success": True,
+            "manager": manager_stats,
+            "cameras": reader_stats,
+            "summary": {
+                "total_cameras": len(reader_stats),
+                "total_subscribers": sum(
+                    stats.get("subscribers_count", 0) 
+                    for stats in reader_stats.values() 
+                    if isinstance(stats, dict)
+                ),
+                "persistent_mode_cameras": sum(
+                    1 for stats in reader_stats.values() 
+                    if isinstance(stats, dict) and stats.get("mode") == "persistent"
+                ),
+                "on_demand_mode_cameras": sum(
+                    1 for stats in reader_stats.values() 
+                    if isinstance(stats, dict) and stats.get("mode") == "on_demand"
+                )
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"获取帧读取器统计信息失败: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        }
+
+@router.get("/frame-readers/camera/{camera_id}")
+def get_camera_frame_reader_stats(camera_id: int):
+    """
+    获取指定摄像头的帧读取器详细统计信息
+    
+    Args:
+        camera_id: 摄像头ID
+        
+    Returns:
+        该摄像头的详细统计信息
+    """
+    try:
+        all_stats = frame_reader_manager.get_all_stats()
+        
+        if camera_id not in all_stats:
+            return {
+                "success": False,
+                "error": f"摄像头 {camera_id} 没有活跃的帧读取器"
+            }
+        
+        return {
+            "success": True,
+            "camera_id": camera_id,
+            "stats": all_stats[camera_id]
+        }
+        
+    except Exception as e:
+        logger.error(f"获取摄像头 {camera_id} 帧读取器统计信息失败: {str(e)}")
+        return {
+            "success": False,
+            "error": str(e)
+        } 
