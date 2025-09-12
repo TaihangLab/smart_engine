@@ -101,8 +101,42 @@ class SystemStartupService:
         try:
             # 1. 创建数据库表
             logger.info("📋 创建数据库表...")
+            
+            # 确保所有模型都被导入，以便create_all能发现它们
+            try:
+                # 导入现有模型
+                from app.models import alert, model, skill, ai_task, llm_skill
+                logger.info("✅ 现有模型导入完成")
+                
+                # 导入预警重构模型（已替换原有模型）
+                logger.info("✅ 预警重构模型已集成到标准模型中")
+                
+            except ImportError as e:
+                logger.warning(f"⚠️ 部分模型导入失败: {e}")
+            
+            # 创建所有表
             Base.metadata.create_all(bind=engine)
             logger.info("✅ 数据库表创建成功")
+            
+            # 1.5. 初始化预警表重构 (暂时禁用)
+            logger.info("⚪ 预警表重构功能暂时禁用（开发中）")
+            # try:
+            #     from app.db.init_alert_redesign import initialize_alert_redesign
+            #     redesign_result = initialize_alert_redesign()
+            #     
+            #     if redesign_result["status"] == "success":
+            #         logger.info(f"✅ 预警表重构初始化成功: {redesign_result['message']}")
+            #     elif redesign_result["status"] == "warning":
+            #         logger.warning(f"⚠️ 预警表重构初始化有警告: {redesign_result['message']}")
+            #     elif redesign_result["status"] == "skipped":
+            #         logger.info(f"⚪ 预警表重构跳过: {redesign_result['message']}")
+            #     elif redesign_result["status"] == "disabled":
+            #         logger.info(f"⚪ 预警表重构已禁用: {redesign_result['message']}")
+            #     else:
+            #         logger.error(f"❌ 预警表重构初始化失败: {redesign_result['message']}")
+            #         
+            # except Exception as e:
+            #     logger.error(f"❌ 预警表重构初始化异常: {str(e)}")
             
             # 2. 同步Triton模型到数据库（如果Triton可用）
             logger.info("🔄 正在同步Triton模型到数据库...")

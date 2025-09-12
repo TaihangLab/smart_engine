@@ -74,7 +74,7 @@ class AlertService:
                 logger.info(f"✅ 报警数据已保存到数据库: ID={created_alert.alert_id}, 状态={created_alert.status}")
             
             # 🔥 修复：使用线程安全的方式调度异步广播
-            alert_dict = AlertResponse.from_orm(created_alert).dict()
+            alert_dict = AlertResponse.model_validate(created_alert).model_dump()
             
             # 在新线程中异步发送SSE消息，避免阻塞主线程
             threading.Thread(
@@ -250,7 +250,11 @@ class AlertService:
         # 更新处理相关字段
         alert.processed_by = status_update.processed_by
         alert.processing_notes = status_update.processing_notes
-        alert.updated_at = datetime.utcnow()
+        alert.updated_at = datetime.now()
+        
+        # 如果状态为已处理、已归档或误报，设置处理完成时间
+        if status_update.status in [AlertStatus.RESOLVED, AlertStatus.ARCHIVED, AlertStatus.FALSE_ALARM]:
+            alert.processed_at = datetime.now()
         
         db.commit()
         db.refresh(alert)

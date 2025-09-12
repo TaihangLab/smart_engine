@@ -39,8 +39,7 @@ from app.core.config import settings
 from app.models.compensation import (
     AlertPublishLog, AlertNotificationLog, CompensationTaskLog,
     PublishStatus, NotificationStatus, CompensationTaskType,
-    AlertPublishLogResponse, AlertNotificationLogResponse, CompensationTaskLogResponse,
-    CompensationStats, CompensationHealth
+    CompensationStats
 )
 from app.services.unified_compensation_service import (
     unified_compensation_service,
@@ -306,7 +305,7 @@ async def get_publish_logs(
                 "total": total,
                 "offset": offset,
                 "limit": limit,
-                "logs": [AlertPublishLogResponse.from_orm(log).dict() for log in logs]
+                "logs": [_log_to_dict(log) for log in logs]
             },
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -356,7 +355,7 @@ async def get_notification_logs(
                 "total": total,
                 "offset": offset,
                 "limit": limit,
-                "logs": [AlertNotificationLogResponse.from_orm(log).dict() for log in logs]
+                "logs": [_log_to_dict(log) for log in logs]
             },
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -406,7 +405,7 @@ async def get_task_logs(
                 "total": total,
                 "offset": offset,
                 "limit": limit,
-                "logs": [CompensationTaskLogResponse.from_orm(log).dict() for log in logs]
+                "logs": [_log_to_dict(log) for log in logs]
             },
             "timestamp": datetime.utcnow().isoformat()
         }
@@ -502,6 +501,66 @@ async def benchmark_message_id_generation(
 # ================================================================
 # 🛠️ 内部辅助函数
 # ================================================================
+
+def _log_to_dict(log) -> Dict[str, Any]:
+    """将日志对象转换为字典"""
+    if isinstance(log, AlertPublishLog):
+        return {
+            "id": log.id,
+            "message_id": log.message_id,
+            "alert_id": log.alert_id,
+            "publish_status": log.publish_status.value if log.publish_status else None,
+            "rabbitmq_queue": log.rabbitmq_queue,
+            "retry_count": log.retry_count,
+            "error_message": log.error_message,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "updated_at": log.updated_at.isoformat() if log.updated_at else None,
+            "last_retry_at": log.last_retry_at.isoformat() if log.last_retry_at else None
+        }
+    elif isinstance(log, AlertNotificationLog):
+        return {
+            "id": log.id,
+            "message_id": log.message_id,
+            "alert_id": log.alert_id,
+            "notification_status": log.notification_status.value if log.notification_status else None,
+            "notification_channel": log.notification_channel.value if log.notification_channel else None,
+            "target_info": log.target_info,
+            "retry_count": log.retry_count,
+            "error_message": log.error_message,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "updated_at": log.updated_at.isoformat() if log.updated_at else None,
+            "last_retry_at": log.last_retry_at.isoformat() if log.last_retry_at else None,
+            "delivered_at": log.delivered_at.isoformat() if log.delivered_at else None
+        }
+    elif isinstance(log, CompensationTaskLog):
+        return {
+            "id": log.id,
+            "task_id": log.task_id,
+            "task_type": log.task_type.value if log.task_type else None,
+            "target_table": log.target_table,
+            "target_id": log.target_id,
+            "execution_result": log.execution_result,
+            "processed_count": log.processed_count,
+            "error_message": log.error_message,
+            "started_at": log.started_at.isoformat() if log.started_at else None,
+            "completed_at": log.completed_at.isoformat() if log.completed_at else None,
+            "created_at": log.created_at.isoformat() if log.created_at else None,
+            "executor_host": log.executor_host,
+            "executor_process_id": log.executor_process_id
+        }
+    else:
+        # 通用转换
+        result = {}
+        for column in log.__table__.columns:
+            value = getattr(log, column.name)
+            if isinstance(value, datetime):
+                result[column.name] = value.isoformat()
+            elif hasattr(value, 'value'):  # 枚举类型
+                result[column.name] = value.value
+            else:
+                result[column.name] = value
+        return result
+
 
 def _calculate_publish_stats(logs: List[AlertPublishLog]) -> Dict[str, Any]:
     """计算发布日志统计信息"""

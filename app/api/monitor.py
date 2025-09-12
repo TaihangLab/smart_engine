@@ -57,9 +57,9 @@ def get_alert_detail(
     pre_alert_info = alert_service.get_pre_alert_info(db, alert)
     
     # 构建响应
-    alert_response = AlertResponse.from_orm(alert)
+    alert_response = AlertResponse.model_validate(alert)
     result = AlertDetailResponse(
-        **alert_response.dict(),
+        **alert_response.model_dump(),
         pre_alert_info=pre_alert_info
     )
     
