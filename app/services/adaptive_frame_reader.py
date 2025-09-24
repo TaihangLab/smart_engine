@@ -118,7 +118,11 @@ class SharedFrameReader:
         # 引用计数和订阅者管理
         self.ref_count = 0
         self.subscribers: Set[int] = set()  # 存储订阅者的哈希ID
+        self.subscriber_intervals: Dict[int, float] = {}  # 存储每个订阅者的帧间隔需求
         self.lock = threading.RLock()
+        
+        # 当前工作参数
+        self.current_frame_interval = None  # 当前使用的最小帧间隔
         
         # 帧读取组件
         self.threaded_reader = None
@@ -139,41 +143,57 @@ class SharedFrameReader:
         self.last_access_time = time.time()
     
     def add_subscriber(self, subscriber_id: int, frame_interval: float) -> bool:
-        """添加订阅者"""
+        """添加订阅者（支持最小间隔优先策略）"""
         with self.lock:
             was_empty = len(self.subscribers) == 0
             self.subscribers.add(subscriber_id)
+            self.subscriber_intervals[subscriber_id] = frame_interval
             self.ref_count += 1
             self.stats["subscribers_count"] = len(self.subscribers)
             self.last_access_time = time.time()
             
-            logger.info(f"摄像头 {self.camera_id} 添加订阅者 {subscriber_id}，当前订阅者数: {len(self.subscribers)}")
+            # 计算新的最小帧间隔
+            new_min_interval = min(self.subscriber_intervals.values())
+            
+            logger.info(f"摄像头 {self.camera_id} 添加订阅者 {subscriber_id}(间隔:{frame_interval}s)，当前订阅者数: {len(self.subscribers)}，最小间隔: {new_min_interval}s")
             
             if was_empty:
                 # 第一个订阅者，需要启动帧读取器
-                return self._start_reading(frame_interval)
+                return self._start_reading(new_min_interval)
             else:
                 # 已有订阅者，检查是否需要调整模式
-                return self._maybe_adjust_mode(frame_interval)
+                return self._maybe_adjust_mode(new_min_interval)
     
     def remove_subscriber(self, subscriber_id: int):
-        """移除订阅者"""
+        """移除订阅者（支持最小间隔优先策略）"""
         with self.lock:
             if subscriber_id in self.subscribers:
                 self.subscribers.remove(subscriber_id)
+                # 移除订阅者的间隔记录
+                removed_interval = self.subscriber_intervals.pop(subscriber_id, None)
                 self.ref_count = max(0, self.ref_count - 1)
                 self.stats["subscribers_count"] = len(self.subscribers)
                 self.last_access_time = time.time()
                 
-                logger.info(f"摄像头 {self.camera_id} 移除订阅者 {subscriber_id}，当前订阅者数: {len(self.subscribers)}")
+                logger.info(f"摄像头 {self.camera_id} 移除订阅者 {subscriber_id}(间隔:{removed_interval}s)，当前订阅者数: {len(self.subscribers)}")
                 
                 if len(self.subscribers) == 0:
                     # 没有订阅者了，停止帧读取器
+                    self.current_frame_interval = None
                     self._stop_reading()
+                else:
+                    # 重新计算最小间隔，可能需要调整模式
+                    new_min_interval = min(self.subscriber_intervals.values())
+                    if new_min_interval != self.current_frame_interval:
+                        logger.info(f"摄像头 {self.camera_id} 最小间隔从 {self.current_frame_interval}s 调整为 {new_min_interval}s")
+                        self._maybe_adjust_mode(new_min_interval)
     
     def _start_reading(self, frame_interval: float) -> bool:
         """启动帧读取"""
         try:
+            # 记录当前工作间隔
+            self.current_frame_interval = frame_interval
+            
             # 确定工作模式
             if frame_interval >= self.connection_overhead_threshold:
                 self.mode = "on_demand"
@@ -217,11 +237,41 @@ class SharedFrameReader:
             logger.error(f"启动摄像头 {self.camera_id} 共享帧读取器失败: {str(e)}")
             return False
     
-    def _maybe_adjust_mode(self, frame_interval: float) -> bool:
-        """检查是否需要调整模式"""
-        # 简化处理：目前不支持动态模式切换
-        # 如果需要，可以在这里实现更复杂的逻辑
-        return True
+    def _maybe_adjust_mode(self, new_min_interval: float) -> bool:
+        """检查是否需要调整模式（支持动态切换）"""
+        try:
+            # 如果最小间隔没有变化，无需调整
+            if new_min_interval == self.current_frame_interval:
+                return True
+            
+            # 计算新的工作模式
+            new_mode = "on_demand" if new_min_interval >= self.connection_overhead_threshold else "persistent"
+            
+            # 如果模式需要改变，重启帧读取器
+            if new_mode != self.mode:
+                logger.info(f"摄像头 {self.camera_id} 需要从 {self.mode} 模式切换到 {new_mode} 模式")
+                self._stop_reading()
+                return self._start_reading(new_min_interval)
+            else:
+                # 模式不变，但间隔改变，更新持续连接模式的间隔
+                if self.mode == "persistent" and self.threaded_reader:
+                    logger.info(f"摄像头 {self.camera_id} 持续连接模式间隔从 {self.current_frame_interval}s 调整为 {new_min_interval}s")
+                    self.current_frame_interval = new_min_interval
+                    self.threaded_reader.frame_interval = new_min_interval
+                    return True
+                elif self.mode == "on_demand":
+                    # 按需模式下，只需要更新记录的间隔
+                    logger.info(f"摄像头 {self.camera_id} 按需模式间隔从 {self.current_frame_interval}s 调整为 {new_min_interval}s")
+                    self.current_frame_interval = new_min_interval
+                    return True
+                else:
+                    # 其他情况，重启
+                    self._stop_reading()
+                    return self._start_reading(new_min_interval)
+                    
+        except Exception as e:
+            logger.error(f"摄像头 {self.camera_id} 调整模式失败: {str(e)}", exc_info=True)
+            return False
     
     def _stop_reading(self):
         """停止帧读取"""
