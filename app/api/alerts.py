@@ -6,9 +6,11 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 import asyncio
 import math
+from sqlalchemy import desc
+from pydantic import BaseModel
 
 from app.db.session import get_db
-from app.models.alert import AlertResponse, AlertUpdate, AlertStatus
+from app.models.alert import Alert, AlertResponse, AlertUpdate, AlertStatus
 from app.services.alert_service import alert_service, register_sse_client, unregister_sse_client, publish_test_alert, connected_clients
 
 logger = logging.getLogger(__name__)
@@ -216,7 +218,7 @@ async def get_realtime_alerts(
         pages = 1
     
     # 将Alert对象转换为AlertResponse对象
-    alert_responses = [AlertResponse.from_orm(alert) for alert in filtered_alerts]
+    alert_responses = [AlertResponse.model_validate(alert) for alert in filtered_alerts]
     
     logger.info(f"获取实时预警列表成功，返回 {len(alert_responses)} 条记录，总共 {total_count} 条")
     
@@ -382,33 +384,13 @@ def get_alert(
         logger.warning(f"报警记录不存在: ID={alert_id}")
         raise HTTPException(status_code=404, detail="报警记录不存在")
     
-    # 🆕 使用AlertResponse.from_orm转换，确保包含所有字段和URL
-    alert_response = AlertResponse.from_orm(alert)
+    # 🆕 使用AlertResponse.model_validate转换，确保包含所有字段和URL
+    alert_response = AlertResponse.model_validate(alert)
     
     logger.info(f"获取报警详情成功: ID={alert_id}, 处理步骤数: {len(alert_response.process.get('steps', [])) if alert_response.process else 0}")
     return alert_response
 
-@router.put("/{alert_id}/status", response_model=AlertResponse)
-def update_alert_status(
-    alert_id: int,
-    status_update: AlertUpdate,
-    db: Session = Depends(get_db)
-):
-    """
-    更新报警状态，自动记录处理流程
-    """
-    logger.info(f"收到更新报警状态请求: ID={alert_id}, 新状态={status_update.status}")
-    
-    updated_alert = alert_service.update_alert_status(db, alert_id, status_update)
-    if updated_alert is None:
-        logger.warning(f"报警记录不存在: ID={alert_id}")
-        raise HTTPException(status_code=404, detail="报警记录不存在")
-    
-    # 转换为响应模型
-    alert_response = AlertResponse.from_orm(updated_alert)
-    
-    logger.info(f"报警状态更新成功: ID={alert_id}, 新状态={updated_alert.status}, 处理步骤数: {len(alert_response.process.get('steps', [])) if alert_response.process else 0}")
-    return alert_response
+
 
 @router.get("/{alert_id}/process", response_model=Dict[str, Any])
 def get_alert_process(
@@ -548,3 +530,550 @@ async def send_test_alert(
         logger.error(f"发送测试报警失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"发送测试报警失败: {str(e)}")
 
+
+# ========== 预警处理增强功能 ==========
+
+@router.post("/{alert_id}/start-processing", response_model=AlertResponse, description="开始处理预警（确认处理）")
+def start_processing_alert(
+    alert_id: int,
+    processing_notes: str,
+    processed_by: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    开始处理预警（确认处理功能）
+    将预警状态更新为"处理中"并记录处理意见
+    """
+    try:
+        # 构建状态更新请求
+        status_update = AlertUpdate(
+            status=AlertStatus.PROCESSING,
+            processed_by=processed_by,
+            processing_notes=processing_notes
+        )
+        
+        updated_alert = alert_service.update_alert_status(db, alert_id, status_update)
+        if not updated_alert:
+            raise HTTPException(status_code=404, detail="预警记录不存在")
+        
+        alert_response = AlertResponse.model_validate(updated_alert)
+        logger.info(f"✅ 成功开始处理预警 {alert_id}，处理人: {processed_by}")
+        return alert_response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"开始处理预警失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"开始处理预警失败: {str(e)}")
+
+
+@router.post("/{alert_id}/finish-processing", response_model=AlertResponse, description="完成处理预警（结束处理）")
+def finish_processing_alert(
+    alert_id: int,
+    final_notes: Optional[str] = None,
+    processed_by: Optional[str] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    完成处理预警（结束处理功能）
+    将预警状态更新为"已处理"并记录完成信息
+    """
+    try:
+        # 检查当前状态
+        alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
+        if not alert:
+            raise HTTPException(status_code=404, detail="预警记录不存在")
+        
+        if alert.status != AlertStatus.PROCESSING:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"预警当前状态为{AlertStatus.get_display_name(alert.status)}，不能完成处理"
+            )
+
+        # 构建状态更新请求
+        final_processing_notes = final_notes or "处理已完成"
+        status_update = AlertUpdate(
+            status=AlertStatus.RESOLVED,
+            processed_by=processed_by,
+            processing_notes=final_processing_notes
+        )
+        
+        updated_alert = alert_service.update_alert_status(db, alert_id, status_update)
+        alert_response = AlertResponse.model_validate(updated_alert)
+        
+        logger.info(f"✅ 成功完成处理预警 {alert_id}，处理人: {processed_by}")
+        return alert_response
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"完成处理预警失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"完成处理预警失败: {str(e)}")
+
+
+@router.get("/{alert_id}/processing-history", description="获取预警处理历史")
+def get_alert_processing_history(
+    alert_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    获取预警处理历史，解析process字段中的步骤信息
+    """
+    try:
+        alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
+        if not alert:
+            raise HTTPException(status_code=404, detail="预警记录不存在")
+        
+        processing_history = []
+        if alert.process and 'steps' in alert.process:
+            for step in alert.process['steps']:
+                processing_history.append({
+                    "step": step.get('step', ''),
+                    "time": step.get('time', ''),
+                    "description": step.get('desc', ''),
+                    "operator": step.get('operator', '')
+                })
+        
+        result = {
+            "alert_id": alert.alert_id,
+            "current_status": alert.status,
+            "current_status_display": AlertStatus.get_display_name(alert.status),
+            "processed_by": alert.processed_by,
+            "processed_at": alert.processed_at,
+            "processing_notes": alert.processing_notes,
+            "history": processing_history,
+            "total_steps": len(processing_history)
+        }
+        
+        logger.info(f"✅ 成功获取预警 {alert_id} 的处理历史，共 {len(processing_history)} 条记录")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取预警处理历史失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取预警处理历史失败: {str(e)}")
+
+
+@router.get("/by-status/{status}", description="根据处理状态获取预警列表")
+def get_alerts_by_processing_status(
+    status: int,
+    limit: int = Query(default=100, ge=1, le=1000, description="每页数量"),
+    offset: int = Query(default=0, ge=0, description="偏移量"),
+    db: Session = Depends(get_db)
+):
+    """
+    根据处理状态获取预警列表
+    status: 1-待处理, 2-处理中, 3-已处理, 4-已归档, 5-误报
+    """
+    try:
+        # 验证状态值
+        if status not in [1, 2, 3, 4, 5]:
+            raise HTTPException(status_code=400, detail=f"无效的状态值: {status}")
+        
+        # 查询预警列表
+        query = db.query(Alert).filter(Alert.status == status)
+        total = query.count()
+        
+        alerts = query.order_by(desc(Alert.alert_time)).offset(offset).limit(limit).all()
+        
+        # 转换为响应格式
+        alert_list = []
+        for alert in alerts:
+            alert_dict = {
+                "alert_id": alert.alert_id,
+                "alert_name": alert.alert_name,
+                "alert_type": alert.alert_type,
+                "camera_name": alert.camera_name,
+                "location": alert.location,
+                "alert_time": alert.alert_time,
+                "status": alert.status,
+                "status_display": AlertStatus.get_display_name(alert.status),
+                "processed_by": alert.processed_by,
+                "processed_at": alert.processed_at
+            }
+            alert_list.append(alert_dict)
+        
+        result = {
+            "alerts": alert_list,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "status": status,
+            "status_display": AlertStatus.get_display_name(status)
+        }
+        
+        logger.info(f"✅ 成功获取状态为 {AlertStatus.get_display_name(status)} 的预警列表，共 {total} 条")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取预警列表失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取预警列表失败: {str(e)}")
+
+
+def _is_valid_status_transition(current_status: int, target_status: int) -> bool:
+    """验证状态转换的合法性"""
+    # 允许同状态转换（用于更新处理意见、处理人等信息）
+    if current_status == target_status:
+        return True
+    
+    # 定义合法的状态转换路径
+    valid_transitions = {
+        AlertStatus.PENDING: [AlertStatus.PROCESSING, AlertStatus.FALSE_ALARM, AlertStatus.ARCHIVED],
+        AlertStatus.PROCESSING: [AlertStatus.RESOLVED, AlertStatus.ARCHIVED, AlertStatus.FALSE_ALARM],
+        AlertStatus.RESOLVED: [AlertStatus.ARCHIVED, AlertStatus.PROCESSING],  # 允许重新处理
+        AlertStatus.ARCHIVED: [AlertStatus.PROCESSING],  # 允许从归档恢复
+        AlertStatus.FALSE_ALARM: [AlertStatus.PROCESSING]  # 允许从误报恢复
+    }
+    
+    allowed_next_states = valid_transitions.get(current_status, [])
+    return target_status in allowed_next_states
+
+
+def _get_action_type_from_status_change(from_status: int, to_status: int) -> int:
+    """根据状态变化确定动作类型"""
+    from app.models.alert import ProcessingActionType
+    
+    # 状态转换映射到动作类型
+    status_action_map = {
+        (AlertStatus.PENDING, AlertStatus.PROCESSING): ProcessingActionType.START_PROCESSING,
+        (AlertStatus.PROCESSING, AlertStatus.RESOLVED): ProcessingActionType.FINISH_PROCESSING,
+        (AlertStatus.RESOLVED, AlertStatus.ARCHIVED): ProcessingActionType.ARCHIVE,
+        (AlertStatus.PENDING, AlertStatus.FALSE_ALARM): ProcessingActionType.MARK_FALSE_ALARM,
+        (AlertStatus.PROCESSING, AlertStatus.FALSE_ALARM): ProcessingActionType.MARK_FALSE_ALARM,
+        (AlertStatus.ARCHIVED, AlertStatus.PROCESSING): ProcessingActionType.REOPEN,
+        (AlertStatus.FALSE_ALARM, AlertStatus.PROCESSING): ProcessingActionType.REOPEN,
+    }
+    
+    return status_action_map.get((from_status, to_status), ProcessingActionType.UPDATE_NOTES)
+
+
+def _get_action_description(action_type: int, from_status: int, to_status: int) -> str:
+    """获取动作描述"""
+    from app.models.alert import ProcessingActionType
+    
+    descriptions = {
+        ProcessingActionType.START_PROCESSING: "开始处理预警",
+        ProcessingActionType.FINISH_PROCESSING: "完成预警处理",
+        ProcessingActionType.ARCHIVE: "归档预警",
+        ProcessingActionType.MARK_FALSE_ALARM: "标记为误报",
+        ProcessingActionType.REOPEN: "重新处理预警",
+        ProcessingActionType.UPDATE_NOTES: "更新处理意见"
+    }
+    
+    return descriptions.get(action_type, f"状态更新: {AlertStatus.get_display_name(from_status)} -> {AlertStatus.get_display_name(to_status)}")
+
+
+@router.get("/{alert_id}/processing-records", description="获取预警的所有处理记录")
+def get_alert_processing_records(
+    alert_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    获取预警的所有处理记录（从alert_processing_records表）
+    """
+    try:
+        # 1. 验证预警是否存在
+        alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
+        if not alert:
+            raise HTTPException(status_code=404, detail=f"预警记录不存在: {alert_id}")
+        
+        # 2. 查询处理记录
+        from app.models.alert import AlertProcessingRecord
+        records = db.query(AlertProcessingRecord)\
+                    .filter(AlertProcessingRecord.alert_id == alert_id)\
+                    .order_by(AlertProcessingRecord.created_at.desc())\
+                    .all()
+        
+        # 3. 转换为响应格式
+        processing_records = []
+        for record in records:
+            processing_records.append({
+                "record_id": record.record_id,
+                "action_type": record.action_type,
+                "action_display": record.action_display,
+                "from_status": record.from_status,
+                "from_status_display": record.from_status_display,
+                "to_status": record.to_status,
+                "to_status_display": record.to_status_display,
+                "operator_name": record.operator_name,
+                "operator_role": record.operator_role,
+                "operator_department": record.operator_department,
+                "notes": record.notes,
+                "processing_duration": record.processing_duration,
+                "priority_level": record.priority_level,
+                "priority_display": record.priority_display,
+                "is_automated": record.is_automated,
+                "created_at": record.created_at,
+                "updated_at": record.updated_at
+            })
+        
+        result = {
+            "alert_id": alert_id,
+            "total_records": len(processing_records),
+            "processing_records": processing_records
+        }
+        
+        logger.info(f"✅ 成功获取预警 {alert_id} 的处理记录，共 {len(processing_records)} 条")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取处理记录失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取处理记录失败: {str(e)}")
+
+
+@router.put("/{alert_id}/status", description="更新预警状态并创建处理记录")
+def update_alert_status(
+    alert_id: int,
+    alert_update: AlertUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    更新预警状态 - 前端确认处理按钮调用的API
+    同时更新alerts表和自动创建alert_processing_records记录
+    """
+    try:
+        logger.info(f"🔄 开始处理预警状态更新: alert_id={alert_id}, status={alert_update.status}")
+        
+        # 1. 查找预警记录
+        alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
+        if not alert:
+            logger.error(f"预警记录不存在: {alert_id}")
+            raise HTTPException(status_code=404, detail=f"预警记录不存在: {alert_id}")
+        
+        # 2. 记录原状态
+        original_status = alert.status
+        logger.info(f"预警 {alert_id} 状态变更: {original_status} -> {alert_update.status}")
+        
+        # 3. 验证状态转换的合法性
+        if not _is_valid_status_transition(original_status, alert_update.status):
+            error_msg = f"不允许的状态转换: {AlertStatus.get_display_name(original_status)} -> {AlertStatus.get_display_name(alert_update.status)}"
+            logger.error(error_msg)
+            raise HTTPException(status_code=400, detail=error_msg)
+        
+        # 4. 更新预警基本信息
+        alert.status = alert_update.status
+        alert.processed_by = alert_update.processed_by
+        alert.processing_notes = alert_update.processing_notes
+        alert.processed_at = datetime.now()
+        alert.updated_at = datetime.now()
+        
+        # 5. 创建处理记录 - 关键步骤！
+        from app.models.alert import AlertProcessingRecord, ProcessingActionType
+        
+        # 根据状态变化确定动作类型
+        action_type = _get_action_type_from_status_change(original_status, alert_update.status)
+        
+        processing_record = AlertProcessingRecord(
+            alert_id=alert_id,
+            action_type=action_type,
+            from_status=original_status,
+            to_status=alert_update.status,
+            operator_name=alert_update.processed_by or "系统操作",
+            operator_role="处理员",
+            operator_department="安全部门",
+            notes=alert_update.processing_notes,
+            priority_level=0,
+            is_automated=False,
+            created_at=datetime.now()
+        )
+        
+        logger.info(f"📝 创建处理记录: action_type={action_type}, operator={processing_record.operator_name}")
+        
+        # 6. 同时更新JSON格式的process字段（兼容性）
+        action_desc = _get_action_description(action_type, original_status, alert_update.status)
+        alert.add_process_step(
+            step=action_desc,
+            desc=alert_update.processing_notes or action_desc,
+            operator=alert_update.processed_by or "系统操作"
+        )
+        
+        # 7. 保存到数据库
+        db.add(processing_record)
+        db.commit()
+        
+        logger.info(f"✅ 成功保存处理记录到数据库: record_id={processing_record.record_id}")
+        
+        # 8. 刷新获取最新数据
+        db.refresh(alert)
+        db.refresh(processing_record)
+        
+        # 9. 返回处理结果（前端期望的格式）
+        result = {
+            "code": 0,
+            "msg": "success", 
+            "data": {
+                "success": True,
+                "message": f"预警 {alert_id} 状态更新成功",
+                "alert_id": alert_id,
+                "status_change": {
+                    "from": original_status,
+                    "from_display": AlertStatus.get_display_name(original_status),
+                    "to": alert_update.status,
+                    "to_display": AlertStatus.get_display_name(alert_update.status)
+                },
+                "processing_record": {
+                    "record_id": processing_record.record_id,
+                    "action_type": processing_record.action_type,
+                    "action_display": processing_record.action_display,
+                    "created_at": processing_record.created_at,
+                    "operator": processing_record.operator_name
+                },
+                "updated_alert": {
+                    "alert_id": alert.alert_id,
+                    "status": alert.status,
+                    "status_display": AlertStatus.get_display_name(alert.status),
+                    "processed_by": alert.processed_by,
+                    "processed_at": alert.processed_at,
+                    "processing_notes": alert.processing_notes
+                }
+            }
+        }
+        
+        logger.info(f"✅ 预警状态更新完成: {alert_id}")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"更新预警状态失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"更新预警状态失败: {str(e)}")
+
+
+@router.put("/batch-update", description="批量更新预警状态并创建处理记录") 
+def batch_update_alert_status(
+    batch_request: dict,
+    db: Session = Depends(get_db)
+):
+    """
+    批量更新预警状态 - 前端批量处理调用的API
+    同时更新alerts表和创建alert_processing_records记录
+    """
+    try:
+        alert_ids = batch_request.get("alert_ids", [])
+        if not alert_ids:
+            raise HTTPException(status_code=400, detail="缺少预警ID列表")
+        
+        logger.info(f"🔄 开始批量处理预警: {len(alert_ids)} 个预警")
+        
+        # 提取更新数据
+        status = batch_request.get("status")
+        processing_notes = batch_request.get("processing_notes")
+        processed_by = batch_request.get("processed_by")
+        
+        if status is None:
+            raise HTTPException(status_code=400, detail="缺少状态参数")
+        
+        success_count = 0
+        failure_count = 0
+        results = []
+        
+        for alert_id in alert_ids:
+            try:
+                # 查找预警记录
+                alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
+                if not alert:
+                    results.append({
+                        "alert_id": alert_id,
+                        "success": False,
+                        "error": f"预警记录不存在: {alert_id}"
+                    })
+                    failure_count += 1
+                    continue
+                
+                # 记录原状态
+                original_status = alert.status
+                
+                # 验证状态转换
+                if not _is_valid_status_transition(original_status, status):
+                    results.append({
+                        "alert_id": alert_id,
+                        "success": False,
+                        "error": f"不允许的状态转换: {AlertStatus.get_display_name(original_status)} -> {AlertStatus.get_display_name(status)}"
+                    })
+                    failure_count += 1
+                    continue
+                
+                # 更新预警
+                alert.status = status
+                alert.processed_by = processed_by
+                alert.processing_notes = processing_notes
+                alert.processed_at = datetime.now()
+                alert.updated_at = datetime.now()
+                
+                # 创建处理记录
+                from app.models.alert import AlertProcessingRecord, ProcessingActionType
+                action_type = _get_action_type_from_status_change(original_status, status)
+                
+                processing_record = AlertProcessingRecord(
+                    alert_id=alert_id,
+                    action_type=action_type,
+                    from_status=original_status,
+                    to_status=status,
+                    operator_name=processed_by or "系统操作",
+                    operator_role="处理员",
+                    operator_department="安全部门",
+                    notes=processing_notes,
+                    priority_level=0,
+                    is_automated=False,
+                    created_at=datetime.now()
+                )
+                
+                # 更新JSON字段
+                action_desc = _get_action_description(action_type, original_status, status)
+                alert.add_process_step(
+                    step=action_desc,
+                    desc=processing_notes or action_desc,
+                    operator=processed_by or "系统操作"
+                )
+                
+                db.add(processing_record)
+                
+                results.append({
+                    "alert_id": alert_id,
+                    "success": True,
+                    "processing_record_id": processing_record.record_id,
+                    "status_change": f"{AlertStatus.get_display_name(original_status)} -> {AlertStatus.get_display_name(status)}"
+                })
+                success_count += 1
+                
+                logger.info(f"✅ 批量处理成功: alert_id={alert_id}")
+                
+            except Exception as e:
+                logger.error(f"批量处理单个预警失败: alert_id={alert_id}, error={str(e)}")
+                results.append({
+                    "alert_id": alert_id,
+                    "success": False,
+                    "error": str(e)
+                })
+                failure_count += 1
+        
+        # 提交所有更改
+        db.commit()
+        
+        # 返回结果
+        result = {
+            "code": 0 if failure_count == 0 else -1,
+            "msg": "success" if failure_count == 0 else f"部分失败: {failure_count}个失败",
+            "data": {
+                "total": len(alert_ids),
+                "success_count": success_count,
+                "failure_count": failure_count,
+                "results": results
+            }
+        }
+        
+        logger.info(f"✅ 批量更新预警状态完成: {success_count}成功, {failure_count}失败")
+        return result
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"批量更新预警状态失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"批量更新预警状态失败: {str(e)}")
