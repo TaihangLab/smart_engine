@@ -812,7 +812,7 @@ def get_llm_tasks(
         
         # 应用过滤条件
         if skill_id:
-            query = query.filter(LLMTask.skill_class_id == skill_id)
+            query = query.filter(LLMTask.skill_id == skill_id)  # 修正字段名
         
         if status is not None:
             query = query.filter(LLMTask.status == status)
@@ -883,16 +883,26 @@ def create_llm_task(
         task = LLMTask(
             name=task_data.name,
             description=task_data.description,
-            skill_class_id=task_data.skill_id,
+            skill_id=task_data.skill_id,  # 修正字段名：使用skill_id而不是skill_class_id
             camera_id=task_data.camera_id,
             frame_rate=task_data.frame_rate,
             status=task_data.status,
+            alert_level=task_data.alert_level,  # 添加缺失的alert_level字段
             running_period=task_data.running_period,
         )
         
         db.add(task)
         db.commit()
         db.refresh(task)
+        
+        # 如果任务是启用状态，立即调度执行
+        if task.status:
+            try:
+                from app.services.llm_task_executor import llm_task_executor
+                llm_task_executor.update_task_schedule(task.id)
+                logger.info(f"LLM任务 {task.id} 已自动调度执行")
+            except Exception as e:
+                logger.warning(f"自动调度LLM任务失败: {str(e)}")
         
         logger.info(f"创建LLM任务成功: {task.name} (ID: {task.id})")
         
@@ -1045,9 +1055,6 @@ async def preview_test_llm_skill(
             # 解析响应并提取输出参数
             analysis_result, extracted_params = _parse_json_response(response_text, parsed_output_params)
             
-            # 提取置信度
-            confidence = llm_service.extract_confidence(analysis_result)
-            
             logger.info(f"LLM技能预览测试成功")
             return {
                 "success": True,
@@ -1057,7 +1064,6 @@ async def preview_test_llm_skill(
                     "raw_response": response_text,
                     "analysis_result": analysis_result,
                     "extracted_parameters": extracted_params,
-                    "confidence": confidence,
                     "test_config": {
                         "base_system_prompt": system_prompt,
                         "enhanced_system_prompt": enhanced_system_prompt,

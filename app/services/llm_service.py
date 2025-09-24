@@ -39,11 +39,10 @@ class LLMServiceResult:
     """LLM服务调用结果"""
     
     def __init__(self, success: bool, response: Optional[str] = None, 
-                 confidence: float = 0.0, analysis_result: Optional[Dict] = None,
+                 analysis_result: Optional[Dict] = None,
                  error_message: Optional[str] = None):
         self.success = success
         self.response = response
-        self.confidence = confidence
         self.analysis_result = analysis_result or {}
         self.error_message = error_message
     
@@ -51,7 +50,6 @@ class LLMServiceResult:
         return {
             "success": self.success,
             "response": self.response,
-            "confidence": self.confidence,
             "analysis_result": self.analysis_result,
             "error_message": self.error_message
         }
@@ -531,78 +529,6 @@ class LLMService:
                 self.logger.error(f"配置: {config}")
             raise
     
-    async def acall_llm(self, skill_type: str = None, system_prompt: str = "", user_prompt: str = "", 
-                       user_prompt_template: str = "", response_format: Optional[Dict] = None,
-                       image_data: Optional[Union[str, bytes, np.ndarray]] = None,
-                       context: Optional[Dict[str, Any]] = None, use_backup: bool = False) -> LLMServiceResult:
-        """
-        异步LLM调用方法
-        """
-        try:
-            # 处理提示词模板
-            final_prompt = user_prompt
-            if user_prompt_template and context:
-                try:
-                    final_prompt = user_prompt_template.format(**context)
-                except KeyError as e:
-                    self.logger.warning(f"格式化提示词时缺少参数 {e}，使用原始提示词")
-                    final_prompt = user_prompt_template
-            
-            # 获取配置
-            llm_config = self.get_llm_config(skill_type, use_backup)
-            
-            config = {
-                "temperature": llm_config["api_config"]["temperature"],
-                "max_tokens": llm_config["api_config"]["max_tokens"]
-            }
-            
-            # 选择链类型
-            if image_data is not None:
-                # 多模态链
-                chain = self.create_multimodal_chain(system_prompt=system_prompt, **config)
-                inputs = {"text": final_prompt, "image": image_data}
-            else:
-                # 简单文本链
-                output_parser = JsonOutputParser() if response_format and response_format.get("type") == "json_object" else StrOutputParser()
-                chain = self.create_simple_chain(system_prompt=system_prompt, output_parser=output_parser, **config)
-                inputs = {"input": final_prompt}
-            
-            # 异步执行
-            response = await chain.ainvoke(inputs)
-            
-            # 解析响应
-            if isinstance(response, dict):
-                analysis_result = response
-                response_text = json.dumps(response, ensure_ascii=False)
-            else:
-                response_text = str(response)
-                if response_format and response_format.get("type") == "json_object":
-                    try:
-                        analysis_result = json.loads(response_text)
-                    except json.JSONDecodeError:
-                        analysis_result = {"analysis": response_text}
-                else:
-                    analysis_result = {"analysis": response_text}
-            
-            # 提取置信度
-            confidence = self.extract_confidence(analysis_result)
-            
-            self.logger.info(f"异步LLM调用成功，置信度: {confidence}")
-            
-            return LLMServiceResult(
-                success=True,
-                response=response_text,
-                confidence=confidence,
-                analysis_result=analysis_result
-            )
-            
-        except Exception as e:
-            error_msg = f"异步LLM调用失败: {str(e)}"
-            self.logger.error(error_msg)
-            return LLMServiceResult(
-                success=False,
-                error_message=error_msg
-            )
     
     def call_llm(self, skill_type: str = None, system_prompt: str = "", user_prompt: str = "", 
                  user_prompt_template: str = "", response_format: Optional[Dict] = None,
@@ -643,6 +569,7 @@ class LLMService:
             # 同步执行（直接创建新的事件循环）
             import asyncio
             response = asyncio.run(chain.ainvoke(inputs))
+  
             
             # 解析响应
             if isinstance(response, dict):
@@ -658,15 +585,14 @@ class LLMService:
                 else:
                     analysis_result = {"analysis": response_text}
             
-            # 提取置信度
-            confidence = self.extract_confidence(analysis_result)
+            self.logger.info(f"LLM调用响应: {response_text}")
+            self.logger.info(f"LLM调用响应分析结果: {analysis_result}")
             
-            self.logger.info(f"LLM调用成功，置信度: {confidence}")
+            self.logger.info(f"LLM调用成功")
             
             return LLMServiceResult(
                 success=True,
                 response=response_text,
-                confidence=confidence,
                 analysis_result=analysis_result
             )
             
@@ -678,25 +604,6 @@ class LLMService:
                 error_message=error_msg
             )
     
-    def extract_confidence(self, analysis_result: Dict[str, Any]) -> float:
-        """从分析结果中提取置信度"""
-        try:
-            confidence_fields = ["confidence", "score", "certainty", "probability"]
-            
-            for field in confidence_fields:
-                if field in analysis_result:
-                    value = analysis_result[field]
-                    if isinstance(value, (int, float)):
-                        if float(value) > 1:
-                            return min(float(value) / 100.0, 1.0)
-                        else:
-                            return min(float(value), 1.0)
-            
-            return 0.7
-            
-        except Exception as e:
-            self.logger.warning(f"提取置信度失败: {str(e)}")
-            return 0.5
     
     def validate_skill_config(self, skill_type: str = None) -> tuple[bool, Optional[str]]:
         """验证LLM配置是否有效"""
