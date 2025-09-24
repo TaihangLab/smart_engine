@@ -3,7 +3,7 @@ LLM任务数据模型
 """
 from typing import Optional, Dict, Any, List
 from datetime import datetime, timezone, timedelta
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, JSON, ForeignKey, Float
 from sqlalchemy.orm import relationship
 from pydantic import BaseModel, Field
 
@@ -24,7 +24,7 @@ class LLMTask(Base):
     
     # 任务配置
     camera_id = Column(Integer, nullable=True)  # 摄像头ID，可选
-    frame_rate = Column(Integer, default=30)    # 帧率（每分钟处理次数）
+    frame_rate = Column(Float, default=0.033)    # 帧率（FPS，每秒执行次数）
     status = Column(Boolean, default=True)
     alert_level = Column(Integer, default=0)  # 预警等级
     
@@ -53,7 +53,7 @@ class LLMTaskCreate(BaseModel):
     description: Optional[str] = Field(None, description="任务描述")
     skill_id: str = Field(..., description="技能类业务ID")
     camera_id: Optional[int] = Field(None, description="摄像头ID")
-    frame_rate: int = Field(30, ge=1, le=3600, description="帧率（每分钟处理次数）")
+    frame_rate: float = Field(0.033, ge=0.001, le=60.0, description="帧率（FPS，每秒执行次数）")
     status: bool = Field(True, description="是否启用")
     alert_level: int = Field(0, ge=0, le=4, description="预警等级 (0:默认, 1:最高, 2:高, 3:中, 4:低)")
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行时段配置")
@@ -64,7 +64,7 @@ class LLMTaskUpdate(BaseModel):
     name: Optional[str] = Field(None, description="任务名称")
     description: Optional[str] = Field(None, description="任务描述")
     camera_id: Optional[int] = Field(None, description="摄像头ID")
-    frame_rate: Optional[int] = Field(None, ge=1, le=3600, description="帧率（每分钟处理次数）")
+    frame_rate: Optional[float] = Field(None, ge=0.001, le=60.0, description="帧率（FPS，每秒执行次数）")
     status: Optional[bool] = Field(None, description="是否启用")
     alert_level: Optional[int] = Field(None, ge=0, le=4, description="预警等级 (0:默认, 1:最高, 2:高, 3:中, 4:低)")
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行时段配置")
@@ -76,9 +76,9 @@ class LLMTaskResponse(BaseModel):
     id: int
     name: str
     description: Optional[str]
-    skill_class_id: int
+    skill_id: str  # 修正字段名和类型：使用skill_id，类型为str
     camera_id: Optional[int]
-    frame_rate: int
+    frame_rate: float  # 修正类型：FPS为浮点数
     status: bool
     alert_level: int
     running_period: Optional[Dict[str, Any]]
@@ -94,7 +94,7 @@ class TaskConfigurationRequest(BaseModel):
     task_name: str = Field(..., description="任务名称")
     skill_class_id: int = Field(..., description="技能类ID")
     camera_ids: List[int] = Field(..., description="摄像头ID列表")
-    frame_rate: int = Field(30, ge=1, le=3600, description="取帧频率（每分钟处理次数）")
+    frame_rate: float = Field(0.033, ge=0.001, le=60.0, description="取帧频率（FPS，每秒处理次数）")
     running_period: Optional[Dict[str, Any]] = Field(None, description="运行时段配置")
     custom_config: Optional[Dict[str, Any]] = Field(None, description="自定义配置")
 
