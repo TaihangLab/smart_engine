@@ -25,6 +25,7 @@ from app.services.alert_service import alert_service
 from app.services.camera_service import CameraService
 from app.services.llm_service import llm_service
 from app.services.minio_client import minio_client
+from app.services.rabbitmq_client import rabbitmq_client
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +38,9 @@ class LLMTaskProcessor:
         self.running = False
         self.execution_thread = None
         self.stop_event = threading.Event()
+        
+        # 长期持有的帧读取器
+        self.frame_reader = None
         
         # 执行统计
         self.stats = {
@@ -57,6 +61,9 @@ class LLMTaskProcessor:
         self.running = True
         self.stop_event.clear()
         
+        # 初始化长期持有的帧读取器
+        self._initialize_frame_reader()
+        
         self.execution_thread = threading.Thread(
             target=self._execution_worker,
             daemon=True,
@@ -71,17 +78,57 @@ class LLMTaskProcessor:
         self.running = False
         self.stop_event.set()
         
+        # 停止帧读取器
+        self._cleanup_frame_reader()
+        
         if self.execution_thread and self.execution_thread.is_alive():
             self.execution_thread.join(timeout=5.0)
             
         logger.info(f"LLM任务 {self.task_id} 处理器已停止")
+    
+    def _initialize_frame_reader(self):
+        """初始化长期持有的帧读取器"""
+        try:
+            if not self.task.camera_id:
+                logger.warning(f"LLM任务 {self.task_id} 未配置摄像头ID")
+                return
+            
+            # 计算帧间隔（LLM任务通常不需要高频率）
+            frame_interval = getattr(self.task, 'frame_interval', 60.0)  # 默认60秒间隔
+            
+            self.frame_reader = AdaptiveFrameReader(
+                camera_id=self.task.camera_id,
+                frame_interval=frame_interval,
+                connection_overhead_threshold=settings.ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD
+            )
+            
+            if self.frame_reader.start():
+                logger.info(f"LLM任务 {self.task_id} 帧读取器已初始化")
+            else:
+                logger.error(f"LLM任务 {self.task_id} 帧读取器初始化失败")
+                self.frame_reader = None
+                
+        except Exception as e:
+            logger.error(f"LLM任务 {self.task_id} 初始化帧读取器异常: {str(e)}", exc_info=True)
+            self.frame_reader = None
+    
+    def _cleanup_frame_reader(self):
+        """清理帧读取器"""
+        if self.frame_reader:
+            try:
+                self.frame_reader.stop()
+                logger.info(f"LLM任务 {self.task_id} 帧读取器已清理")
+            except Exception as e:
+                logger.error(f"LLM任务 {self.task_id} 清理帧读取器失败: {str(e)}")
+            finally:
+                self.frame_reader = None
         
     def _execution_worker(self):
         """LLM任务执行工作线程"""
         logger.info(f"LLM任务 {self.task_id} 执行线程已启动")
         
-        # 计算执行间隔（frame_rate是每分钟执行次数）
-        interval = 60.0 / max(1, self.task.frame_rate)
+        # 计算执行间隔（frame_rate是FPS，每秒执行次数）
+        interval = 1.0 / max(0.001, self.task.frame_rate)  # 防止除零，最小0.001 FPS
         
         # 低频率任务需要确保不超过自适应帧连接开销阈值
         if interval > settings.ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD:
@@ -125,28 +172,14 @@ class LLMTaskProcessor:
     
     def _execute_llm_task(self) -> bool:
         """执行单次LLM任务分析"""
-        frame_reader = None
         try:
-            # 获取摄像头最新帧
-            if not self.task.camera_id:
-                logger.warning(f"LLM任务 {self.task_id} 未配置摄像头ID")
+            # 检查帧读取器是否可用
+            if not self.frame_reader:
+                logger.warning(f"LLM任务 {self.task_id} 帧读取器未初始化")
                 return False
             
-            # 使用自适应帧读取器获取最新帧
-            # 计算默认帧间隔（LLM任务通常不需要高频率）
-            frame_interval = getattr(self.task, 'frame_interval', 60.0)  # 默认60秒间隔
-            
-            frame_reader = AdaptiveFrameReader(
-                camera_id=self.task.camera_id,
-                frame_interval=frame_interval,
-                connection_overhead_threshold=settings.ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD
-            )
-            
-            if not frame_reader.start():
-                logger.error(f"LLM任务 {self.task_id} 无法启动帧读取器")
-                return False
-            
-            frame = frame_reader.get_latest_frame()
+            # 使用长期持有的帧读取器获取最新帧
+            frame = self.frame_reader.get_latest_frame()
             
             if frame is None:
                 logger.warning(f"LLM任务 {self.task_id} 无法获取摄像头 {self.task.camera_id} 的帧数据")
@@ -162,8 +195,7 @@ class LLMTaskProcessor:
                 # 获取摄像头信息用于模板变量替换
                 db = next(get_db())
                 try:
-                    camera_service = CameraService()
-                    camera_info = camera_service.get_camera(db, self.task.camera_id)
+                    camera_info = CameraService.get_ai_camera_by_id(self.task.camera_id, db)
                     
                     if camera_info:
                         user_prompt = user_prompt.replace("{camera_name}", camera_info.get("name", "未知摄像头"))
@@ -180,14 +212,21 @@ class LLMTaskProcessor:
             enhanced_prompt = self._build_json_prompt(user_prompt, output_parameters)
             
             # 调用LLM服务进行多模态分析
+            logger.info(f"LLM任务 {self.task_id} 调用LLM服务进行多模态分析")
+            logger.info(f"LLM任务 {self.task_id} 增强的提示词: {enhanced_prompt}")
+            # logger.info(f"LLM任务 {self.task_id} 帧数据: {frame}")
+            logger.info(f"LLM任务 {self.task_id} 技能类型: {skill_type}")
+            logger.info(f"LLM任务 {self.task_id} 系统提示词: {system_prompt}")
+            logger.info(f"LLM任务 {self.task_id} 输出参数: {output_parameters}")
+            logger.info(f"LLM任务 {self.task_id} 用户提示词: {user_prompt}")
+
+
+
             result = llm_service.call_llm(
                 skill_type=skill_type,
                 system_prompt=system_prompt,
                 user_prompt=enhanced_prompt,
-                image_data=frame,
-                temperature=self.skill_class.temperature,
-                max_tokens=self.skill_class.max_tokens,
-                top_p=self.skill_class.top_p
+                image_data=frame
             )
             
             if not result.success:
@@ -202,34 +241,33 @@ class LLMTaskProcessor:
             logger.debug(f"LLM任务 {self.task_id} 提取参数: {extracted_params}")
             
             # 根据技能配置处理分析结果
-            self._process_llm_result(extracted_params or analysis_result, frame)
+            # 优先使用extracted_params，如果为None则使用analysis_result
+            result_data = extracted_params if extracted_params is not None else analysis_result
+            self._process_llm_result(result_data, frame)
             
             return True
             
         except Exception as e:
             logger.error(f"LLM任务 {self.task_id} 执行异常: {str(e)}", exc_info=True)
             return False
-        finally:
-            # 确保帧读取器被正确释放
-            if frame_reader:
-                try:
-                    frame_reader.stop()
-                except Exception as e:
-                    logger.error(f"LLM任务 {self.task_id} 释放帧读取器失败: {str(e)}")
     
     def _process_llm_result(self, llm_response: Dict[str, Any], frame: np.ndarray):
         """处理LLM分析结果，根据预警条件生成预警"""
         try:
             # 获取预警条件配置
-            alert_conditions = self.skill_class.config.get("alert_conditions", {}) if self.skill_class.config else {}
+            alert_conditions = self.skill_class.alert_conditions if self.skill_class.alert_conditions else {}
             
             if not alert_conditions:
                 logger.debug(f"LLM任务 {self.task_id} 未配置预警条件，跳过预警生成")
                 return
             
             # 评估预警条件
+            logger.info(f"LLM任务 {self.task_id} 预警条件: {alert_conditions}")
+            logger.info(f"LLM任务 {self.task_id} 分析结果: {llm_response}")
             alert_triggered = self._evaluate_alert_conditions(llm_response, alert_conditions)
             
+            logger.info(f"LLM任务 {self.task_id} 预警条件评估结果: {alert_triggered}")
+
             if alert_triggered:
                 # 生成预警
                 self._generate_alert(llm_response, frame)
@@ -267,6 +305,7 @@ class LLMTaskProcessor:
                     
                     # 执行条件判断
                     result = self._evaluate_single_condition(param_value, operator, value)
+                    logger.debug(f"LLM任务 {self.task_id} 条件评估: {field}={param_value} {operator} {value} → {result}")
                     condition_results.append(result)
                 
                 # 根据条件关系计算组结果
@@ -303,16 +342,36 @@ class LLMTaskProcessor:
             elif operator == "is_not_empty":  # 改为is_not_empty
                 return param_value is not None and param_value != "" and param_value != []
             elif operator == "eq":  # 改为eq
-                return param_value == target_value
+                # 简单的布尔值字符串转换
+                if isinstance(param_value, bool) and isinstance(target_value, str):
+                    return param_value == (target_value.lower() == "true")
+                elif isinstance(param_value, str) and isinstance(target_value, bool):
+                    return (param_value.lower() == "true") == target_value
+                else:
+                    return param_value == target_value
             elif operator == "ne":  # 改为ne
-                return param_value != target_value
+                # 简单的布尔值字符串转换
+                if isinstance(param_value, bool) and isinstance(target_value, str):
+                    return param_value != (target_value.lower() == "true")
+                elif isinstance(param_value, str) and isinstance(target_value, bool):
+                    return (param_value.lower() == "true") != target_value
+                else:
+                    return param_value != target_value
             elif operator == "gte":  # 改为gte
+                if param_value is None or target_value is None:
+                    return False
                 return float(param_value) >= float(target_value)
             elif operator == "lte":  # 改为lte
+                if param_value is None or target_value is None:
+                    return False
                 return float(param_value) <= float(target_value)
             elif operator == "gt":  # 改为gt
+                if param_value is None or target_value is None:
+                    return False
                 return float(param_value) > float(target_value)
             elif operator == "lt":  # 改为lt
+                if param_value is None or target_value is None:
+                    return False
                 return float(param_value) < float(target_value)
             elif operator == "contains":  # 新增contains
                 return str(target_value) in str(param_value)
@@ -328,9 +387,29 @@ class LLMTaskProcessor:
     def _generate_alert(self, analysis_result: Dict[str, Any], frame: np.ndarray):
         """生成预警"""
         try:
-            # 上传帧图像到MinIO
-            timestamp = datetime.now()
-            object_name = f"llm_alerts/{self.task_id}/{timestamp.strftime('%Y%m%d_%H%M%S')}.jpg"
+            # 获取摄像头信息（参考AI任务执行器的方式）
+            db = next(get_db())
+            try:
+                from app.services.camera_service import CameraService
+                camera_info = CameraService.get_ai_camera_by_id(self.task.camera_id, db)
+                camera_name = camera_info.get("name", f"摄像头{self.task.camera_id}") if camera_info else f"摄像头{self.task.camera_id}"
+                
+                # 确保location字段不为None，优先使用camera_info中的location
+                location = "智能监控区域"  # 默认位置
+                if camera_info:
+                    camera_location = camera_info.get("location")
+                    if camera_location:  # 检查是否为None或空字符串
+                        location = camera_location
+            except Exception as e:
+                logger.warning(f"获取摄像头信息失败: {str(e)}")
+                camera_name = f"摄像头{self.task.camera_id}"
+                location = "智能监控区域"
+            finally:
+                db.close()
+            
+            # 上传帧图像到MinIO（参考AI任务执行器的方式）
+            timestamp = int(time.time())
+            img_filename = f"llm_alert_{self.task_id}_{self.task.camera_id}_{timestamp}.jpg"
             
             # 编码图像
             success, encoded_frame = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, 90])
@@ -341,40 +420,56 @@ class LLMTaskProcessor:
             frame_bytes = encoded_frame.tobytes()
             
             # 上传到MinIO
+            minio_frame_object_name = ""
             try:
-                uploaded_object_name = minio_client.upload_bytes(
+                # 构建MinIO路径，与AI任务保持一致的结构
+                minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{self.task_id}"
+                
+                minio_frame_object_name = minio_client.upload_bytes(
                     data=frame_bytes,
-                    object_name=object_name.split('/')[-1],  # 只传文件名
+                    object_name=img_filename,
                     content_type="image/jpeg",
-                    prefix="llm_alerts/" + str(self.task_id)
+                    prefix=minio_prefix
                 )
-                logger.info(f"LLM任务 {self.task_id} 图像上传成功: {uploaded_object_name}")
+                logger.info(f"LLM任务 {self.task_id} 预警截图已上传到MinIO: {minio_frame_object_name}")
             except Exception as e:
                 logger.error(f"LLM任务 {self.task_id} 图像上传失败: {str(e)}")
                 return
             
-            # 构建完整的对象路径用于URL
-            full_object_path = f"llm_alerts/{self.task_id}/{uploaded_object_name}"
+            # 构建简洁的预警信息
+            alert_name = f"{self.skill_class.skill_name}预警"
+            alert_type = "llm_智能分析"
+            alert_description = f"LLM{camera_name}检测到{self.skill_class.skill_name}异常，请及时处理"
             
-            # 构建预警数据
-            alert_data = {
-                "type": "llm_alert",
-                "task_id": self.task_id,
-                "task_type": "llm",
-                "skill_class_id": self.skill_class.id,
-                "skill_name": self.skill_class.name_zh,
+            # 获取技能信息（参考AI任务执行器的方式）
+            skill_class_id = self.skill_class.id
+            skill_name_zh = self.skill_class.skill_name
+            
+            # 构建完整的预警信息（参考AI任务执行器的结构）
+            complete_alert = {
+                "alert_time": datetime.now().isoformat(),
+                "alert_level": self.task.alert_level or 2,  # 使用任务配置的预警等级
+                "alert_name": alert_name,
+                "alert_type": alert_type,
+                "alert_description": alert_description,
+                "location": location,
                 "camera_id": self.task.camera_id,
-                "timestamp": timestamp.isoformat(),
-                "analysis_result": analysis_result,
-                "image_url": f"/api/minio/get-object/{settings.MINIO_BUCKET}/{full_object_path}",
-                "minio_frame_object_name": full_object_path,
-                "level": 2,  # 默认预警等级
-                "message": f"LLM技能 {self.skill_class.name_zh} 检测到异常情况"
+                "camera_name": camera_name,
+                "task_id": self.task_id,
+                "skill_class_id": skill_class_id,
+                "skill_name_zh": skill_name_zh,
+                "electronic_fence": None,  # LLM技能不使用电子围栏
+                "minio_frame_object_name": minio_frame_object_name,  # 传递object_name而不是URL
+                "minio_video_object_name": "",  # LLM技能不生成视频
+                "result": [{"name": "LLM分析", "analysis": analysis_result}],  # 简化的LLM分析结果
             }
             
-            # 发送预警
-            alert_service.send_alert(alert_data)
-            logger.info(f"LLM任务 {self.task_id} 预警已发送: {alert_data['message']}")
+            # 发送预警到RabbitMQ（与AI任务保持一致）
+            success = rabbitmq_client.publish_alert(complete_alert)
+            if success:
+                logger.info(f"LLM任务 {self.task_id} 预警已发送: {alert_description}")
+            else:
+                logger.error(f"LLM任务 {self.task_id} 预警发送失败: {alert_description}")
             
         except Exception as e:
             logger.error(f"LLM任务 {self.task_id} 生成预警异常: {str(e)}", exc_info=True)
@@ -580,12 +675,12 @@ class LLMTaskExecutor:
         try:
             # 获取技能类信息
             skill_class = db.query(LLMSkillClass).filter(
-                LLMSkillClass.id == task.skill_class_id,
+                LLMSkillClass.skill_id == task.skill_id,  # 修正：使用skill_id关联
                 LLMSkillClass.status == True
             ).first()
             
             if not skill_class:
-                logger.warning(f"LLM任务 {task.id} 关联的技能类 {task.skill_class_id} 不存在或已禁用")
+                logger.warning(f"LLM任务 {task.id} 关联的技能类 {task.skill_id} 不存在或已禁用")
                 return
             
             # 停止已存在的任务处理器
