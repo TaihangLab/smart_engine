@@ -708,10 +708,10 @@ class AlertMergeManager:
             timestamp_str = datetime.fromtimestamp(timestamp).strftime("%Y%m%d_%H%M%S")
             expected_video_filename = f"alert_video_{task_id}_{timestamp_str}.mp4"
             
-            # 构建预期的MinIO对象名
+            # 构建预期的MinIO对象名（只返回文件名，不包含前缀）
             from app.core.config import settings
             minio_prefix = f"{settings.MINIO_ALERT_VIDEO_PREFIX}{task_id}"
-            expected_video_object_name = f"{minio_prefix}/{expected_video_filename}"
+            expected_video_object_name = expected_video_filename  # 只使用文件名，保持与upload_bytes一致
             
             # 立即发送预警，包含预期的视频地址
             immediate_alert = alert_data.copy()
