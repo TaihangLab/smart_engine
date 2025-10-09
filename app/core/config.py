@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # 数据库配置
     MYSQL_SERVER: str = Field(default="127.0.0.1", description="MySQL服务器地址")
     MYSQL_USER: str = Field(default="root", description="MySQL用户名")
-    MYSQL_PASSWORD: str = Field(default="root", description="MySQL密码")
+    MYSQL_PASSWORD: str = Field(default="123456", description="MySQL密码")
     MYSQL_DB: str = Field(default="smart_vision", description="MySQL数据库名")
     MYSQL_PORT: int = Field(default=3306, description="MySQL端口")
     
@@ -405,6 +405,14 @@ class Settings(BaseSettings):
     ALERT_REVIEW_RETRY_MAX_ATTEMPTS: int = Field(default=3, description="复判任务最大重试次数")
     ALERT_REVIEW_COMPLETED_TTL: int = Field(default=86400, description="已完成复判任务缓存时间（秒）")
     ALERT_REVIEW_QUEUE_ENABLED: bool = Field(default=True, description="是否启用复判队列服务")
+
+    # ================================================================
+    # 📋 预警数据库重构配置
+    # ================================================================
+    ALERT_REDESIGN_MODE: str = Field(default="auto", description="预警表重构模式：auto=自动，manual=手动，disabled=禁用")
+    ALERT_REDESIGN_MIGRATE_DAYS: int = Field(default=7, description="迁移最近N天的数据作为样本")
+    ALERT_REDESIGN_BACKUP_LEGACY: bool = Field(default=True, description="是否备份原始表为alerts_legacy")
+    ALERT_REDESIGN_AUTO_INIT: bool = Field(default=True, description="系统启动时自动初始化重构表结构")
 
     class Config:
         env_file = ".env"

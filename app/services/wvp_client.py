@@ -7,6 +7,27 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+def check_connection(func):
+    """装饰器：检查WVP连接状态，如果不可用则返回默认值"""
+    @functools.wraps(func)
+    def wrapper(self, *args, **kwargs):
+        # 检查连接状态
+        if not self.ensure_connection():
+            # 根据方法名返回合适的默认值
+            method_name = func.__name__
+            if method_name.startswith('get_') and 'list' in method_name:
+                return {"total": 0, "list": []}
+            elif method_name.startswith('get_'):
+                return None
+            elif method_name.startswith('start_') or method_name.startswith('stop_'):
+                return False
+            else:
+                return None
+        
+        # 连接正常，执行原始方法
+        return func(self, *args, **kwargs)
+    return wrapper
+
 def auto_relogin(func):
     """装饰器：当API调用因授权失效返回401或其他认证错误时自动重新登录"""
     @functools.wraps(func)
@@ -82,7 +103,22 @@ class WVPClient:
     def __init__(self):
         self.base_url = settings.WVP_API_URL
         self.session = requests.Session()
-        self._login()
+        self.is_connected = False
+        self.connection_error = None
+        self._initialize_connection()
+
+    def _initialize_connection(self) -> None:
+        """初始化WVP连接 - 优雅降级处理"""
+        try:
+            self._login()
+            self.is_connected = True
+            self.connection_error = None
+            logger.info("✅ WVP客户端连接成功")
+        except Exception as e:
+            self.is_connected = False
+            self.connection_error = str(e)
+            logger.warning(f"⚠️ WVP客户端连接失败，将使用降级模式: {str(e)}")
+            logger.info("💡 系统将在后台自动重试连接，WVP相关功能暂时不可用")
 
     def _login(self) -> None:
         """登录WVP平台"""
@@ -96,7 +132,7 @@ class WVPClient:
             response = self.session.get(login_url, params={
                 "username": settings.WVP_USERNAME,
                 "password": password_md5
-            })
+            }, timeout=10)  # 添加超时设置
             
             if response.status_code != 200:
                 logger.error(f"Login failed with status code {response.status_code}")
@@ -129,6 +165,24 @@ class WVPClient:
                 logger.error(f"Response content: {e.response.text}")
             raise Exception(f"Failed to login to WVP: {str(e)}")
 
+    def ensure_connection(self) -> bool:
+        """确保WVP连接可用，如果不可用则尝试重连"""
+        if self.is_connected:
+            return True
+        
+        try:
+            logger.info("🔄 尝试重新连接WVP...")
+            self._login()
+            self.is_connected = True
+            self.connection_error = None
+            logger.info("✅ WVP重连成功")
+            return True
+        except Exception as e:
+            self.is_connected = False
+            self.connection_error = str(e)
+            logger.warning(f"⚠️ WVP重连失败: {str(e)}")
+            return False
+
     def check_response_status(self, response_data: dict) -> bool:
         """检查响应状态，判断是否需要重新登录
         
@@ -144,6 +198,7 @@ class WVPClient:
             return True
         return False
 
+    @check_connection
     @auto_relogin
     def get_devices(self, page: int = 1, count: int = 100, query: str = "", status: bool = True) -> Dict[str, Any]:
         """
@@ -165,7 +220,7 @@ class WVPClient:
                 "status": status
             }
             
-            response = self.session.get(url, params=params)
+            response = self.session.get(url, params=params, timeout=10)
             logger.info(f"Get devices response status: {response.status_code}")
             
             if response.status_code != 200:
@@ -214,6 +269,7 @@ class WVPClient:
             # 这里不捕获异常，让它传播到装饰器进行处理
             raise
 
+    @check_connection
     @auto_relogin
     def get_device(self, device_id: str) -> Optional[Dict[str, Any]]:
         """
@@ -238,6 +294,7 @@ class WVPClient:
             logger.error(f"Failed to get device info: {str(e)}")
             return None
 
+    @check_connection
     @auto_relogin
     def get_device_channels(self, device_id: str, page: int = 1, count: int = 100, 
                            query: str = "", online: Optional[bool] = None, 
@@ -748,6 +805,7 @@ class WVPClient:
             logger.error(f"Failed to get stream info: {str(e)}")
             return None
 
+    @check_connection
     @auto_relogin
     def get_push_list(self, page: int = 1, count: int = 100) -> Dict[str, Any]:
         """
@@ -791,6 +849,7 @@ class WVPClient:
                 logger.error(f"Response content: {e.response.text}")
             return {"total": 0, "list": []}
 
+    @check_connection
     @auto_relogin
     def get_proxy_list(self, page: int = 1, count: int = 100) -> Dict[str, Any]:
         """
@@ -1125,6 +1184,7 @@ class WVPClient:
             logger.error(f"获取通用通道播放地址异常: {str(e)}")
             return None
 
+    @check_connection
     @auto_relogin
     def get_channel_list(self, page: int = 1, count: int = 100, query: str = "", 
                         online: Optional[bool] = None, has_record_plan: Optional[bool] = None,

@@ -359,10 +359,20 @@ class AlertService:
         if location:
             query = query.filter(Alert.location.like(f"%{location}%"))
         
-        # 按状态过滤 - 只支持整数值
+        # 按状态过滤 - 支持整数值或字符串
         if status:
-            status_value = int(status)
-            query = query.filter(Alert.status == status_value)
+            try:
+                # 如果是字符串，尝试转换为整数
+                if isinstance(status, str):
+                    status_value = int(status)
+                else:
+                    # 如果已经是整数，直接使用
+                    status_value = status
+                query = query.filter(Alert.status == status_value)
+            except ValueError:
+                # 转换失败时记录日志但不抛出异常
+                logger.warning(f"无效的状态值，无法转换为整数: {status}")
+                pass
         
         # 🆕 按日期范围过滤（简单格式：YYYY-MM-DD）
         if start_date:
@@ -456,10 +466,20 @@ class AlertService:
         if location:
             query = query.filter(Alert.location.like(f"%{location}%"))
         
-        # 按状态过滤 - 只支持整数值
+        # 按状态过滤 - 支持整数值或字符串
         if status:
-            status_value = int(status)
-            query = query.filter(Alert.status == status_value)
+            try:
+                # 如果是字符串，尝试转换为整数
+                if isinstance(status, str):
+                    status_value = int(status)
+                else:
+                    # 如果已经是整数，直接使用
+                    status_value = status
+                query = query.filter(Alert.status == status_value)
+            except ValueError:
+                # 转换失败时记录日志但不抛出异常
+                logger.warning(f"无效的状态值，无法转换为整数: {status}")
+                pass
         
         if start_date:
             try:

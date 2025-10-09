@@ -17,6 +17,9 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
+# 常量定义
+ALERT_NOT_FOUND_MSG = "预警记录不存在"
+
 @router.get("/stream", description="实时报警SSE流")
 async def alert_stream(request: Request):
     """
@@ -150,9 +153,19 @@ async def get_realtime_alerts(
             except ValueError:
                 raise HTTPException(status_code=400, detail=f"结束时间格式错误，应为ISO格式: {end_time}")
         
-        # 验证状态值
-        if status and status not in ["待处理", "处理中", "已处理", "已忽略", "已过期"]:
-            raise HTTPException(status_code=400, detail=f"无效的状态值: {status}")
+        # 验证状态值并转换为数字
+        status_value = None
+        if status:
+            status_map = {
+                "待处理": 1,
+                "处理中": 2,
+                "已处理": 3,
+                "已忽略": 4,
+                "已过期": 5
+            }
+            if status not in status_map:
+                raise HTTPException(status_code=400, detail=f"无效的状态值: {status}")
+            status_value = status_map[status]
             
         # 验证日期范围
         if parsed_start_date and parsed_end_date and parsed_start_date > parsed_end_date:
@@ -182,7 +195,7 @@ async def get_realtime_alerts(
         alert_name=alert_name,
         task_id=task_id,
         location=location,
-        status=status,
+        status=status_value,
         start_date=start_date,
         end_date=end_date,
         start_time=start_time,
@@ -201,7 +214,7 @@ async def get_realtime_alerts(
         alert_name=alert_name,
         task_id=task_id,
         location=location,
-        status=status,
+        status=status_value,
         start_date=start_date,
         end_date=end_date,
         start_time=start_time,
@@ -1077,3 +1090,330 @@ def batch_update_alert_status(
         db.rollback()
         logger.error(f"批量更新预警状态失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"批量更新预警状态失败: {str(e)}")
+
+
+class BatchDeleteAlertsRequest(BaseModel):
+    """批量删除预警请求模型"""
+    alert_ids: List[int]
+
+
+@router.post("/batch-delete", summary="批量删除预警")
+async def batch_delete_alerts(
+    request: BatchDeleteAlertsRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    批量删除预警记录
+    
+    Args:
+        request: 包含预警ID列表的请求体
+        db: 数据库会话
+        
+    Returns:
+        批量删除结果
+    """
+    try:
+        alert_ids = request.alert_ids
+        if not alert_ids:
+            raise HTTPException(status_code=400, detail="预警ID列表不能为空")
+            
+        logger.info(f"开始批量删除预警: {alert_ids}")
+        
+        # 查询要删除的预警记录
+        alerts_to_delete = db.query(Alert).filter(Alert.alert_id.in_(alert_ids)).all()
+        found_alert_ids = [alert.alert_id for alert in alerts_to_delete]
+        not_found_ids = [alert_id for alert_id in alert_ids if alert_id not in found_alert_ids]
+        
+        deleted_count = 0
+        if alerts_to_delete:
+            # 删除预警记录（会级联删除相关的处理记录）
+            for alert in alerts_to_delete:
+                db.delete(alert)
+                deleted_count += 1
+                logger.debug(f"删除预警记录: alert_id={alert.alert_id}")
+            
+            db.commit()
+            logger.info(f"批量删除预警完成，共删除 {deleted_count} 条记录")
+        
+        # 构建响应信息
+        if deleted_count == 0:
+            if not_found_ids:
+                message = f"所选预警记录不存在，无法删除。未找到的ID: {not_found_ids}"
+            else:
+                message = "没有找到可删除的预警记录"
+        elif not_found_ids:
+            message = f"成功删除 {deleted_count} 条记录，{len(not_found_ids)} 条记录未找到（ID: {not_found_ids}）"
+        else:
+            message = f"成功删除 {deleted_count} 条预警记录"
+            
+        return {
+            "code": 0,
+            "msg": message,
+            "data": {
+                "deleted_count": deleted_count,
+                "not_found_ids": not_found_ids,
+                "total_requested": len(alert_ids)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"批量删除预警失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"批量删除预警失败: {str(e)}")
+
+
+@router.delete("/{alert_id}", summary="删除单个预警")
+async def delete_alert(
+    alert_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    删除单个预警记录
+    
+    Args:
+        alert_id: 预警ID
+        db: 数据库会话
+        
+    Returns:
+        删除结果
+    """
+    try:
+        logger.info(f"开始删除预警: {alert_id}")
+        
+        # 查询要删除的预警记录
+        alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
+        if not alert:
+            raise HTTPException(status_code=404, detail=ALERT_NOT_FOUND_MSG)
+        
+        # 删除预警记录（会级联删除相关的处理记录）
+        db.delete(alert)
+        db.commit()
+        
+        logger.info(f"删除预警成功: alert_id={alert_id}")
+        
+        return {
+            "code": 0,
+            "msg": "预警删除成功",
+            "data": {
+                "alert_id": alert_id
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"删除预警失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"删除预警失败: {str(e)}")
+
+
+@router.post("/{alert_id}/false-alarm", summary="标记预警为误报")
+async def mark_alert_as_false_alarm(
+    alert_id: int,
+    review_notes: str = Query(..., description="复判意见"),
+    reviewer_name: str = Query(..., description="复判人员姓名"),
+    db: Session = Depends(get_db)
+):
+    """
+    标记预警为误报，并创建复判记录
+    
+    Args:
+        alert_id: 预警ID
+        review_notes: 复判意见
+        reviewer_name: 复判人员姓名
+        db: 数据库会话
+        
+    Returns:
+        误报处理结果
+    """
+    try:
+        logger.info(f"开始标记预警为误报: alert_id={alert_id}, reviewer={reviewer_name}")
+        
+        # 查询预警记录
+        alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
+        if not alert:
+            raise HTTPException(status_code=404, detail=ALERT_NOT_FOUND_MSG)
+        
+        # 检查预警是否已经是误报状态
+        if alert.status == AlertStatus.FALSE_ALARM:
+            return {
+                "code": 0,
+                "msg": "预警已经是误报状态",
+                "data": {
+                    "alert_id": alert_id,
+                    "status": alert.status,
+                    "status_display": alert.status_display
+                }
+            }
+        
+        # 更新预警状态为误报
+        old_status = alert.status
+        alert.status = AlertStatus.FALSE_ALARM
+        alert.processed_at = datetime.utcnow()
+        alert.processed_by = reviewer_name
+        alert.processing_notes = f"标记为误报：{review_notes}"
+        
+        # 添加处理流程步骤
+        alert.add_process_step("标记误报", f"复判人员 {reviewer_name} 标记为误报：{review_notes}", reviewer_name)
+        
+        # 创建复判记录
+        from app.db.review_record_dao import ReviewRecordDAO
+        review_dao = ReviewRecordDAO(db)
+        review_record = review_dao.create_review_record(
+            alert_id=alert_id,
+            review_type="manual",
+            reviewer_name=reviewer_name,
+            review_notes=review_notes
+        )
+        
+        if not review_record:
+            logger.warning(f"创建复判记录失败: alert_id={alert_id}")
+        
+        # 创建处理记录
+        from app.models.alert import AlertProcessingRecord, ProcessingActionType
+        processing_record = AlertProcessingRecord(
+            alert_id=alert_id,
+            action_type=ProcessingActionType.MARK_FALSE_ALARM,
+            from_status=old_status,
+            to_status=AlertStatus.FALSE_ALARM,
+            operator_name=reviewer_name,
+            operator_role="复判人员",
+            notes=review_notes,
+            created_at=datetime.utcnow()
+        )
+        db.add(processing_record)
+        
+        db.commit()
+        
+        logger.info(f"标记误报成功: alert_id={alert_id}, reviewer={reviewer_name}")
+        
+        return {
+            "code": 0,
+            "msg": "预警已标记为误报",
+            "data": {
+                "alert_id": alert_id,
+                "status": alert.status,
+                "status_display": alert.status_display,
+                "review_record_id": review_record.review_id if review_record else None,
+                "processed_at": alert.processed_at,
+                "processed_by": alert.processed_by
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"标记误报失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"标记误报失败: {str(e)}")
+
+
+@router.post("/batch-false-alarm", summary="批量标记预警为误报")
+async def batch_mark_alerts_as_false_alarm(
+    request: BatchDeleteAlertsRequest,  # 复用批量删除的请求模型
+    review_notes: str = Query(..., description="复判意见"),
+    reviewer_name: str = Query(..., description="复判人员姓名"),
+    db: Session = Depends(get_db)
+):
+    """
+    批量标记预警为误报
+    
+    Args:
+        request: 包含预警ID列表的请求体
+        review_notes: 复判意见
+        reviewer_name: 复判人员姓名
+        db: 数据库会话
+        
+    Returns:
+        批量误报处理结果
+    """
+    try:
+        alert_ids = request.alert_ids
+        if not alert_ids:
+            raise HTTPException(status_code=400, detail="预警ID列表不能为空")
+            
+        logger.info(f"开始批量标记误报: {alert_ids}, reviewer={reviewer_name}")
+        
+        # 查询要处理的预警记录
+        alerts_to_process = db.query(Alert).filter(Alert.alert_id.in_(alert_ids)).all()
+        found_alert_ids = [alert.alert_id for alert in alerts_to_process]
+        not_found_ids = [alert_id for alert_id in alert_ids if alert_id not in found_alert_ids]
+        
+        processed_count = 0
+        already_false_alarm_count = 0
+        
+        for alert in alerts_to_process:
+            if alert.status == AlertStatus.FALSE_ALARM:
+                already_false_alarm_count += 1
+                continue
+                
+            # 更新预警状态为误报
+            old_status = alert.status
+            alert.status = AlertStatus.FALSE_ALARM
+            alert.processed_at = datetime.utcnow()
+            alert.processed_by = reviewer_name
+            alert.processing_notes = f"批量标记为误报：{review_notes}"
+            
+            # 添加处理流程步骤
+            alert.add_process_step("批量标记误报", f"复判人员 {reviewer_name} 批量标记为误报：{review_notes}", reviewer_name)
+            
+            # 创建复判记录
+            from app.db.review_record_dao import ReviewRecordDAO
+            review_dao = ReviewRecordDAO(db)
+            review_record = review_dao.create_review_record(
+                alert_id=alert.alert_id,
+                review_type="manual",
+                reviewer_name=reviewer_name,
+                review_notes=review_notes
+            )
+            
+            # 创建处理记录
+            from app.models.alert import AlertProcessingRecord, ProcessingActionType
+            processing_record = AlertProcessingRecord(
+                alert_id=alert.alert_id,
+                action_type=ProcessingActionType.MARK_FALSE_ALARM,
+                from_status=old_status,
+                to_status=AlertStatus.FALSE_ALARM,
+                operator_name=reviewer_name,
+                operator_role="复判人员",
+                notes=review_notes,
+                created_at=datetime.utcnow()
+            )
+            db.add(processing_record)
+            
+            processed_count += 1
+        
+        db.commit()
+        
+        logger.info(f"批量标记误报完成，共处理 {processed_count} 条记录")
+        
+        # 构建响应信息
+        message_parts = []
+        if processed_count > 0:
+            message_parts.append(f"成功标记 {processed_count} 条预警为误报")
+        if already_false_alarm_count > 0:
+            message_parts.append(f"{already_false_alarm_count} 条预警已经是误报状态")
+        if not_found_ids:
+            message_parts.append(f"{len(not_found_ids)} 条预警记录未找到")
+            
+        message = "；".join(message_parts) if message_parts else "没有找到可处理的预警记录"
+        
+        return {
+            "code": 0,
+            "msg": message,
+            "data": {
+                "processed_count": processed_count,
+                "already_false_alarm_count": already_false_alarm_count,
+                "not_found_ids": not_found_ids,
+                "total_requested": len(alert_ids)
+            }
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"批量标记误报失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"批量标记误报失败: {str(e)}")

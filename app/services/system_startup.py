@@ -106,6 +106,10 @@ class SystemStartupService:
             try:
                 # 导入现有模型
                 from app.models import alert, model, skill, ai_task, llm_skill
+                # 导入预警档案关联模型
+                from app.models import alert_archive_link
+                # 导入复判记录模型
+                from app.models import review_record
                 logger.info("✅ 现有模型导入完成")
                 
                 # 导入预警重构模型（已替换原有模型）
