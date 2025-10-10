@@ -1248,6 +1248,19 @@ async def mark_alert_as_false_alarm(
                 }
             }
         
+        # 检查预警状态：只有待处理状态才能标记为误报
+        if alert.status != AlertStatus.PENDING:
+            status_names = {
+                AlertStatus.PROCESSING: "处理中",
+                AlertStatus.RESOLVED: "已处理",
+                AlertStatus.ARCHIVED: "已归档"
+            }
+            current_status_name = status_names.get(alert.status, alert.status_display)
+            raise HTTPException(
+                status_code=400,
+                detail=f"只有待处理状态的预警才能标记为误报，当前状态为：{current_status_name}"
+            )
+        
         # 更新预警状态为误报
         old_status = alert.status
         alert.status = AlertStatus.FALSE_ALARM
@@ -1343,10 +1356,17 @@ async def batch_mark_alerts_as_false_alarm(
         
         processed_count = 0
         already_false_alarm_count = 0
+        skipped_non_pending_count = 0
         
         for alert in alerts_to_process:
             if alert.status == AlertStatus.FALSE_ALARM:
                 already_false_alarm_count += 1
+                continue
+            
+            # 检查预警状态：只有待处理状态才能标记为误报
+            if alert.status != AlertStatus.PENDING:
+                skipped_non_pending_count += 1
+                logger.warning(f"跳过非待处理状态的预警: alert_id={alert.alert_id}, status={alert.status}")
                 continue
                 
             # 更新预警状态为误报
@@ -1395,6 +1415,8 @@ async def batch_mark_alerts_as_false_alarm(
             message_parts.append(f"成功标记 {processed_count} 条预警为误报")
         if already_false_alarm_count > 0:
             message_parts.append(f"{already_false_alarm_count} 条预警已经是误报状态")
+        if skipped_non_pending_count > 0:
+            message_parts.append(f"{skipped_non_pending_count} 条预警因非待处理状态被跳过")
         if not_found_ids:
             message_parts.append(f"{len(not_found_ids)} 条预警记录未找到")
             
@@ -1406,6 +1428,7 @@ async def batch_mark_alerts_as_false_alarm(
             "data": {
                 "processed_count": processed_count,
                 "already_false_alarm_count": already_false_alarm_count,
+                "skipped_non_pending_count": skipped_non_pending_count,
                 "not_found_ids": not_found_ids,
                 "total_requested": len(alert_ids)
             }
