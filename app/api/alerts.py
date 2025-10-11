@@ -8,12 +8,24 @@ import asyncio
 import math
 from sqlalchemy import desc
 from pydantic import BaseModel
+import csv
+import io
 
 from app.db.session import get_db
 from app.models.alert import Alert, AlertResponse, AlertUpdate, AlertStatus
 from app.services.alert_service import alert_service, register_sse_client, unregister_sse_client, publish_test_alert, connected_clients
 
 logger = logging.getLogger(__name__)
+
+# 导入 openpyxl 用于 Excel 导出
+try:
+    from openpyxl import Workbook
+    from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
+    from openpyxl.utils import get_column_letter
+    OPENPYXL_AVAILABLE = True
+except ImportError:
+    OPENPYXL_AVAILABLE = False
+    logger.warning("openpyxl 未安装，Excel 导出功能将不可用")
 
 router = APIRouter()
 
@@ -380,6 +392,286 @@ def get_connected_clients():
         logger.error(f"获取连接客户端信息失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取连接客户端信息失败: {str(e)}")
 
+
+@router.get("/export", summary="导出预警数据")
+async def export_alerts(
+    db: Session = Depends(get_db),
+    format: str = Query("csv", description="导出格式: csv 或 excel"),
+    alert_ids: Optional[List[int]] = Query(None, description="指定导出的预警ID列表"),
+    alert_type: Optional[str] = Query(None, description="报警类型"),
+    camera_id: Optional[int] = Query(None, description="摄像头ID"),
+    camera_name: Optional[str] = Query(None, description="摄像头名称"),
+    alert_level: Optional[int] = Query(None, description="报警等级"),
+    alert_name: Optional[str] = Query(None, description="报警名称"),
+    task_id: Optional[int] = Query(None, description="任务ID"),
+    location: Optional[str] = Query(None, description="位置"),
+    status: Optional[str] = Query(None, description="报警状态"),
+    start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    start_time: Optional[str] = Query(None, description="开始时间 (ISO格式)"),
+    end_time: Optional[str] = Query(None, description="结束时间 (ISO格式)"),
+    skill_class_id: Optional[int] = Query(None, description="技能类别ID"),
+    alert_id: Optional[int] = Query(None, description="报警ID")
+):
+    """
+    导出预警数据
+    
+    支持根据筛选条件导出CSV或Excel格式的预警数据
+    如果指定了alert_ids，则只导出这些预警；否则根据筛选条件导出所有匹配的预警
+    """
+    try:
+        logger.info(f"收到导出预警数据请求: format={format}, alert_ids={alert_ids}, "
+                   f"camera_id={camera_id}, camera_name={camera_name}, alert_type={alert_type}")
+        
+        # 验证导出格式
+        if format not in ['csv', 'excel']:
+            raise HTTPException(status_code=400, detail=f"不支持的导出格式: {format}，仅支持 csv 或 excel")
+        
+        # 验证日期参数格式
+        if start_date:
+            try:
+                datetime.strptime(start_date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"开始日期格式错误: {start_date}")
+        
+        if end_date:
+            try:
+                datetime.strptime(end_date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"结束日期格式错误: {end_date}")
+        
+        if start_time:
+            try:
+                datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"开始时间格式错误: {start_time}")
+        
+        if end_time:
+            try:
+                datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"结束时间格式错误: {end_time}")
+        
+        # 转换状态值
+        status_value = None
+        if status:
+            status_map = {
+                "待处理": 1,
+                "处理中": 2,
+                "已处理": 3,
+                "已忽略": 4,
+                "已过期": 5
+            }
+            if status in status_map:
+                status_value = status_map[status]
+        
+        # 如果指定了alert_ids，直接查询这些预警
+        if alert_ids:
+            logger.info(f"导出指定的 {len(alert_ids)} 个预警")
+            alerts = db.query(Alert).filter(Alert.alert_id.in_(alert_ids)).order_by(desc(Alert.alert_time)).all()
+        else:
+            # 否则根据筛选条件查询所有匹配的预警（不限制数量）
+            logger.info("导出所有筛选条件下的预警（无数量限制）")
+            alerts = await alert_service.get_alerts(
+                db=db,
+                skip=0,
+                limit=999999,  # 设置一个非常大的限制，实际上等于不限制
+                alert_type=alert_type,
+                camera_id=camera_id,
+                camera_name=camera_name,
+                alert_level=alert_level,
+                alert_name=alert_name,
+                task_id=task_id,
+                location=location,
+                status=status_value,
+                start_date=start_date,
+                end_date=end_date,
+                start_time=start_time,
+                end_time=end_time,
+                skill_class_id=skill_class_id,
+                alert_id=alert_id
+            )
+        
+        if not alerts:
+            raise HTTPException(status_code=404, detail="没有找到符合条件的预警数据")
+        
+        logger.info(f"找到 {len(alerts)} 条预警数据，开始生成{format.upper()}文件")
+        
+        # 生成CSV文件
+        if format == 'csv':
+            # 创建CSV内容
+            output = io.StringIO()
+            writer = csv.writer(output)
+            
+            # 写入表头
+            headers = [
+                "预警ID", "预警名称", "预警类型", "预警等级", "摄像头名称", 
+                "位置", "预警时间", "状态", "处理人", "处理时间", "处理备注"
+            ]
+            writer.writerow(headers)
+            
+            # 写入数据行
+            for alert in alerts:
+                # 状态显示名称
+                status_display = AlertStatus.get_display_name(alert.status)
+                
+                # 预警等级显示
+                level_display = f"等级{alert.alert_level}" if alert.alert_level else "-"
+                
+                # 格式化时间
+                alert_time = alert.alert_time.strftime("%Y-%m-%d %H:%M:%S") if alert.alert_time else "-"
+                processed_at = alert.processed_at.strftime("%Y-%m-%d %H:%M:%S") if alert.processed_at else "-"
+                
+                row = [
+                    alert.alert_id,
+                    alert.alert_name or "-",
+                    alert.alert_type or "-",
+                    level_display,
+                    alert.camera_name or "-",
+                    alert.location or "-",
+                    alert_time,
+                    status_display,
+                    alert.processed_by or "-",
+                    processed_at,
+                    alert.processing_notes or "-"
+                ]
+                writer.writerow(row)
+            
+            # 获取CSV内容
+            csv_content = output.getvalue()
+            output.close()
+            
+            # 返回CSV文件
+            logger.info(f"CSV文件生成完成，共 {len(alerts)} 条记录")
+            return Response(
+                content=csv_content.encode('utf-8-sig'),  # 使用utf-8-sig编码支持Excel打开中文
+                media_type="text/csv; charset=utf-8",
+                headers={
+                    "Content-Disposition": f"attachment; filename=alerts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+                }
+            )
+        
+        elif format == 'excel':
+            # 检查 openpyxl 是否可用
+            if not OPENPYXL_AVAILABLE:
+                raise HTTPException(
+                    status_code=501, 
+                    detail="Excel格式导出功能需要安装 openpyxl 库，请运行: pip install openpyxl"
+                )
+            
+            # 创建 Excel 工作簿
+            wb = Workbook()
+            ws = wb.active
+            ws.title = "预警数据"
+            
+            # 定义样式
+            # 表头样式
+            header_font = Font(name='微软雅黑', size=11, bold=True, color='FFFFFF')
+            header_fill = PatternFill(start_color='4472C4', end_color='4472C4', fill_type='solid')
+            header_alignment = Alignment(horizontal='center', vertical='center', wrap_text=True)
+            header_border = Border(
+                left=Side(style='thin', color='000000'),
+                right=Side(style='thin', color='000000'),
+                top=Side(style='thin', color='000000'),
+                bottom=Side(style='thin', color='000000')
+            )
+            
+            # 数据样式
+            data_alignment = Alignment(horizontal='left', vertical='center', wrap_text=True)
+            data_border = Border(
+                left=Side(style='thin', color='D0D0D0'),
+                right=Side(style='thin', color='D0D0D0'),
+                top=Side(style='thin', color='D0D0D0'),
+                bottom=Side(style='thin', color='D0D0D0')
+            )
+            
+            # 写入表头
+            headers = [
+                "预警ID", "预警名称", "预警类型", "预警等级", "摄像头名称", 
+                "位置", "预警时间", "状态", "处理人", "处理时间", "处理备注"
+            ]
+            
+            for col_num, header in enumerate(headers, 1):
+                cell = ws.cell(row=1, column=col_num)
+                cell.value = header
+                cell.font = header_font
+                cell.fill = header_fill
+                cell.alignment = header_alignment
+                cell.border = header_border
+            
+            # 写入数据行
+            for row_num, alert in enumerate(alerts, 2):
+                # 状态显示名称
+                status_display = AlertStatus.get_display_name(alert.status)
+                
+                # 预警等级显示
+                level_display = f"等级{alert.alert_level}" if alert.alert_level else "-"
+                
+                # 格式化时间
+                alert_time = alert.alert_time.strftime("%Y-%m-%d %H:%M:%S") if alert.alert_time else "-"
+                processed_at = alert.processed_at.strftime("%Y-%m-%d %H:%M:%S") if alert.processed_at else "-"
+                
+                row_data = [
+                    alert.alert_id,
+                    alert.alert_name or "-",
+                    alert.alert_type or "-",
+                    level_display,
+                    alert.camera_name or "-",
+                    alert.location or "-",
+                    alert_time,
+                    status_display,
+                    alert.processed_by or "-",
+                    processed_at,
+                    alert.processing_notes or "-"
+                ]
+                
+                for col_num, value in enumerate(row_data, 1):
+                    cell = ws.cell(row=row_num, column=col_num)
+                    cell.value = value
+                    cell.alignment = data_alignment
+                    cell.border = data_border
+            
+            # 调整列宽
+            column_widths = {
+                'A': 10,  # 预警ID
+                'B': 25,  # 预警名称
+                'C': 20,  # 预警类型
+                'D': 12,  # 预警等级
+                'E': 20,  # 摄像头名称
+                'F': 20,  # 位置
+                'G': 20,  # 预警时间
+                'H': 12,  # 状态
+                'I': 15,  # 处理人
+                'J': 20,  # 处理时间
+                'K': 30,  # 处理备注
+            }
+            
+            for col, width in column_widths.items():
+                ws.column_dimensions[col].width = width
+            
+            # 冻结首行（表头）
+            ws.freeze_panes = 'A2'
+            
+            # 保存到内存
+            excel_output = io.BytesIO()
+            wb.save(excel_output)
+            excel_output.seek(0)
+            
+            # 返回 Excel 文件
+            logger.info(f"Excel文件生成完成，共 {len(alerts)} 条记录")
+            return Response(
+                content=excel_output.getvalue(),
+                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                headers={
+                    "Content-Disposition": f"attachment; filename=alerts_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+                }
+            )
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"导出预警数据失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"导出预警数据失败: {str(e)}")
 
 
 @router.get("/{alert_id}", response_model=AlertResponse)
