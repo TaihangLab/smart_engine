@@ -337,13 +337,13 @@ class AlertMergeManager:
         self.video_encoding_timeout = settings.ALERT_VIDEO_ENCODING_TIMEOUT_SECONDS
         
         # H.264编码配置
-        self.video_codec = getattr(settings, 'ALERT_VIDEO_CODEC', 'avc1')
-        self.video_bitrate = getattr(settings, 'ALERT_VIDEO_BITRATE', 2000000)
-        self.video_gop_size = getattr(settings, 'ALERT_VIDEO_GOP_SIZE', 30)
+        self.video_codec = settings.ALERT_VIDEO_CODEC
+        self.video_bitrate = settings.ALERT_VIDEO_BITRATE
+        self.video_gop_size = settings.ALERT_VIDEO_GOP_SIZE
         
-        # 分级视频缓冲配置（向后兼容）
-        self.video_critical_pre_buffer = getattr(settings, 'ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS', 5.0)
-        self.video_critical_post_buffer = getattr(settings, 'ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS', 5.0)
+        # 分级视频缓冲配置
+        self.video_critical_pre_buffer = settings.ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS
+        self.video_critical_post_buffer = settings.ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS
         
         logger.info(f"✅ 预警合并管理器已初始化（简化版）")
         logger.info(f"📊 核心配置: 合并窗口={self.merge_window}s, 基础延迟={self.base_delay}s, 最大持续={self.max_duration}s")
