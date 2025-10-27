@@ -56,6 +56,12 @@ class Settings(BaseSettings):
     DB_AUTOCOMMIT: bool = Field(default=False, description="数据库自动提交")
     DB_AUTOFLUSH: bool = Field(default=False, description="数据库自动刷新")
     
+    # JWT配置
+    JWT_SECRET_KEY: str = Field(default="smart_engine_jwt_secret_key_2024", description="JWT密钥")
+    JWT_ALGORITHM: str = Field(default="HS256", description="JWT算法")
+    JWT_EXPIRE_MINUTES: int = Field(default=60 * 24 * 7, description="JWT过期时间（分钟）")  # 7天
+    JWT_REFRESH_EXPIRE_MINUTES: int = Field(default=60 * 24 * 30, description="JWT刷新令牌过期时间（分钟）")  # 30天
+
     # WVP配置
     WVP_API_URL: str = Field(default="http://192.168.0.16:18080", description="WVP API地址")
     WVP_USERNAME: str = Field(default="admin", description="WVP用户名")

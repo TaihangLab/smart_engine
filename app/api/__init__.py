@@ -2,7 +2,13 @@
 API包，提供REST API接口
 """
 from fastapi import APIRouter
-from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, ai_task_review, chat_assistant, wvp_proxy, alert_archives, review_records
+from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, ai_task_review, chat_assistant, wvp_proxy
+from app.modules.admin.controllers.auth_controller import router as auth_router
+from app.modules.admin.controllers.user_controller import router as user_router
+from app.modules.admin.controllers.dept_controller import router as dept_router
+from app.modules.admin.controllers.role_controller import router as role_router
+from app.modules.admin.controllers.menu_controller import router as menu_router
+from app.modules.admin.controllers.post_controller import router as post_router
 
 api_router = APIRouter()
 api_router.include_router(cameras.router, prefix="/cameras", tags=["cameras"])
@@ -17,9 +23,13 @@ api_router.include_router(llm_skills.router, prefix="/llm-skills", tags=["llm_sk
 api_router.include_router(llm_skill_review.router, prefix="/llm-skill-review", tags=["llm_skill_review"])
 api_router.include_router(ai_task_review.router, prefix="/ai-task-review", tags=["ai_task_review"])
 api_router.include_router(chat_assistant.router, prefix="/chat", tags=["chat_assistant"])
-api_router.include_router(alert_archives.router, prefix="/alert-archives", tags=["alert_archives"])
-api_router.include_router(review_records.router, prefix="/review-records", tags=["review_records"])
 api_router.include_router(wvp_proxy.router, prefix="", tags=["wvp_proxy"])
+api_router.include_router(auth_router, tags=["认证管理"])
+api_router.include_router(user_router, prefix="/user", tags=["用户管理"])
+api_router.include_router(dept_router, prefix="/dept", tags=["部门管理"])
+api_router.include_router(role_router, prefix="/role", tags=["角色管理"])
+api_router.include_router(menu_router, prefix="/menu", tags=["菜单管理"])
+api_router.include_router(post_router, prefix="/post", tags=["岗位管理"])
 
 __all__ = ["api_router"]
 

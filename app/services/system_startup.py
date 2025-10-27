@@ -110,6 +110,8 @@ class SystemStartupService:
                 from app.models import alert_archive_link
                 # 导入复判记录模型
                 from app.models import review_record
+                # 导入admin模块模型
+                from app.modules.admin.models import user, menu, post
                 logger.info("✅ 现有模型导入完成")
                 
                 # 导入预警重构模型（已替换原有模型）

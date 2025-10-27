@@ -105,6 +105,20 @@ app = FastAPI(
 
 # 配置中间件
 app.add_middleware(RequestLoggingMiddleware)
+
+# 添加认证中间件 - 根据环境变量决定是否启用
+from app.modules.admin.middleware.auth_middleware import AuthMiddleware, OptionalAuthMiddleware
+import os
+
+# 从环境变量读取认证配置，默认启用认证
+enable_auth = os.getenv("ENABLE_AUTH", "true").lower() == "true"
+if enable_auth:
+    app.add_middleware(AuthMiddleware, enable_auth=True)
+    logger.info("🔐 认证中间件已启用 - 所有API接口需要认证")
+else:
+    app.add_middleware(OptionalAuthMiddleware, enable_auth=False)
+    logger.info("⚠️ 认证中间件已禁用 - 仅用于开发环境")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 允许所有来源，生产环境应该限制

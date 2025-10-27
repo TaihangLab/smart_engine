@@ -32,6 +32,10 @@ langchain-openai==0.3.27
 langchain-core==0.3.66
 redis==5.2.1
 cryptography
+# JWT和认证相关
+PyJWT==2.10.1
+passlib[bcrypt]==1.7.4
+python-jose[cryptography]==3.3.0
 # PyAV - 高稳定性RTSP推流
 av>=15.0.0
 psutil==7.0.0

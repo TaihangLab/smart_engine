@@ -121,7 +121,6 @@ class Alert(Base):
     
     # 关联关系
     processing_records = relationship("AlertProcessingRecord", back_populates="alert", cascade="all, delete-orphan")
-    review_records = relationship("ReviewRecord", back_populates="alert", cascade="all, delete-orphan")
     
     @property
     def status_display(self) -> str:

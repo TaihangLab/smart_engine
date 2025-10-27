@@ -6,9 +6,10 @@ from app.models.alert import Alert, AlertCreate, AlertResponse
 from app.models.llm_skill import LLMSkillClass
 from app.models.review_llm_skill import ReviewSkillClass
 from app.models.llm_task import LLMTask
-from app.models.alert_archive import AlertArchive
-from app.models.alert_archive_link import AlertArchiveLink
-from app.models.review_record import ReviewRecord
+
+# 导入用户管理模块的模型
+from app.modules.admin.models.user import SysUser, SysRole, SysUserRole, SysDept
+from app.modules.admin.models.menu import SysMenu, SysRoleMenu, SysRoleDept
 
 # 🎯 导入零配置补偿机制相关模型
 from app.models.compensation import (
