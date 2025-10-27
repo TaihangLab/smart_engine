@@ -843,5 +843,37 @@ class AlertResponse(BaseModel):
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     process: Optional[Dict[str, Any]] = None
-    
+
+    # 原始对象名字段（用于生成URL）
+    minio_frame_object_name: Optional[str] = None
+    minio_video_object_name: Optional[str] = None
+
     model_config = {"from_attributes": True}
+
+    def model_post_init(self, __context):
+        """模型实例化后自动生成URL"""
+        if self.minio_frame_object_name:
+            try:
+                from app.services.minio_client import minio_client
+                from app.core.config import settings
+                self.minio_frame_url = minio_client.get_presigned_url(
+                    bucket_name=settings.MINIO_BUCKET,
+                    prefix=f"{settings.MINIO_ALERT_IMAGE_PREFIX}{self.task_id}/",
+                    object_name=self.minio_frame_object_name,
+                    expires=3600  # 1小时有效期
+                )
+            except Exception:
+                self.minio_frame_url = ""
+
+        if self.minio_video_object_name:
+            try:
+                from app.services.minio_client import minio_client
+                from app.core.config import settings
+                self.minio_video_url = minio_client.get_presigned_url(
+                    bucket_name=settings.MINIO_BUCKET,
+                    prefix=f"{settings.MINIO_ALERT_VIDEO_PREFIX}{self.task_id}/",
+                    object_name=self.minio_video_object_name,
+                    expires=3600  # 1小时有效期
+                )
+            except Exception:
+                self.minio_video_url = ""
