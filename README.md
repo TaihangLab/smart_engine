@@ -840,85 +840,98 @@ brew install ffmpeg
 ffmpeg -version
 ```
 
-### 4. 环境变量配置
+### 4. 配置文件
 
-创建`.env`文件并配置以下变量：
+所有系统配置在 `app/core/config.py` 中管理。主要配置项包括：
 
-```bash
-# 基础配置
-PROJECT_NAME=Smart Engine
-PROJECT_DESCRIPTION=智能视频分析引擎后端API
-PROJECT_VERSION=1.0.0
-DEBUG=true
-LOG_LEVEL=DEBUG
+```python
+# 在 app/core/config.py 中修改以下配置
 
-# 数据库配置
-MYSQL_SERVER=192.168.1.107
-MYSQL_USER=root
-MYSQL_PASSWORD=root
-MYSQL_DB=smart_vision
-MYSQL_PORT=3306
-
-# Triton推理服务器配置
-TRITON_URL=172.18.1.1:8201
-
-# MinIO对象存储配置
-MINIO_ENDPOINT=192.168.1.107
-MINIO_PORT=9000
-MINIO_ACCESS_KEY=minioadmin
-MINIO_SECRET_KEY=minioadmin
-MINIO_BUCKET=visionai
-MINIO_SECURE=false
-MINIO_ALERT_IMAGE_PREFIX=alert-images/
-
-# RabbitMQ消息队列配置
-RABBITMQ_HOST=192.168.1.107
-RABBITMQ_PORT=5672
-RABBITMQ_USER=guest
-RABBITMQ_PASSWORD=guest
-
-# WVP平台配置
-WVP_API_URL=http://192.168.1.107:18080
-WVP_USERNAME=admin
-WVP_PASSWORD=admin
-
-# 启动恢复配置
-STARTUP_RECOVERY_ENABLED=true
-STARTUP_RECOVERY_DELAY_SECONDS=30
-
-# 智能自适应帧读取配置
-ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD=30
-
-# RTSP推流配置
-RTSP_STREAMING_ENABLED=false
-RTSP_STREAMING_BACKEND=simple  # 推流后端: simple(解决卡顿), pyav, ultra_simple, ffmpeg, hybrid
-RTSP_STREAMING_BASE_URL=rtsp://192.168.1.107/detection
-RTSP_STREAMING_SIGN=a9b7ba70783b617e9998dc4dd82eb3c5
-RTSP_STREAMING_DEFAULT_FPS=15.0
-RTSP_STREAMING_MAX_FPS=30.0
-RTSP_STREAMING_MIN_FPS=1.0
-
-# Redis配置（复判队列）
-REDIS_HOST=192.168.1.107
-REDIS_PORT=6379
-REDIS_DB=0
-REDIS_PASSWORD=
-
-# LLM服务配置
-PRIMARY_LLM_PROVIDER=ollama
-PRIMARY_LLM_BASE_URL=http://172.18.1.1:11434
-PRIMARY_LLM_MODEL=llava:latest
-BACKUP_LLM_MODEL=qwen3:32b
-LLM_TEMPERATURE=0.1
-LLM_MAX_TOKENS=1000
-LLM_TIMEOUT=60
-
-# 复判队列配置
-ALERT_REVIEW_MAX_WORKERS=3
-ALERT_REVIEW_PROCESSING_TIMEOUT=300
-ALERT_REVIEW_RETRY_MAX_ATTEMPTS=3
-ALERT_REVIEW_QUEUE_ENABLED=true
+class Settings(BaseSettings):
+    # 基础配置
+    PROJECT_NAME: str = "Smart Engine"
+    PROJECT_DESCRIPTION: str = "智能视频分析引擎后端API"
+    PROJECT_VERSION: str = "1.0.0"
+    DEBUG: bool = True
+    LOG_LEVEL: str = "DEBUG"
+    
+    # 数据库配置
+    MYSQL_SERVER: str = "192.168.1.107"
+    MYSQL_USER: str = "root"
+    MYSQL_PASSWORD: str = "root"
+    MYSQL_DB: str = "smart_vision"
+    MYSQL_PORT: int = 3306
+    
+    # Triton推理服务器配置
+    TRITON_URL: str = "172.18.1.1:8201"
+    
+    # MinIO对象存储配置
+    MINIO_ENDPOINT: str = "192.168.1.107"
+    MINIO_PORT: int = 9000
+    MINIO_ACCESS_KEY: str = "minioadmin"
+    MINIO_SECRET_KEY: str = "minioadmin"
+    MINIO_BUCKET: str = "visionai"
+    MINIO_SECURE: bool = False
+    MINIO_ALERT_IMAGE_PREFIX: str = "alert-images/"
+    
+    # RabbitMQ消息队列配置
+    RABBITMQ_HOST: str = "192.168.1.107"
+    RABBITMQ_PORT: int = 5672
+    RABBITMQ_USER: str = "guest"
+    RABBITMQ_PASSWORD: str = "guest"
+    
+    # WVP平台配置
+    WVP_API_URL: str = "http://192.168.1.107:18080"
+    WVP_USERNAME: str = "admin"
+    WVP_PASSWORD: str = "admin"
+    
+    # 启动恢复配置
+    STARTUP_RECOVERY_ENABLED: bool = True
+    STARTUP_RECOVERY_DELAY_SECONDS: int = 30
+    
+    # 智能自适应帧读取配置
+    ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD: float = 30.0
+    
+    # RTSP推流配置
+    RTSP_STREAMING_ENABLED: bool = False
+    RTSP_STREAMING_BACKEND: str = "simple"  # simple, pyav, ultra_simple, ffmpeg, hybrid
+    RTSP_STREAMING_BASE_URL: str = "rtsp://192.168.1.107/detection"
+    RTSP_STREAMING_SIGN: str = "a9b7ba70783b617e9998dc4dd82eb3c5"
+    RTSP_STREAMING_DEFAULT_FPS: float = 15.0
+    RTSP_STREAMING_MAX_FPS: float = 30.0
+    RTSP_STREAMING_MIN_FPS: float = 1.0
+    
+    # Redis配置（复判队列）
+    REDIS_HOST: str = "192.168.1.107"
+    REDIS_PORT: int = 6379
+    REDIS_DB: int = 0
+    REDIS_PASSWORD: str = ""
+    
+    # LLM服务配置
+    PRIMARY_LLM_PROVIDER: str = "ollama"
+    PRIMARY_LLM_BASE_URL: str = "http://172.18.1.1:11434"
+    PRIMARY_LLM_MODEL: str = "llava:latest"
+    BACKUP_LLM_MODEL: str = "qwen3:32b"
+    LLM_TEMPERATURE: float = 0.1
+    LLM_MAX_TOKENS: int = 1000
+    LLM_TIMEOUT: int = 60
+    
+    # 复判队列配置
+    ALERT_REVIEW_MAX_WORKERS: int = 3
+    ALERT_REVIEW_PROCESSING_TIMEOUT: int = 300
+    ALERT_REVIEW_RETRY_MAX_ATTEMPTS: int = 3
+    ALERT_REVIEW_QUEUE_ENABLED: bool = True
+    
+    # 预警合并配置（重要：避免大量重复预警）
+    ALERT_MERGE_ENABLED: bool = True
+    ALERT_MERGE_WINDOW_SECONDS: float = 4.0  # 建议6-10秒
+    ALERT_MERGE_MAX_DURATION_SECONDS: float = 15.0
+    ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS: float = 30.0
+    ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS: float = 15.0
+    ALERT_MERGE_IMMEDIATE_LEVELS: str = "1"  # 立即发送的预警等级
 ```
+
+**注意**：修改配置后需要重启应用才能生效。
 
 ### 5. 数据库初始化
 
@@ -1321,21 +1334,22 @@ RTSP_STREAMING_BACKEND=simple  # 推荐设置
 > - **需要依赖**: 所有PyAV版本都需要 `pip install av`
 > - **快速回滚**: 如有问题可设置 `RTSP_STREAMING_BACKEND=ffmpeg` 立即回滚
 
-#### 1. 全局配置（.env文件）
-```bash
+#### 1. 全局配置（config.py文件）
+```python
+# 在 app/core/config.py 中配置
 # 全局启用/禁用RTSP推流功能
-RTSP_STREAMING_ENABLED=true
+RTSP_STREAMING_ENABLED: bool = True
 # 🚀 推流器后端选择（解决卡顿）
-RTSP_STREAMING_BACKEND=simple
+RTSP_STREAMING_BACKEND: str = "simple"
 # RTSP服务器基础地址
-RTSP_STREAMING_BASE_URL=rtsp://192.168.1.107/detection
+RTSP_STREAMING_BASE_URL: str = "rtsp://192.168.1.107/detection"
 # 验证签名
-RTSP_STREAMING_SIGN=a9b7ba70783b617e9998dc4dd82eb3c5
+RTSP_STREAMING_SIGN: str = "a9b7ba70783b617e9998dc4dd82eb3c5"
 # 默认推流帧率
-RTSP_STREAMING_DEFAULT_FPS=15.0
+RTSP_STREAMING_DEFAULT_FPS: float = 15.0
 # 帧率限制
-RTSP_STREAMING_MAX_FPS=30.0
-RTSP_STREAMING_MIN_FPS=1.0
+RTSP_STREAMING_MAX_FPS: float = 30.0
+RTSP_STREAMING_MIN_FPS: float = 1.0
 ```
 
 #### 2. 任务级配置
@@ -1352,8 +1366,8 @@ RTSP_STREAMING_MIN_FPS=1.0
 #### 3. 自动参数获取
 | 参数 | 获取方式 | 说明 |
 |------|----------|------|
-| `base_url` | 全局配置 | 从 `.env` 文件读取 |
-| `sign` | 全局配置 | 从 `.env` 文件读取 |
+| `base_url` | 全局配置 | 从 `config.py` 文件读取 |
+| `sign` | 全局配置 | 从 `config.py` 文件读取 |
 | `fps` | 智能帧率选择 + 全局限制 | **使用任务帧率和全局默认帧率中的最大值**，然后限制在合理范围内 |
 | `width` | 视频流检测 | 自动从原视频流获取 |
 | `height` | 视频流检测 | 自动从原视频流获取 |
@@ -1379,7 +1393,7 @@ RTSP_STREAMING_MIN_FPS=1.0
 ```
 
 #### 2. 全局默认帧率
-- **定义位置**：`.env` 文件中的 `RTSP_STREAMING_DEFAULT_FPS`
+- **定义位置**：`app/core/config.py` 文件中的 `RTSP_STREAMING_DEFAULT_FPS`
 - **作用范围**：系统级默认值
 - **典型值**：15.0 fps
 - **用途**：兜底配置，确保系统始终有合理的帧率
@@ -1711,8 +1725,8 @@ server {
      - 确认环境变量PATH包含FFmpeg路径
      - 验证FFmpeg支持H.264编码和RTSP协议
    - **全局配置**：
-     - 检查 `.env` 文件中的RTSP配置项
-     - 确认 `RTSP_STREAMING_ENABLED=true`
+     - 检查 `app/core/config.py` 文件中的RTSP配置项
+     - 确认 `RTSP_STREAMING_ENABLED: bool = True`
      - 验证 `RTSP_STREAMING_BASE_URL` 地址可访问
    - **任务配置**：
      - 确认任务配置中 `rtsp_streaming.enabled=true`

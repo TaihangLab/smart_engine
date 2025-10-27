@@ -307,20 +307,16 @@ class AlertMergeManager:
         self.video_buffers: Dict[int, VideoBufferManager] = {}
         self.video_buffers_lock = threading.RLock()
         
-        # 从配置文件读取参数
+        # 📋 从配置文件读取参数（简化版）
         from app.core.config import settings
+        
+        # 核心合并配置
         self.merge_enabled = settings.ALERT_MERGE_ENABLED
         self.merge_window = settings.ALERT_MERGE_WINDOW_SECONDS
-        self.max_merge_duration = settings.ALERT_MERGE_MAX_DURATION_SECONDS
-        self.min_merge_delay = settings.ALERT_MERGE_MIN_DELAY_SECONDS
-        self.max_merge_delay = settings.ALERT_MERGE_MAX_DELAY_SECONDS
-        self.emergency_delay = settings.ALERT_MERGE_EMERGENCY_DELAY_SECONDS
+        self.base_delay = settings.ALERT_MERGE_BASE_DELAY_SECONDS
+        self.max_duration = settings.ALERT_MERGE_MAX_DURATION_SECONDS
         self.quick_send_threshold = settings.ALERT_MERGE_QUICK_SEND_THRESHOLD
-        
-        # 新增：分级合并策略
-        self.critical_max_duration = getattr(settings, 'ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS', 30.0)
-        self.normal_max_duration = getattr(settings, 'ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS', 15.0)
-        self.adaptive_window = getattr(settings, 'ALERT_MERGE_ADAPTIVE_WINDOW', True)
+        self.level_delay_factor = settings.ALERT_MERGE_LEVEL_DELAY_FACTOR
         
         # 解析立即发送的预警等级
         immediate_levels_str = settings.ALERT_MERGE_IMMEDIATE_LEVELS.strip()
@@ -329,15 +325,11 @@ class AlertMergeManager:
         else:
             self.immediate_levels = set()
         
+        # 视频录制配置
         self.video_enabled = settings.ALERT_VIDEO_ENABLED
         self.video_buffer_duration = settings.ALERT_VIDEO_BUFFER_DURATION_SECONDS
         self.video_pre_buffer = settings.ALERT_VIDEO_PRE_BUFFER_SECONDS
         self.video_post_buffer = settings.ALERT_VIDEO_POST_BUFFER_SECONDS
-        
-        # 新增：分级视频缓冲配置
-        self.video_critical_pre_buffer = getattr(settings, 'ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS', 5.0)
-        self.video_critical_post_buffer = getattr(settings, 'ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS', 5.0)
-        
         self.video_fps = settings.ALERT_VIDEO_FPS
         self.video_quality = settings.ALERT_VIDEO_QUALITY
         self.video_width = settings.ALERT_VIDEO_WIDTH
@@ -349,12 +341,14 @@ class AlertMergeManager:
         self.video_bitrate = getattr(settings, 'ALERT_VIDEO_BITRATE', 2000000)
         self.video_gop_size = getattr(settings, 'ALERT_VIDEO_GOP_SIZE', 30)
         
-        logger.info(f"预警合并管理器已初始化 - 合并功能: {'启用' if self.merge_enabled else '禁用'}, "
-                   f"视频录制: {'启用' if self.video_enabled else '禁用'}, "
-                   f"合并窗口: {self.merge_window}秒, 普通最大持续时间: {self.normal_max_duration}秒, "
-                   f"关键最大持续时间: {self.critical_max_duration}秒, "
-                   f"最大延迟: {self.max_merge_delay}秒, 立即发送等级: {self.immediate_levels}, "
-                   f"视频编码: {self.video_codec}, 码率: {self.video_bitrate}bps, GOP: {self.video_gop_size}")
+        # 分级视频缓冲配置（向后兼容）
+        self.video_critical_pre_buffer = getattr(settings, 'ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS', 5.0)
+        self.video_critical_post_buffer = getattr(settings, 'ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS', 5.0)
+        
+        logger.info(f"✅ 预警合并管理器已初始化（简化版）")
+        logger.info(f"📊 核心配置: 合并窗口={self.merge_window}s, 基础延迟={self.base_delay}s, 最大持续={self.max_duration}s")
+        logger.info(f"🚀 智能策略: 等级延迟系数={self.level_delay_factor}, 快速发送阈值={self.quick_send_threshold}, 立即发送等级={self.immediate_levels}")
+        logger.info(f"🎬 视频配置: {'启用' if self.video_enabled else '禁用'}, 编码={self.video_codec}, 码率={self.video_bitrate}bps")
     
     def get_or_create_video_buffer(self, task_id: int, fps: float = None) -> VideoBufferManager:
         """获取或创建视频缓冲管理器"""
@@ -470,21 +464,33 @@ class AlertMergeManager:
             return False
     
     def _generate_alert_key(self, alert_data: Dict[str, Any]) -> str:
-        """生成预警唯一键"""
+        """生成预警唯一键
+        
+        注意：预警键用于识别相似预警以进行合并。
+        - 不包含检测数量等动态内容，避免无法合并
+        - 只使用稳定的标识字段（任务ID、摄像头ID等）
+        """
         try:
-            # 使用任务ID、摄像头ID、技能类ID、预警类型和预警等级生成唯一键
+            # 🔧 优化：使用稳定的标识字段生成唯一键，移除动态的alert_name
+            # alert_name可能包含动态内容（如"检测到3个人"、"检测到5个人"）
+            # 这会导致相似预警无法合并
+            
+            # 基础键组件（稳定字段）
             key_components = [
                 str(alert_data.get("task_id", "")),
                 str(alert_data.get("camera_id", "")),
                 str(alert_data.get("skill_class_id", "")),
                 str(alert_data.get("alert_type", "")),
-                str(alert_data.get("alert_level", "")),
-                str(alert_data.get("alert_name", ""))
+                str(alert_data.get("alert_level", ""))
             ]
+            
             
             # 生成MD5哈希
             key_string = "|".join(key_components)
-            return hashlib.md5(key_string.encode('utf-8')).hexdigest()[:16]
+            alert_key = hashlib.md5(key_string.encode('utf-8')).hexdigest()[:16]
+            
+            logger.debug(f"生成预警键: {alert_key} (来源: {key_string})")
+            return alert_key
             
         except Exception as e:
             logger.error(f"生成预警键失败: {str(e)}")
@@ -492,50 +498,34 @@ class AlertMergeManager:
             return f"alert_{int(time.time())}"
     
     def _set_merge_timer(self, alert_key: str, merged_alert: MergedAlert):
-        """设置合并定时器 - 分级延迟策略"""
+        """设置合并定时器 - 智能延迟策略
+        
+        延迟计算规则：
+        1. 基础延迟：从配置的 base_delay 开始
+        2. 等级调整：等级越高（数字越大），延迟越长（等级 * level_delay_factor）
+        3. 快速发送：预警数量达到阈值时立即发送
+        4. 上限控制：延迟不超过 base_delay * 3
+        """
         try:
             # 取消现有定时器
             if merged_alert.merge_timer:
                 merged_alert.merge_timer.cancel()
             
-            # 获取基础预警数据以判断预警等级
+            # 获取预警等级
             base_alert_data = merged_alert.get_base_alert_data()
             alert_level = base_alert_data.get("alert_level", 4)
             
-            # 🚀 分级延迟策略：1级=0秒，2级≤3秒，3-4级≤5秒
-            if alert_level in self.immediate_levels:
-                # 1级预警：紧急预警使用最短延迟（实际上不会走到这里，因为1级直接发送）
-                delay = self.emergency_delay
-                logger.info(f"预警 {alert_key} 使用紧急延迟: {delay:.1f}秒")
-            elif alert_level == 2:
-                # 2级预警：最大3秒延迟
-                max_delay_level2 = 3.0
-                if merged_alert.alert_count >= self.quick_send_threshold:
-                    delay = min(2.0, max_delay_level2)  # 快速发送2秒
-                else:
-                    delay = min(
-                        1.5 + (merged_alert.alert_count - 1) * 0.5,  # 1.5→2.0→2.5→3.0
-                        max_delay_level2
-                    )
-                logger.debug(f"预警 {alert_key} (2级) 延迟: {delay:.1f}秒")
-            elif alert_level in [3, 4]:
-                # 3-4级预警：最大5秒延迟
-                max_delay_level34 = 5.0
-                if merged_alert.alert_count >= self.quick_send_threshold:
-                    delay = min(3.0, max_delay_level34)  # 快速发送3秒
-                else:
-                    delay = min(
-                        2.0 + (merged_alert.alert_count - 1) * 0.5,  # 2.0→2.5→3.0→3.5→4.0→4.5→5.0
-                        max_delay_level34
-                    )
-                logger.debug(f"预警 {alert_key} ({alert_level}级) 延迟: {delay:.1f}秒")
+            # 🎯 统一延迟计算公式
+            if merged_alert.alert_count >= self.quick_send_threshold:
+                # 达到快速发送阈值，立即发送
+                delay = 0.5
+                logger.debug(f"预警 {alert_key} ({alert_level}级) 达到快速发送阈值({self.quick_send_threshold})，延迟: {delay:.1f}秒")
             else:
-                # 其他预警等级：使用默认最大延迟
-                delay = min(
-                    self.min_merge_delay + (merged_alert.alert_count - 1) * 0.5,
-                    self.max_merge_delay
-                )
-                logger.debug(f"预警 {alert_key} (未知级别{alert_level}) 延迟: {delay:.1f}秒")
+                # 基础延迟 + 等级调整
+                # 等级越高延迟越长：1级最短，4级最长
+                level_adjustment = alert_level * self.level_delay_factor
+                delay = min(self.base_delay + level_adjustment, self.base_delay * 3)
+                logger.debug(f"预警 {alert_key} ({alert_level}级) 延迟: {delay:.1f}秒 (基础={self.base_delay}s + 等级调整={level_adjustment:.1f}s)")
             
             # 创建新定时器
             merged_alert.merge_timer = threading.Timer(
@@ -878,11 +868,8 @@ class AlertMergeManager:
         }
 
     def _get_max_duration_for_level(self, alert_level: int) -> float:
-        """根据预警等级获取最大合并持续时间"""
-        if alert_level <= 2:  # 1-2级为关键预警
-            return self.critical_max_duration
-        else:  # 3-4级为普通预警
-            return self.normal_max_duration
+        """获取最大合并持续时间（简化版：所有等级统一）"""
+        return self.max_duration
     
     def _check_and_trigger_review_after_alert(self, alert_data: Dict[str, Any]):
         """

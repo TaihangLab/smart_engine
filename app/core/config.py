@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     # 数据库配置
     MYSQL_SERVER: str = Field(default="127.0.0.1", description="MySQL服务器地址")
     MYSQL_USER: str = Field(default="root", description="MySQL用户名")
-    MYSQL_PASSWORD: str = Field(default="123456", description="MySQL密码")
+    MYSQL_PASSWORD: str = Field(default="root", description="MySQL密码")
     MYSQL_DB: str = Field(default="smart_vision", description="MySQL数据库名")
     MYSQL_PORT: int = Field(default=3306, description="MySQL端口")
     
@@ -57,7 +57,7 @@ class Settings(BaseSettings):
     DB_AUTOFLUSH: bool = Field(default=False, description="数据库自动刷新")
     
     # WVP配置
-    WVP_API_URL: str = Field(default="http://192.168.0.16:18080", description="WVP API地址")
+    WVP_API_URL: str = Field(default="http://192.168.0.14:18080", description="WVP API地址")
     WVP_USERNAME: str = Field(default="admin", description="WVP用户名")
     WVP_PASSWORD: str = Field(default="admin", description="WVP密码")
     
@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
     
     # MinIO配置
-    MINIO_ENDPOINT: str = Field(default="192.168.0.16", description="MinIO服务器地址")
+    MINIO_ENDPOINT: str = Field(default="192.168.0.14", description="MinIO服务器地址")
     MINIO_PORT: int = Field(default=9000, description="MinIO端口")
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", description="MinIO访问密钥")
     MINIO_SECRET_KEY: str = Field(default="minioadmin", description="MinIO秘密密钥")
@@ -316,7 +316,7 @@ class Settings(BaseSettings):
     # RTSP推流配置
     RTSP_STREAMING_ENABLED: bool = Field(default=True, description="是否全局启用RTSP推流功能")
     RTSP_STREAMING_BACKEND: str = Field(default="pyav", description="推流后端选择: 'pyav'(推荐，高性能), 'ffmpeg'(兼容模式)")
-    RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://192.168.0.16/detection", description="RTSP推流基础地址")
+    RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://192.168.0.14/detection", description="RTSP推流基础地址")
     RTSP_STREAMING_SIGN: str = Field(default="a9b7ba70783b617e9998dc4dd82eb3c5", description="RTSP推流验证签名")
     RTSP_STREAMING_DEFAULT_FPS: float = Field(default=30.0, description="RTSP推流默认帧率")
     RTSP_STREAMING_MAX_FPS: float = Field(default=30.0, description="RTSP推流最大帧率")
@@ -328,20 +328,17 @@ class Settings(BaseSettings):
     # 智能帧获取配置
     ADAPTIVE_FRAME_CONNECTION_OVERHEAD_THRESHOLD: float = Field(default=30.0, description="连接开销阈值（秒），超过此值使用按需截图模式")
 
-    # 预警合并配置
+      # ========== 预警合并配置（简化版） ==========
+    # 核心配置：只需要配置这5个参数即可
     ALERT_MERGE_ENABLED: bool = Field(default=True, description="是否启用预警合并功能")
-    ALERT_MERGE_WINDOW_SECONDS: float = Field(default=4.0, description="预警合并时间窗口（秒）")
-    ALERT_MERGE_MAX_DURATION_SECONDS: float = Field(default=15.0, description="预警合并最大持续时间（秒）")
-    ALERT_MERGE_MIN_DELAY_SECONDS: float = Field(default=2.0, description="预警合并最小延迟（秒）")
-    ALERT_MERGE_MAX_DELAY_SECONDS: float = Field(default=10.0, description="预警合并最大延迟（秒）")
-    ALERT_MERGE_IMMEDIATE_LEVELS: str = Field(default="1", description="立即发送的预警等级（逗号分隔，如'1,2'）")
-    ALERT_MERGE_QUICK_SEND_THRESHOLD: int = Field(default=3, description="快速发送阈值（预警数量）")
-    ALERT_MERGE_EMERGENCY_DELAY_SECONDS: float = Field(default=1.0, description="紧急预警最大延迟（秒）")
-
-    # 高级合并策略配置
-    ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS: float = Field(default=30.0, description="1-2级预警最大合并持续时间（秒）")
-    ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS: float = Field(default=15.0, description="3-4级预警最大合并持续时间（秒）")
-    ALERT_MERGE_ADAPTIVE_WINDOW: bool = Field(default=True, description="是否启用自适应合并窗口")
+    ALERT_MERGE_WINDOW_SECONDS: float = Field(default=8.0, description="预警合并窗口（秒）- 多久内的相似预警会合并")
+    ALERT_MERGE_BASE_DELAY_SECONDS: float = Field(default=4.0, description="基础延迟（秒）- 预警合并的初始等待时间")
+    ALERT_MERGE_MAX_DURATION_SECONDS: float = Field(default=30.0, description="最大持续时间（秒）- 预警最长合并时间，超过后强制发送")
+    ALERT_MERGE_IMMEDIATE_LEVELS: str = Field(default="", description="立即发送的预警等级（逗号分隔，如'1'表示1级立即发送，空字符串表示所有等级都参与合并）")
+    
+    # 可选高级配置（一般不需要修改）
+    ALERT_MERGE_QUICK_SEND_THRESHOLD: int = Field(default=8, description="快速发送阈值 - 预警数量达到此值时快速发送")
+    ALERT_MERGE_LEVEL_DELAY_FACTOR: float = Field(default=0.5, description="等级延迟系数 - 控制不同等级的延迟差异（等级越高延迟越长）")
 
     # 预警视频录制配置
     ALERT_VIDEO_ENABLED: bool = Field(default=True, description="是否启用预警视频录制")
