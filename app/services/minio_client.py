@@ -18,8 +18,19 @@ logger = logging.getLogger(__name__)
 class MinioClient:
     """MinIO客户端服务类"""
     
+    _instance: Optional['MinioClient'] = None
+    _initialized: bool = False
+    
     def __init__(self):
-        """初始化MinIO客户端"""
+        """初始化MinIO客户端（延迟初始化）"""
+        self.client: Optional[Minio] = None
+        self._bucket_checked: bool = False
+    
+    def _connect(self) -> None:
+        """建立MinIO连接"""
+        if self.client is not None:
+            return
+            
         try:
             self.client = Minio(
                 f"{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}",
@@ -27,18 +38,19 @@ class MinioClient:
                 secret_key=settings.MINIO_SECRET_KEY,
                 secure=settings.MINIO_SECURE
             )
-            
-            # 确保存储桶存在
-            self._ensure_bucket()
-            logger.info(f"MinIO客户端初始化成功: {settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}")
+            logger.info(f"MinIO客户端连接成功: {settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}")
         except Exception as e:
-            logger.error(f"MinIO客户端初始化失败: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"MinIO客户端初始化失败: {str(e)}")
+            logger.error(f"MinIO客户端连接失败: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"MinIO客户端连接失败: {str(e)}")
     
     def _ensure_bucket(self) -> None:
         """确保存储桶存在，如果不存在则创建"""
+        if self._bucket_checked:
+            return
+            
         try:
-            if not self.client.bucket_exists(settings.MINIO_BUCKET):
+            self._connect()
+            if self.client and not self.client.bucket_exists(settings.MINIO_BUCKET):
                 self.client.make_bucket(settings.MINIO_BUCKET)
                 # 设置桶为公共读取权限
                 policy = {
@@ -52,8 +64,10 @@ class MinioClient:
                         }
                     ]
                 }
-                self.client.set_bucket_policy(settings.MINIO_BUCKET, policy)
+                import json
+                self.client.set_bucket_policy(settings.MINIO_BUCKET, json.dumps(policy))
                 logger.info(f"创建存储桶: {settings.MINIO_BUCKET}")
+            self._bucket_checked = True
         except S3Error as err:
             logger.error(f"确保存储桶存在失败: {err}")
             raise HTTPException(status_code=500, detail=f"确保存储桶存在失败: {str(err)}")
@@ -75,6 +89,8 @@ class MinioClient:
             str: 对象名称（不包含前缀）
         """
         try:
+            self._ensure_bucket()
+            
             # 如果提供了前缀，确保它以 / 结尾
             if prefix and not prefix.endswith("/"):
                 prefix = f"{prefix}/"
@@ -111,6 +127,7 @@ class MinioClient:
             str: 临时访问URL
         """
         try:
+            self._ensure_bucket()
             
             object_name = f"{prefix}{object_name}"
 
@@ -149,6 +166,8 @@ class MinioClient:
             bytes: 文件内容
         """
         try:
+            self._ensure_bucket()
+            
             # 获取对象数据
             response = self.client.get_object(
                 bucket_name=settings.MINIO_BUCKET,
@@ -176,6 +195,8 @@ class MinioClient:
             bool: 删除是否成功
         """
         try:
+            self._ensure_bucket()
+            
             self.client.remove_object(
                 bucket_name=settings.MINIO_BUCKET,
                 object_name=object_name
@@ -198,6 +219,8 @@ class MinioClient:
             List[Dict]: 文件信息列表
         """
         try:
+            self._ensure_bucket()
+            
             objects = self.client.list_objects(
                 bucket_name=settings.MINIO_BUCKET,
                 prefix=prefix,
@@ -217,6 +240,14 @@ class MinioClient:
         except S3Error as err:
             logger.error(f"列出文件失败: {err}")
             raise HTTPException(status_code=500, detail=f"列出文件失败: {str(err)}")
-        
-# 创建单例MinIO客户端
+
+
+def get_minio_client() -> MinioClient:
+    """获取MinIO客户端单例"""
+    if not hasattr(get_minio_client, '_instance'):
+        get_minio_client._instance = MinioClient()
+    return get_minio_client._instance
+
+
+# 创建单例MinIO客户端（延迟初始化，首次使用时才连接）
 minio_client = MinioClient() 
