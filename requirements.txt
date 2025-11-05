@@ -37,3 +37,5 @@ av>=15.0.0
 psutil==7.0.0
 # Excel导出支持
 openpyxl==3.1.2
+# Nacos服务注册与发现
+nacos-sdk-python>=1.0.0
