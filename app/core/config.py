@@ -395,32 +395,7 @@ class Settings(BaseSettings):
     REDIS_PORT: int = Field(default=6379, description="Redis端口")
     REDIS_DB: int = Field(default=0, description="Redis数据库编号")
     REDIS_PASSWORD: str = Field(default="", description="Redis密码")
-    
-    # Nacos配置
-    NACOS_ENABLED: bool = Field(default=True, description="是否启用Nacos服务注册")
-    NACOS_SERVER_ADDRESSES: str = Field(default="127.0.0.1:8848", description="Nacos服务器地址")
-    NACOS_NAMESPACE: str = Field(default="", description="Nacos命名空间ID")
-    NACOS_GROUP_NAME: str = Field(default="DEFAULT_GROUP", description="Nacos分组名称")
-    NACOS_SERVICE_NAME: str = Field(default="smart-engine", description="服务名称")
-    NACOS_SERVICE_IP: Optional[str] = Field(default=None, description="服务IP地址（留空自动获取）")
-    NACOS_SERVICE_PORT: Optional[int] = Field(default=None, description="服务端口（留空使用REST_PORT）")
-    NACOS_CLUSTER_NAME: str = Field(default="DEFAULT", description="Nacos集群名称")
-    NACOS_WEIGHT: float = Field(default=1.0, description="服务权重")
-    NACOS_METADATA: Dict[str, str] = Field(
-        default={"version": "1.0.0", "env": "dev"},
-        description="服务元数据"
-    )
-    # Nacos 2.x 认证配置
-    NACOS_USERNAME: str = Field(default="nacos", description="Nacos用户名")
-    NACOS_PASSWORD: str = Field(default="nacos", description="Nacos密码")
-    NACOS_AUTH_ENABLE: bool = Field(default=True, description="是否启用Nacos认证")
-    NACOS_AUTH_TOKEN: str = Field(
-        default="SecretKey012345678901234567890123456789012345678901234567",
-        description="Nacos认证Token（Nacos 2.x必需）"
-    )
-    NACOS_AUTH_IDENTITY_KEY: str = Field(default="nacos", description="Nacos身份标识Key")
-    NACOS_AUTH_IDENTITY_VALUE: str = Field(default="nacos", description="Nacos身份标识Value")
-    NACOS_HEARTBEAT_INTERVAL: int = Field(default=5, description="心跳间隔（秒）")
+
 
     # 预警复判队列配置
     ALERT_REVIEW_MAX_WORKERS: int = Field(default=1, description="复判队列工作者数量")

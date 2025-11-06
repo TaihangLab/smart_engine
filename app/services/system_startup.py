@@ -67,22 +67,13 @@ class SystemStartupService:
                 "startup_order": 0
             },
             {
-                "name": "nacos_registration",
-                "display_name": "Nacos服务注册",
-                "start_func": self._initialize_nacos_registration,
-                "stop_func": self._shutdown_nacos_registration,
-                "enabled": settings.NACOS_ENABLED,
-                "critical": False,
-                "startup_order": 1
-            },
-            {
                 "name": "enterprise_minio_services",
                 "display_name": "企业级MinIO服务集群",
                 "start_func": self._initialize_enterprise_minio_services,
                 "stop_func": self._shutdown_enterprise_minio_services,
                 "enabled": True,
                 "critical": False,
-                "startup_order": 2
+                "startup_order": 1
             },
             {
                 "name": "unified_compensation",
@@ -91,7 +82,7 @@ class SystemStartupService:
                 "stop_func": stop_unified_compensation,
                 "enabled": settings.COMPENSATION_AUTO_START,
                 "critical": True,
-                "startup_order": 3
+                "startup_order": 2
             }
         ]
         
@@ -226,43 +217,6 @@ class SystemStartupService:
         except Exception as e:
             logger.error(f"💥 系统核心初始化失败: {str(e)}", exc_info=True)
             raise
-
-    async def _initialize_nacos_registration(self):
-        """初始化Nacos服务注册"""
-        logger.info("🚀 开始初始化Nacos服务注册...")
-        
-        try:
-            from app.services.nacos_client import nacos_client
-            
-            # 初始化Nacos客户端
-            if nacos_client.initialize():
-                # 注册服务到Nacos
-                if nacos_client.register_service():
-                    logger.info("✅ 服务已成功注册到Nacos")
-                else:
-                    logger.warning("⚠️ 服务注册到Nacos失败")
-            else:
-                logger.warning("⚠️ Nacos客户端初始化失败")
-                
-        except Exception as e:
-            logger.error(f"❌ Nacos服务注册初始化失败: {str(e)}", exc_info=True)
-            # Nacos不是关键服务，失败不影响系统启动
-
-    async def _shutdown_nacos_registration(self):
-        """关闭Nacos服务注册"""
-        logger.info("⏹️ 开始关闭Nacos服务注册...")
-        
-        try:
-            from app.services.nacos_client import nacos_client
-            
-            # 注销服务
-            if nacos_client.deregister_service():
-                logger.info("✅ 服务已从Nacos注销")
-            else:
-                logger.warning("⚠️ 服务从Nacos注销失败")
-                
-        except Exception as e:
-            logger.error(f"❌ Nacos服务注销失败: {str(e)}")
 
     async def _initialize_enterprise_minio_services(self):
         """初始化企业级MinIO服务集群"""
