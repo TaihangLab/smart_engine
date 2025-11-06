@@ -398,8 +398,8 @@ class Settings(BaseSettings):
     
     # Nacos配置
     NACOS_ENABLED: bool = Field(default=True, description="是否启用Nacos服务注册")
-    NACOS_SERVER_ADDRESSES: str = Field(default="127.0.0.1:8848", description="Nacos服务器地址")
-    NACOS_NAMESPACE: str = Field(default="", description="Nacos命名空间ID")
+    NACOS_SERVER_ADDRESSES: str = Field(default="172.16.201.80:8848", description="Nacos服务器地址")
+    NACOS_NAMESPACE: str = Field(default="dev", description="Nacos命名空间ID")
     NACOS_GROUP_NAME: str = Field(default="DEFAULT_GROUP", description="Nacos分组名称")
     NACOS_SERVICE_NAME: str = Field(default="smart-engine", description="服务名称")
     NACOS_SERVICE_IP: Optional[str] = Field(default=None, description="服务IP地址（留空自动获取）")
