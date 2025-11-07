@@ -365,7 +365,7 @@ class Settings(BaseSettings):
     PRIMARY_LLM_PROVIDER: str = Field(default="ollama", description="主要LLM提供商")
     PRIMARY_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="主要LLM服务器地址（OpenAI兼容API）")
     PRIMARY_LLM_API_KEY: str = Field(default="ollama", description="主要LLM API密钥（Ollama不需要密钥）")
-    PRIMARY_LLM_MODEL: str = Field(default="llava:latest", description="主要LLM模型名称")
+    PRIMARY_LLM_MODEL: str = Field(default="qwen2.5vl:72b", description="主要LLM模型名称")
 
     # 备用LLM服务配置（容错机制）- 同样使用Ollama的另一个模型
     BACKUP_LLM_PROVIDER: str = Field(default="ollama", description="备用LLM提供商")
