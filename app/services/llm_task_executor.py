@@ -22,6 +22,7 @@ from app.models.llm_skill import LLMSkillClass
 from app.models.llm_task import LLMTask
 from app.services.adaptive_frame_reader import AdaptiveFrameReader
 from app.services.alert_service import alert_service
+from app.services.alert_merge_manager import alert_merge_manager
 from app.services.camera_service import CameraService
 from app.services.llm_service import llm_service
 from app.services.minio_client import minio_client
@@ -83,6 +84,13 @@ class LLMTaskProcessor:
         
         if self.execution_thread and self.execution_thread.is_alive():
             self.execution_thread.join(timeout=5.0)
+        
+        # 清理预警合并管理器中的任务资源
+        try:
+            alert_merge_manager.cleanup_task_resources(self.task_id)
+            logger.info(f"已清理LLM任务 {self.task_id} 的预警合并资源")
+        except Exception as e:
+            logger.error(f"清理LLM任务 {self.task_id} 预警合并资源失败: {str(e)}")
             
         logger.info(f"LLM任务 {self.task_id} 处理器已停止")
     
@@ -460,16 +468,21 @@ class LLMTaskProcessor:
                 "skill_name_zh": skill_name_zh,
                 "electronic_fence": None,  # LLM技能不使用电子围栏
                 "minio_frame_object_name": minio_frame_object_name,  # 传递object_name而不是URL
-                "minio_video_object_name": "",  # LLM技能不生成视频
+                "minio_video_object_name": "",  # LLM预警不需要视频
                 "result": [{"name": "LLM分析", "analysis": analysis_result}],  # 简化的LLM分析结果
             }
             
-            # 发送预警到RabbitMQ（与AI任务保持一致）
-            success = rabbitmq_client.publish_alert(complete_alert)
+            # 🚀 使用预警合并管理器 - LLM预警不传递frame_bytes,不生成视频
+            success = alert_merge_manager.add_alert(
+                alert_data=complete_alert,
+                image_object_name=minio_frame_object_name,
+                frame_bytes=None  # LLM预警不需要视频,传递None
+            )
+            
             if success:
-                logger.info(f"LLM任务 {self.task_id} 预警已发送: {alert_description}")
+                logger.info(f"✅ LLM任务 {self.task_id} 预警已添加到合并管理器: {alert_description}")
             else:
-                logger.error(f"LLM任务 {self.task_id} 预警发送失败: {alert_description}")
+                logger.error(f"❌ LLM任务 {self.task_id} 添加预警到合并管理器失败: {alert_description}")
             
         except Exception as e:
             logger.error(f"LLM任务 {self.task_id} 生成预警异常: {str(e)}", exc_info=True)
