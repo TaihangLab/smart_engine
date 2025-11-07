@@ -43,6 +43,7 @@ async def health_check():
         db.close()
     except Exception:
         checks["database"] = False
+
     
     # 确定整体状态
     critical_services = ["triton_server", "database"]

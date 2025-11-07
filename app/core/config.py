@@ -396,6 +396,7 @@ class Settings(BaseSettings):
     REDIS_DB: int = Field(default=0, description="Redis数据库编号")
     REDIS_PASSWORD: str = Field(default="", description="Redis密码")
 
+
     # 预警复判队列配置
     ALERT_REVIEW_MAX_WORKERS: int = Field(default=1, description="复判队列工作者数量")
     ALERT_REVIEW_PROCESSING_TIMEOUT: int = Field(default=300, description="复判任务处理超时时间（秒）")

@@ -137,12 +137,17 @@ class EnterpriseMinIOClient:
     """企业级MinIO客户端"""
     
     def __init__(self):
-        """初始化企业级MinIO客户端"""
-        self._init_client()
+        """初始化企业级MinIO客户端（延迟连接）"""
         self._init_components()
+        self.client: Optional[Minio] = None
+        self._client_initialized = False
+        self._bucket_checked = False
         
     def _init_client(self):
-        """初始化MinIO客户端"""
+        """初始化MinIO客户端（延迟连接）"""
+        if self._client_initialized:
+            return
+            
         try:
             self.client = Minio(
                 f"{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}",
@@ -151,11 +156,18 @@ class EnterpriseMinIOClient:
                 secure=settings.MINIO_SECURE
             )
             
-            # 确保存储桶存在
-            self._ensure_bucket()
-            logger.info(f"✅ 企业级MinIO客户端初始化成功: {settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}")
+            self._client_initialized = True
+            logger.info(f"✅ 企业级MinIO客户端连接成功: {settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}")
+            
+            # 更新连接状态
+            self._connection_status["is_connected"] = True
+            self._connection_status["last_connection_time"] = datetime.now()
+            self._connection_status["total_connection_attempts"] += 1
+            
         except Exception as e:
-            logger.error(f"❌ 企业级MinIO客户端初始化失败: {str(e)}")
+            logger.error(f"❌ 企业级MinIO客户端连接失败: {str(e)}")
+            self._connection_status["is_connected"] = False
+            self._connection_status["last_disconnection_time"] = datetime.now()
             raise
     
     def _init_components(self):
@@ -168,14 +180,14 @@ class EnterpriseMinIOClient:
         
         # 初始化连接状态跟踪
         self._connection_status = {
-            "is_connected": True,
-            "last_connection_time": datetime.now(),
+            "is_connected": False,  # 初始未连接
+            "last_connection_time": None,
             "last_disconnection_time": None,
             "consecutive_failures": 0,
             "consecutive_successes": 0,
-            "total_connection_attempts": 1,
+            "total_connection_attempts": 0,
             "uptime_seconds": 0.0,
-            "connection_stability": "stable"
+            "connection_stability": "unknown"
         }
         
         # 启动健康监控线程
@@ -186,12 +198,22 @@ class EnterpriseMinIOClient:
         )
         self._health_monitor_thread.start()
     
+    def _ensure_connection(self):
+        """确保MinIO连接已建立"""
+        if not self._client_initialized:
+            self._init_client()
+    
     def _ensure_bucket(self):
         """确保存储桶存在"""
+        if self._bucket_checked:
+            return
+            
         try:
-            if not self.client.bucket_exists(settings.MINIO_BUCKET):
+            self._ensure_connection()
+            if self.client and not self.client.bucket_exists(settings.MINIO_BUCKET):
                 self.client.make_bucket(settings.MINIO_BUCKET)
                 logger.info(f"✅ 创建存储桶: {settings.MINIO_BUCKET}")
+            self._bucket_checked = True
         except Exception as e:
             logger.error(f"❌ 确保存储桶存在失败: {str(e)}")
             raise
@@ -308,6 +330,8 @@ class EnterpriseMinIOClient:
                                content_type: str = "application/octet-stream",
                                prefix: str = "") -> str:
         """企业级上传字节数据（带重试机制）"""
+        self._ensure_bucket()
+        
         def _upload_operation():
             # 如果提供了前缀，确保它以 / 结尾
             if prefix and not prefix.endswith("/"):
@@ -337,6 +361,9 @@ class EnterpriseMinIOClient:
         try:
             start_time = time.time()
             
+            # 尝试连接（如果未连接）
+            self._ensure_connection()
+            
             # 简单的健康检查：列出存储桶
             self.client.bucket_exists(settings.MINIO_BUCKET)
             
@@ -344,6 +371,7 @@ class EnterpriseMinIOClient:
             
             return {
                 "status": "healthy",
+                "healthy": True,
                 "response_time_ms": response_time * 1000,
                 "endpoint": f"{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}",
                 "bucket": settings.MINIO_BUCKET,
@@ -353,6 +381,7 @@ class EnterpriseMinIOClient:
         except Exception as e:
             return {
                 "status": "unhealthy",
+                "healthy": False,
                 "error": str(e),
                 "endpoint": f"{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}",
                 "timestamp": datetime.now().isoformat()
@@ -421,6 +450,8 @@ class EnterpriseMinIOClient:
     
     def get_presigned_url(self, bucket_name: str, prefix: str, object_name: str, expires: int = 3600) -> str:
         """获取预签名URL（兼容性接口）"""
+        self._ensure_bucket()
+        
         def _get_url_operation():
             full_object_name = f"{prefix}{object_name}"
             return self.client.presigned_get_object(
@@ -438,6 +469,8 @@ class EnterpriseMinIOClient:
     
     def download_file(self, object_name: str) -> bytes:
         """下载文件（兼容性接口）"""
+        self._ensure_bucket()
+        
         def _download_operation():
             response = self.client.get_object(
                 bucket_name=settings.MINIO_BUCKET,
@@ -452,6 +485,8 @@ class EnterpriseMinIOClient:
     
     def delete_file(self, object_name: str) -> bool:
         """删除文件（兼容性接口）"""
+        self._ensure_bucket()
+        
         def _delete_operation():
             self.client.remove_object(
                 bucket_name=settings.MINIO_BUCKET,
@@ -466,6 +501,8 @@ class EnterpriseMinIOClient:
     
     def list_files(self, prefix: str = "", recursive: bool = True) -> List[Dict[str, Any]]:
         """列出文件（兼容性接口）"""
+        self._ensure_bucket()
+        
         def _list_operation():
             objects = self.client.list_objects(
                 bucket_name=settings.MINIO_BUCKET,

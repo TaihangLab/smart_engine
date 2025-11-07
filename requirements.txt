@@ -35,5 +35,3 @@ cryptography
 # PyAV - 高稳定性RTSP推流
 av>=15.0.0
 psutil==7.0.0
-# Excel导出支持
-openpyxl==3.1.2

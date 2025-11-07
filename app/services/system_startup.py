@@ -241,14 +241,19 @@ class SystemStartupService:
             minio_fallback_storage.start()
             logger.info("✅ MinIO降级存储服务已启动")
             
-            # 4. 企业级MinIO客户端已自动初始化
+            # 4. 企业级MinIO客户端已自动初始化（延迟连接，首次使用时才连接）
             logger.info("🏢 验证企业级MinIO客户端...")
             from app.services.enterprise_minio_client import enterprise_minio_client
-            health_status = enterprise_minio_client.health_check()
-            if health_status.get("healthy", False):
-                logger.info("✅ 企业级MinIO客户端健康状态良好")
-            else:
-                logger.warning("⚠️ 企业级MinIO客户端健康检查有警告")
+            try:
+                health_status = enterprise_minio_client.health_check()
+                if health_status.get("healthy", False):
+                    logger.info("✅ 企业级MinIO客户端健康状态良好")
+                else:
+                    logger.warning(f"⚠️ 企业级MinIO客户端暂时不可用: {health_status.get('error', '未知错误')}")
+                    logger.info("💡 MinIO服务将在首次使用时自动尝试连接")
+            except Exception as e:
+                logger.warning(f"⚠️ 企业级MinIO客户端初始化检查失败: {str(e)}")
+                logger.info("💡 MinIO服务将在首次使用时自动尝试连接")
             
             # 5. MinIO上传编排器无需手动启动（单例模式）
             logger.info("🎯 验证MinIO上传编排器...")
