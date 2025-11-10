@@ -29,17 +29,21 @@ class AITask(Base):
     skill_class_id = Column(Integer, ForeignKey("skill_classes.id"), nullable=False)  # 技能类ID
     skill_config = Column(JSON)  # 技能在此任务中的特定配置
     
-    # 复判配置
-    review_enabled = Column(Boolean, default=False)  # 是否启用复判
-    review_skill_class_id = Column(Integer, ForeignKey("review_skill_classes.id"), nullable=True)  # 复判技能类ID
-    review_confidence_threshold = Column(Integer, default=80)  # 复判置信度阈值（0-100）
-    review_conditions = Column(JSON, nullable=True)  # 复判触发条件，如特定预警等级、类型等
+    # ==================== 废弃字段（已迁移到 TaskReviewConfig 表）====================
+    # 以下字段已废弃，复判配置现在统一使用 task_review_configs 表
+    # 保留这些字段只是为了避免数据库迁移，实际不再使用
+    review_enabled = Column(Boolean, default=False)  # [废弃] 是否启用复判
+    review_skill_class_id = Column(Integer, ForeignKey("review_skill_classes.id"), nullable=True)  # [废弃] 复判技能类ID
+    review_confidence_threshold = Column(Integer, default=80)  # [废弃] 复判置信度阈值（0-100）
+    review_conditions = Column(JSON, nullable=True)  # [废弃] 复判触发条件
+    # =============================================================================
     
     created_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
     updated_at = Column(DateTime, default=lambda: datetime.now(tz=timezone(timedelta(hours=8))), onupdate=lambda: datetime.now(tz=timezone(timedelta(hours=8))))
 
     # 关系对象
     skill_class = relationship("SkillClass")
+    # review_skill_class 关系已废弃，但为了 SQLAlchemy 映射完整性需要保留
     review_skill_class = relationship("ReviewSkillClass", foreign_keys=[review_skill_class_id])
 
     def __repr__(self):
