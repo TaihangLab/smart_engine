@@ -394,13 +394,13 @@ class AlertMergeManager:
         # 如果预警合并功能被禁用，直接发送预警
         if not self.merge_enabled:
             logger.info("预警合并功能已禁用，直接发送预警")
-            return self._send_immediate_alert(alert_data)
+            return self._send_immediate_alert(alert_data, frame_bytes)
         
         # 🚨 检查是否为需要立即发送的高优先级预警
         alert_level = alert_data.get("alert_level", 4)
         if alert_level in self.immediate_levels:
             logger.info(f"检测到{alert_level}级紧急预警，立即发送（不合并）")
-            return self._send_immediate_alert(alert_data)
+            return self._send_immediate_alert(alert_data, frame_bytes)
         try:
             # 生成预警唯一键
             alert_key = self._generate_alert_key(alert_data)
@@ -603,6 +603,27 @@ class AlertMergeManager:
             
             # 构建最终预警信息
             final_alert = base_alert_data.copy()
+            
+            # 将图片数据缓存到 Redis（用于复判，5分钟过期）
+            image_cache_key = None
+            if merged_alert.alert_instances and merged_alert.alert_instances[0].frame_data:
+                try:
+                    from app.services.redis_client import redis_client
+                    alert_id = base_alert_data.get("alert_id", "")
+                    task_id = base_alert_data.get("task_id", "")
+                    timestamp = int(merged_alert.first_timestamp)
+                    image_cache_key = f"alert_image:{task_id}_{alert_id}_{timestamp}"
+                    
+                    # 缓存图片数据，5分钟过期（足够复判使用）
+                    redis_client.setex_bytes(
+                        image_cache_key,
+                        300,  # 5分钟
+                        merged_alert.alert_instances[0].frame_data
+                    )
+                    logger.debug(f"图片已缓存到 Redis: {image_cache_key}")
+                except Exception as e:
+                    logger.warning(f"缓存图片到 Redis 失败: {str(e)}")
+            
             final_alert.update({
                 # 合并信息
                 "alert_count": merged_alert.alert_count,
@@ -616,6 +637,7 @@ class AlertMergeManager:
                 
                 # 使用第一个图片作为主图片
                 "minio_frame_object_name": merged_alert.alert_instances[0].image_object_name if merged_alert.alert_instances else "",
+                "image_cache_key": image_cache_key,  # Redis 缓存 key，用于复判
                 
                 # 更新描述
                 "alert_description": self._generate_merged_description(base_alert_data, merged_alert)
@@ -687,7 +709,7 @@ class AlertMergeManager:
         except Exception as e:
             logger.error(f"清理任务 {task_id} 资源失败: {str(e)}")
     
-    def _send_immediate_alert(self, alert_data: Dict[str, Any]) -> bool:
+    def _send_immediate_alert(self, alert_data: Dict[str, Any], frame_bytes: Optional[bytes] = None) -> bool:
         """直接发送预警（不进行合并）- 支持异步视频生成"""
         try:
             # 🎬 为1级预警预生成视频文件名和路径
@@ -698,10 +720,24 @@ class AlertMergeManager:
             timestamp_str = datetime.fromtimestamp(timestamp).strftime("%Y%m%d_%H%M%S")
             expected_video_filename = f"alert_video_{task_id}_{timestamp_str}.mp4"
             
-            # 构建预期的MinIO对象名（只返回文件名，不包含前缀）
+            # 构建预期的MinIO对象名（只返回文件名，保持与upload_bytes一致）
             from app.core.config import settings
             minio_prefix = f"{settings.MINIO_ALERT_VIDEO_PREFIX}{task_id}"
             expected_video_object_name = expected_video_filename  # 只使用文件名，保持与upload_bytes一致
+            
+            # 🖼️ 将图片数据缓存到 Redis（用于复判，5分钟过期）
+            image_cache_key = None
+            if frame_bytes:
+                try:
+                    from app.services.redis_client import redis_client
+                    alert_id = alert_data.get("alert_id", "")
+                    image_cache_key = f"alert_image:{task_id}_{alert_id}_{int(timestamp)}"
+                    
+                    # 缓存图片数据，5分钟过期
+                    redis_client.setex_bytes(image_cache_key, 300, frame_bytes)
+                    logger.debug(f"紧急预警图片已缓存到 Redis: {image_cache_key}")
+                except Exception as e:
+                    logger.warning(f"缓存紧急预警图片到 Redis 失败: {str(e)}")
             
             # 立即发送预警，包含预期的视频地址
             immediate_alert = alert_data.copy()
@@ -717,7 +753,8 @@ class AlertMergeManager:
                     "timestamp": datetime.fromtimestamp(timestamp).isoformat(),
                     "object_name": alert_data.get("minio_frame_object_name", ""),
                     "relative_time": 0.0
-                }]
+                }],
+                "image_cache_key": image_cache_key  # Redis 缓存 key，用于复判
             })
             
             # 🚀 立即发送预警（不等待视频）
@@ -923,13 +960,20 @@ class AlertMergeManager:
                     logger.warning(f"AI任务不存在: {task_id}")
                     return
                 
+                # 查询复判配置（使用新的配置表）
+                from app.models.task_review_config import TaskReviewConfig
+                review_config = db.query(TaskReviewConfig).filter(
+                    TaskReviewConfig.task_type == "ai_task",
+                    TaskReviewConfig.task_id == task_id
+                ).first()
+                
                 # 检查是否启用复判
-                if not ai_task.review_enabled:
+                if not review_config or not review_config.review_enabled:
                     logger.debug(f"任务 {task_id} 未启用复判功能")
                     return
                 
                 # 检查是否配置了复判技能
-                if not ai_task.review_llm_skill_class_id:
+                if not review_config.review_skill_class_id:
                     logger.warning(f"任务 {task_id} 启用了复判但未配置复判技能")
                     return
                 
@@ -940,7 +984,7 @@ class AlertMergeManager:
                 
                 # 调用复判服务
                 logger.info(f"✅ 任务 {task_id} 满足复判条件，开始执行复判")
-                self._trigger_llm_review(alert_data, ai_task)
+                self._trigger_llm_review(alert_data, ai_task, review_config)
                 
             finally:
                 db.close()
@@ -950,91 +994,36 @@ class AlertMergeManager:
     
     def _check_review_conditions_for_alert(self, alert_data: Dict[str, Any], ai_task: AITask) -> bool:
         """
-        检查预警是否满足复判条件
+        检查预警是否满足复判条件（全新设计：不再使用任务级别的复判条件）
+        
+        复判技能本身会判断是否为误报，不需要预先过滤。
+        所有预警都应该提交给复判技能进行判断。
         
         Args:
             alert_data: 预警数据
             ai_task: AI任务对象
             
         Returns:
-            是否满足复判条件
+            是否满足复判条件（始终返回 True）
         """
-        try:
-            conditions = ai_task.review_conditions
-            if not conditions:
-                return True  # 没有条件限制，默认都复判
+        # 不再使用任务级别的复判条件
+        # 复判技能自己会判断是否为误报
+        return True
             
-            # 检查预警等级
-            if "alert_levels" in conditions:
-                alert_level = alert_data.get("alert_level", 4)
-                if alert_level not in conditions["alert_levels"]:
-                    logger.debug(f"预警等级 {alert_level} 不在复判条件中")
-                    return False
-            
-            # 检查预警类型
-            if "alert_types" in conditions:
-                alert_type = alert_data.get("alert_type", "")
-                if alert_type not in conditions["alert_types"]:
-                    logger.debug(f"预警类型 {alert_type} 不在复判条件中")
-                    return False
-            
-            # 检查摄像头ID
-            if "camera_ids" in conditions:
-                camera_id = alert_data.get("camera_id")
-                if camera_id not in conditions["camera_ids"]:
-                    logger.debug(f"摄像头 {camera_id} 不在复判条件中")
-                    return False
-            
-            # 检查时间范围（如果有）
-            if "time_range" in conditions:
-                from datetime import datetime
-                time_range = conditions["time_range"]
-                
-                # 使用预警时间或当前时间
-                alert_time_str = alert_data.get("alert_time")
-                if alert_time_str:
-                    alert_time = datetime.fromisoformat(alert_time_str.replace('Z', '+00:00')).time()
-                else:
-                    alert_time = datetime.now().time()
-                
-                start_time = datetime.strptime(time_range["start"], "%H:%M").time()
-                end_time = datetime.strptime(time_range["end"], "%H:%M").time()
-                
-                if not (start_time <= alert_time <= end_time):
-                    logger.debug(f"预警时间 {alert_time} 不在复判时间范围内")
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"检查复判条件失败: {str(e)}")
-            return False
-    
-    def _trigger_llm_review(self, alert_data: Dict[str, Any], ai_task: AITask):
+    def _trigger_llm_review(self, alert_data: Dict[str, Any], ai_task: AITask, review_config):
         """
         触发LLM复判（使用队列服务）
         
         Args:
             alert_data: 预警数据
             ai_task: AI任务对象
+            review_config: 复判配置对象（TaskReviewConfig）
         """
         try:
             from app.services.alert_review_queue_service import alert_review_queue_service
             
-            # 调用队列服务添加复判任务
-            import asyncio
-            
-            # 创建新的事件循环（因为在线程中）
-            try:
-                loop = asyncio.get_event_loop()
-            except RuntimeError:
-                loop = asyncio.new_event_loop()
-                asyncio.set_event_loop(loop)
-            
-            # 将复判任务加入队列
-            success = loop.run_until_complete(
-                alert_review_queue_service.enqueue_review_task(alert_data, ai_task)
-            )
+            # 调用队列服务添加复判任务（同步调用）
+            success = alert_review_queue_service.enqueue_review_task(alert_data, ai_task, review_config.review_skill_class_id)
             
             if success:
                 logger.info(f"🎯 任务 {ai_task.id} 的预警复判任务已加入队列")

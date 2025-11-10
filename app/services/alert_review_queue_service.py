@@ -88,13 +88,14 @@ class AlertReviewQueueService:
         self.worker_threads.clear()
         self.logger.info("预警复判队列服务已停止")
     
-    def enqueue_review_task(self, alert_data: Dict[str, Any], ai_task: AITask) -> bool:
+    def enqueue_review_task(self, alert_data: Dict[str, Any], ai_task: AITask, review_skill_class_id: int) -> bool:
         """
         将复判任务加入队列
         
         Args:
             alert_data: 预警数据
             ai_task: AI任务对象
+            review_skill_class_id: 复判技能类ID（来自 TaskReviewConfig）
             
         Returns:
             是否成功加入队列
@@ -112,10 +113,8 @@ class AlertReviewQueueService:
             review_task = {
                 "task_id": task_id,
                 "ai_task_id": ai_task.id,
-                "llm_skill_class_id": ai_task.review_llm_skill_class_id,
+                "llm_skill_class_id": review_skill_class_id,
                 "alert_data": alert_data,
-                "confidence_threshold": ai_task.review_confidence_threshold or 80,
-                "review_conditions": ai_task.review_conditions,
                 "created_at": datetime.now().isoformat(),
                 "attempts": 0,
                 "max_attempts": self.retry_max_attempts
@@ -168,7 +167,17 @@ class AlertReviewQueueService:
             for task_data in processing_tasks:
                 try:
                     task = json.loads(task_data)
-                    processing_time = datetime.fromisoformat(task.get("processing_started_at", ""))
+                    
+                    # 获取处理开始时间
+                    processing_started_at = task.get("processing_started_at")
+                    if not processing_started_at:
+                        # 如果没有开始时间，说明任务可能损坏，移回主队列
+                        self.redis_client.lrem(self.processing_queue_key, 1, task_data)
+                        self.redis_client.lpush(self.review_queue_key, task_data)
+                        recovered_count += 1
+                        continue
+                    
+                    processing_time = datetime.fromisoformat(processing_started_at)
                     
                     # 检查是否超时
                     if (current_time - processing_time).total_seconds() > self.processing_timeout:
@@ -178,7 +187,7 @@ class AlertReviewQueueService:
                         recovered_count += 1
                         
                 except Exception as e:
-                    self.logger.warning(f"恢复中断任务失败: {str(e)}")
+                    self.logger.warning(f"恢复中断任务失败: {str(e)}, 任务数据: {task_data[:100] if task_data else 'None'}")
             
             if recovered_count > 0:
                 self.logger.info(f"已恢复 {recovered_count} 个中断的复判任务")
@@ -235,7 +244,6 @@ class AlertReviewQueueService:
                 "task_id": task["ai_task_id"],
                 "llm_skill_class_id": task["llm_skill_class_id"],
                 "alert_data": task["alert_data"],
-                "confidence_threshold": task["confidence_threshold"],
                 "review_type": "auto_queue",
                 "trigger_source": "alert_review_queue"
             }
