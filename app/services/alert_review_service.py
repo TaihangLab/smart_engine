@@ -344,7 +344,7 @@ class AlertReviewService:
         alert_data: Dict[str, Any], 
         review_result: str, 
         llm_result: LLMServiceResult
-    ):
+    ) -> bool:
         """
         处理预警数据的复判结果
         
@@ -352,18 +352,27 @@ class AlertReviewService:
             alert_data: 预警数据字典
             review_result: 复判结果
             llm_result: LLM调用结果
+            
+        Returns:
+            处理是否成功
         """
         try:
-            # 如果判断为误报，调用其他人员开发的接口标记为复判
             if review_result == "rejected":
-                await self._mark_alert_data_as_false_positive(alert_data, llm_result)
+                # 判断为误报，标记预警
+                success = await self._mark_alert_data_as_false_positive(alert_data, llm_result)
+                return success
+                
             elif review_result == "confirmed":
                 self.logger.info(f"预警 (task_id={alert_data.get('task_id')}) 被确认为真实预警")
+                return True
+                
             else:
                 self.logger.info(f"预警 (task_id={alert_data.get('task_id')}) 复判结果不确定，需要人工审核")
+                return True  # 不确定的结果也视为"处理成功"，只是不采取行动
                 
         except Exception as e:
-            self.logger.error(f"处理预警数据复判结果失败: {str(e)}")
+            self.logger.error(f"处理预警数据复判结果失败: {str(e)}", exc_info=True)
+            return False
     
     def _update_alert_as_false_positive(
         self, 
@@ -438,7 +447,7 @@ class AlertReviewService:
             self.logger.error(f"❌ 标记预警 {alert.alert_id} 为误报失败: {str(e)}", exc_info=True)
             return False
     
-    async def _mark_alert_data_as_false_positive(self, alert_data: Dict[str, Any], llm_result: LLMServiceResult):
+    async def _mark_alert_data_as_false_positive(self, alert_data: Dict[str, Any], llm_result: LLMServiceResult) -> bool:
         """
         标记预警数据为误报（用于预警数据字典）
         
@@ -448,9 +457,12 @@ class AlertReviewService:
         Args:
             alert_data: 预警数据字典
             llm_result: LLM调用结果
+            
+        Returns:
+            是否成功标记为误报
         """
-        db = None
         try:
+            # 获取数据库会话（使用上下文管理，自动清理）
             db = next(get_db())
             
             # 提取复判摘要
@@ -459,13 +471,7 @@ class AlertReviewService:
             # 尝试根据预警信息查找数据库中的预警记录
             alert = self._find_alert_from_data(db, alert_data)
             
-            # 如果找到了对应的预警记录，则更新它
-            if alert:
-                self.logger.info(f"找到对应的预警记录: alert_id={alert.alert_id}，开始标记为误报")
-                
-                # 调用核心逻辑
-                self._update_alert_as_false_positive(db, alert, review_summary)
-            else:
+            if not alert:
                 # 如果没有找到对应的预警记录，可能是预警还未保存到数据库
                 task_id = alert_data.get("task_id")
                 camera_id = alert_data.get("camera_id")
@@ -474,12 +480,24 @@ class AlertReviewService:
                     f"复判结果为误报，但无法立即更新数据库。复判摘要: {review_summary}"
                 )
                 # TODO: 可以考虑将复判结果缓存到 Redis，在预警保存时检查并应用
+                return False
+            
+            # 找到了对应的预警记录，开始标记为误报
+            self.logger.info(f"找到对应的预警记录: alert_id={alert.alert_id}，开始标记为误报")
+            
+            # 调用核心逻辑并返回结果
+            success = self._update_alert_as_false_positive(db, alert, review_summary)
+            
+            if success:
+                self.logger.info(f"✅ 预警数据成功标记为误报: task_id={alert_data.get('task_id')}")
+            else:
+                self.logger.error(f"❌ 预警数据标记为误报失败: task_id={alert_data.get('task_id')}")
+            
+            return success
             
         except Exception as e:
-            self.logger.error(f"❌ 处理预警数据误报标记失败: {str(e)}", exc_info=True)
-        finally:
-            if db:
-                db.close()
+            self.logger.error(f"❌ 处理预警数据误报标记时发生异常: {str(e)}", exc_info=True)
+            return False
     
     def _find_alert_from_data(self, db: Session, alert_data: Dict[str, Any]) -> Optional[Alert]:
         """
