@@ -1,3 +1,4 @@
+# noinspection PyUnreachableCode
 import logging
 import asyncio
 from typing import Dict, Any, Optional, List
@@ -462,7 +463,7 @@ class AlertReviewService:
             是否成功标记为误报
         """
         try:
-            # 获取数据库会话（使用上下文管理，自动清理）
+            # 获取数据库会话
             db = next(get_db())
             
             # 提取复判摘要
@@ -471,8 +472,8 @@ class AlertReviewService:
             # 尝试根据预警信息查找数据库中的预警记录
             alert = self._find_alert_from_data(db, alert_data)
             
-            if not alert:
-                # 如果没有找到对应的预警记录，可能是预警还未保存到数据库
+            # 如果没有找到对应的预警记录，可能是预警还未保存到数据库
+            if alert is None:
                 task_id = alert_data.get("task_id")
                 camera_id = alert_data.get("camera_id")
                 self.logger.warning(
@@ -485,15 +486,17 @@ class AlertReviewService:
             # 找到了对应的预警记录，开始标记为误报
             self.logger.info(f"找到对应的预警记录: alert_id={alert.alert_id}，开始标记为误报")
             
-            # 调用核心逻辑并返回结果
-            success = self._update_alert_as_false_positive(db, alert, review_summary)
+            # 调用核心逻辑标记为误报
+            result = self._update_alert_as_false_positive(db, alert, review_summary)
             
-            if success:
-                self.logger.info(f"✅ 预警数据成功标记为误报: task_id={alert_data.get('task_id')}")
+            # 记录操作结果
+            task_id = alert_data.get('task_id')
+            if result:
+                self.logger.info(f"✅ 预警数据成功标记为误报: task_id={task_id}")
             else:
-                self.logger.error(f"❌ 预警数据标记为误报失败: task_id={alert_data.get('task_id')}")
+                self.logger.error(f"❌ 预警数据标记为误报失败: task_id={task_id}")
             
-            return success
+            return result
             
         except Exception as e:
             self.logger.error(f"❌ 处理预警数据误报标记时发生异常: {str(e)}", exc_info=True)
@@ -511,21 +514,30 @@ class AlertReviewService:
             找到的Alert对象，未找到返回None
         """
         try:
+            # 提取必要字段
             task_id = alert_data.get("task_id")
             camera_id = alert_data.get("camera_id")
             alert_time_str = alert_data.get("alert_time")
             
-            if not all([task_id, camera_id, alert_time_str]):
-                self.logger.warning(f"预警数据缺少必要字段: task_id={task_id}, camera_id={camera_id}, alert_time={alert_time_str}")
+            # 验证必要字段是否存在
+            if not task_id or not camera_id or not alert_time_str:
+                self.logger.warning(
+                    f"预警数据缺少必要字段: task_id={task_id}, "
+                    f"camera_id={camera_id}, alert_time={alert_time_str}"
+                )
                 return None
             
-            # 尝试解析时间
+            # 解析预警时间
+            alert_time: datetime
             if isinstance(alert_time_str, str):
                 alert_time = datetime.fromisoformat(alert_time_str.replace('Z', '+00:00'))
-            else:
+            elif isinstance(alert_time_str, datetime):
                 alert_time = alert_time_str
+            else:
+                self.logger.warning(f"预警时间格式不正确: {type(alert_time_str)}")
+                return None
             
-            # 查找最近时间范围内的预警（允许5秒误差）
+            # 查找最近时间范围内的预警（允许±5秒误差）
             from datetime import timedelta
             time_window = timedelta(seconds=5)
             
@@ -536,10 +548,18 @@ class AlertReviewService:
                 Alert.alert_time <= alert_time + time_window
             ).order_by(Alert.created_at.desc()).first()
             
+            if alert:
+                self.logger.debug(f"找到预警记录: alert_id={alert.alert_id}")
+            else:
+                self.logger.debug(
+                    f"未找到预警记录: task_id={task_id}, camera_id={camera_id}, "
+                    f"alert_time={alert_time}"
+                )
+            
             return alert
             
         except Exception as e:
-            self.logger.warning(f"查找预警记录时出错: {str(e)}")
+            self.logger.warning(f"查找预警记录时出错: {str(e)}", exc_info=True)
             return None
     
     def _extract_summary(self, llm_result: LLMServiceResult) -> str:
