@@ -343,7 +343,8 @@ def start_stream(
     Returns:
         StreamStatusResponse: 推流状态信息
     """
-    video = db.query(LocalVideo).filter(LocalVideo.id == video_id).first()
+    # 使用行锁防止并发启动同一个视频的推流
+    video = db.query(LocalVideo).filter(LocalVideo.id == video_id).with_for_update().first()
     if not video:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -357,10 +358,12 @@ def start_stream(
             detail=f"视频文件不存在: {video.file_path}"
         )
     
-    # 如果已在推流，返回当前状态
+    # 如果已在推流，检查状态并返回
     if video.is_streaming:
         status_info = local_video_stream_manager.get_stream_status(video.stream_id)
         if status_info:
+            # 已经在推流中，返回当前状态（防止重复启动）
+            logger.warning(f"视频已在推流中: {video.name} (stream_id: {video.stream_id})")
             # 移除重复的键，避免参数冲突
             status_info_clean = {k: v for k, v in status_info.items() if k not in ['stream_id', 'video_name', 'video_path']}
             return StreamStatusResponse(
@@ -370,13 +373,21 @@ def start_stream(
                 **status_info_clean
             )
         else:
-            # 状态不一致，重置
+            # 状态不一致，重置（推流管理器中不存在，但数据库标记为推流中）
+            logger.warning(f"推流状态不一致，重置: {video.name}")
             video.is_streaming = False
             video.stream_id = None
             db.commit()
     
     # 生成或使用指定的stream_id
     stream_id = request.stream_id or f"video_{video.id}_{uuid.uuid4().hex[:8]}"
+    
+    # 检查stream_id是否已被使用
+    if local_video_stream_manager.get_stream_status(stream_id):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"推流ID已被使用: {stream_id}，请使用其他ID或留空自动生成"
+        )
     
     # 确定推流帧率
     stream_fps = request.stream_fps or video.stream_fps
@@ -390,9 +401,10 @@ def start_stream(
         )
         
         if not success:
+            # 可能是stream_id冲突或其他原因
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="启动推流失败"
+                detail="启动推流失败，可能推流ID已被占用或系统资源不足"
             )
         
         # 更新数据库状态
