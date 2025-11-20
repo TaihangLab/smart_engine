@@ -1084,9 +1084,23 @@ class AITaskExecutor:
                     rtsp_streamer = None
             
             # 启动异步帧处理器
-            task_processor_config = {
-                "fence_config": self._parse_fence_config(task)
-            }
+            # 根据技能类型决定配置内容
+            skill_config = skill_instance.config if hasattr(skill_instance, 'config') else {}
+            skill_type = skill_config.get('type', 'yolo')
+            
+            if skill_type == 'agent':
+                # Agent技能：需要完整的任务上下文
+                task_processor_config = {
+                    "fence_config": self._parse_fence_config(task),
+                    "task_id": task.id,
+                    "camera_id": task.camera_id
+                }
+            else:
+                # 普通技能（YOLO等）：只需要围栏配置
+                task_processor_config = {
+                    "fence_config": self._parse_fence_config(task)
+                }
+            
             frame_processor.start(skill_instance, task_processor_config, rtsp_streamer)
             
             # 设置视频采集帧率控制

@@ -361,22 +361,31 @@ class Settings(BaseSettings):
     ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警前缓冲时间（秒）")
     ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警后缓冲时间（秒）")
 
-    # 主要LLM服务配置（后端管理，前端不可见）- 使用Ollama
-    PRIMARY_LLM_PROVIDER: str = Field(default="ollama", description="主要LLM提供商")
-    PRIMARY_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="主要LLM服务器地址（OpenAI兼容API）")
-    PRIMARY_LLM_API_KEY: str = Field(default="ollama", description="主要LLM API密钥（Ollama不需要密钥）")
-    PRIMARY_LLM_MODEL: str = Field(default="qwen2.5vl:72b", description="主要LLM模型名称")
-
-    # 备用LLM服务配置（容错机制）- 同样使用Ollama的另一个模型
-    BACKUP_LLM_PROVIDER: str = Field(default="ollama", description="备用LLM提供商")
-    BACKUP_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="备用LLM服务器地址（OpenAI兼容API）")
-    BACKUP_LLM_API_KEY: str = Field(default="ollama", description="备用LLM API密钥（Ollama不需要密钥）")
-    BACKUP_LLM_MODEL: str = Field(default="qwen3:32b", description="备用LLM模型名称")
-
-    # 专用场景模型配置（后端根据技能类型自动选择）
-    ANALYSIS_LLM_MODEL: str = Field(default="llava:latest", description="分析场景专用模型（视觉多模态）")
-    REVIEW_LLM_MODEL: str = Field(default="llava:latest", description="复判场景专用模型（视觉多模态）")
-    CHAT_LLM_MODEL: str = Field(default="qwen3:32b", description="对话场景专用模型（纯文本）")
+    # ========================================
+    # 🎯 LLM模型配置 - 配置驱动智能路由
+    # ========================================
+    
+    # 📝 纯文本模型配置（纯文本聊天、推理、分析）
+    TEXT_LLM_PROVIDER: str = Field(default="ollama", description="纯文本LLM提供商")
+    TEXT_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="纯文本LLM服务地址（OpenAI兼容）")
+    TEXT_LLM_API_KEY: str = Field(default="ollama", description="纯文本LLM API密钥")
+    TEXT_LLM_MODEL: str = Field(default="qwen3:32b", description="纯文本模型（千问3-32B）")
+    
+    # 🖼️ 多模态模型配置（图片/视频分析）
+    MULTIMODAL_LLM_PROVIDER: str = Field(default="vllm", description="多模态LLM提供商")
+    MULTIMODAL_LLM_BASE_URL: str = Field(default="http://172.18.1.1:8000/v1", description="多模态LLM服务地址（千问3VL vllm）")
+    MULTIMODAL_LLM_API_KEY: str = Field(default="EMPTY", description="多模态LLM API密钥")
+    MULTIMODAL_LLM_MODEL: str = Field(default="Qwen3-VL-30B-A3B-Instruct", description="多模态模型（千问3VL-30B）")
+    
+    # 🔄 备用模型配置（自动降级容错）
+    BACKUP_TEXT_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="备用纯文本服务地址")
+    BACKUP_TEXT_LLM_MODEL: str = Field(default="qwen3:14b", description="备用纯文本模型（千问3-14B）")
+    BACKUP_MULTIMODAL_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="备用多模态服务地址")
+    BACKUP_MULTIMODAL_LLM_MODEL: str = Field(default="qwen2.5vl:72b", description="备用多模态模型（千问2.5VL-72B ollama）")
+    
+    # 🔧 智能路由策略
+    LLM_AUTO_ROUTING: bool = Field(default=True, description="启用智能路由（根据输入类型自动选择模型）")
+    LLM_ENABLE_FALLBACK: bool = Field(default=True, description="启用自动降级（主模型失败时使用备用模型）")
 
     # LLM通用参数
     LLM_TEMPERATURE: float = Field(default=0.1, description="LLM温度参数")
