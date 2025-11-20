@@ -392,6 +392,50 @@ class RedisClient:
             self.logger.error(f"Redis SETEX操作失败: {str(e)}")
             return False
     
+    def setex_bytes(self, key: str, time: int, value: bytes) -> bool:
+        """设置二进制数据和过期时间（用于存储图片等二进制数据）"""
+        try:
+            if not self.is_connected:
+                self.connect()
+            
+            # 直接使用底层 Redis 连接，不经过 decode_responses 转换
+            # 创建一个不解码的临时连接
+            raw_client = redis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB,
+                password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+                decode_responses=False,  # 关键：不解码，保持二进制
+                socket_connect_timeout=5,
+                socket_timeout=5
+            )
+            raw_client.setex(key, time, value)
+            return True
+        except Exception as e:
+            self.logger.error(f"Redis SETEX_BYTES操作失败: {str(e)}")
+            return False
+    
+    def get_bytes(self, key: str) -> Optional[bytes]:
+        """获取二进制数据（用于获取图片等二进制数据）"""
+        try:
+            if not self.is_connected:
+                self.connect()
+            
+            # 创建一个不解码的临时连接
+            raw_client = redis.Redis(
+                host=settings.REDIS_HOST,
+                port=settings.REDIS_PORT,
+                db=settings.REDIS_DB,
+                password=settings.REDIS_PASSWORD if settings.REDIS_PASSWORD else None,
+                decode_responses=False,  # 关键：不解码，保持二进制
+                socket_connect_timeout=5,
+                socket_timeout=5
+            )
+            return raw_client.get(key)
+        except Exception as e:
+            self.logger.error(f"Redis GET_BYTES操作失败: {str(e)}")
+            return None
+    
     def incr(self, key: str, amount: int = 1) -> Optional[int]:
         """递增计数器"""
         try:

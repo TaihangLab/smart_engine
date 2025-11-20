@@ -798,7 +798,7 @@ def delete_llm_skill_class(skill_id: str, db: Session = Depends(get_db)):
 @router.get("/tasks", response_model=Dict[str, Any])
 def get_llm_tasks(
     page: int = Query(1, description="当前页码", ge=1),
-    limit: int = Query(10, description="每页数量", ge=1, le=100),
+    limit: int = Query(10, description="每页数量", ge=1, le=1000),
     skill_id: Optional[str] = Query(None, description="技能类业务ID过滤"),
     status: Optional[bool] = Query(None, description="状态过滤"),
     name: Optional[str] = Query(None, description="名称搜索"),
@@ -808,6 +808,8 @@ def get_llm_tasks(
     获取LLM任务列表，支持分页和过滤
     """
     try:
+        logger.info(f"获取LLM任务列表: page={page}, limit={limit}, skill_id={skill_id}, status={status}, name={name}")
+        
         query = db.query(LLMTask)
         
         # 应用过滤条件
@@ -827,6 +829,8 @@ def get_llm_tasks(
         skip = (page - 1) * limit
         tasks = query.order_by(LLMTask.created_at.desc()).offset(skip).limit(limit).all()
         
+        logger.info(f"查询到 {len(tasks)} 个LLM任务，总数: {total}")
+        
         # 格式化结果
         results = []
         for task in tasks:
@@ -841,8 +845,8 @@ def get_llm_tasks(
                 "status": task.status,
                 "alert_level": task.alert_level if task.alert_level is not None else 0,
                 "running_period": task.running_period,
-                "created_at": task.created_at.isoformat(),
-                "updated_at": task.updated_at.isoformat()
+                "created_at": task.created_at.isoformat() if task.created_at else None,
+                "updated_at": task.updated_at.isoformat() if task.updated_at else None
             }
             results.append(result)
         
@@ -852,11 +856,11 @@ def get_llm_tasks(
             "total": total,
             "page": page,
             "limit": limit,
-            "total_pages": (total + limit - 1) // limit
+            "pages": (total + limit - 1) // limit if total > 0 else 1
         }
         
     except Exception as e:
-        logger.error(f"获取LLM任务列表失败: {str(e)}")
+        logger.error(f"获取LLM任务列表失败: {str(e)}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取LLM任务列表失败: {str(e)}"
@@ -1446,6 +1450,19 @@ def delete_llm_task(task_id: int, db: Session = Depends(get_db)):
             llm_task_executor._stop_task_processor(task_id)
         except Exception as e:
             logger.warning(f"停止LLM任务调度失败: {str(e)}")
+        
+        # 清理关联的复判配置
+        try:
+            from app.models.task_review_config import TaskReviewConfig
+            review_config = db.query(TaskReviewConfig).filter(
+                TaskReviewConfig.task_type == "llm_task",
+                TaskReviewConfig.task_id == task_id
+            ).first()
+            if review_config:
+                db.delete(review_config)
+                logger.info(f"已清理LLM任务 {task_id} 的复判配置")
+        except Exception as e:
+            logger.warning(f"清理LLM任务复判配置失败: {str(e)}")
         
         # 删除任务
         db.delete(task)

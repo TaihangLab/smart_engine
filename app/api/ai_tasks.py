@@ -146,10 +146,10 @@ class SkillClassListResponse(BaseModel):
     limit: int = Field(..., description="每页数量", example=10)
     pages: int = Field(..., description="总页数", example=1)
 
-# @router.get("", response_model=TaskListResponse)
-def get_all_tasks(
+@router.get("")
+async def get_all_tasks(
     page: int = Query(1, description="当前页码", ge=1),
-    limit: int = Query(10, description="每页数量", ge=1, le=100),
+    limit: int = Query(10, description="每页数量", ge=1, le=1000),
     camera_id: Optional[int] = Query(None, description="按摄像头ID过滤"),
     skill_class_id: Optional[int] = Query(None, description="按技能类ID过滤"),
     db: Session = Depends(get_db)
@@ -165,9 +165,11 @@ def get_all_tasks(
         db: 数据库会话
         
     Returns:
-        TaskListResponse: 任务列表及分页信息
+        Dict: 任务列表及分页信息
     """
     try:
+        logger.info(f"获取AI任务列表: page={page}, limit={limit}, camera_id={camera_id}, skill_class_id={skill_class_id}")
+        
         if camera_id:
             # 获取特定摄像头的任务
             result = AITaskService.get_tasks_by_camera(camera_id, db)
@@ -178,22 +180,28 @@ def get_all_tasks(
             # 获取所有任务
             result = AITaskService.get_all_tasks(db)
             
+        logger.info(f"AITaskService返回结果: tasks数量={len(result.get('tasks', []))}, total={result.get('total', 0)}")
+        
         # 处理分页
         tasks = result.get("tasks", [])
         total = result.get("total", 0)
         
         # 计算分页信息
-        pages = (total + limit - 1) // limit
+        pages = (total + limit - 1) // limit if total > 0 else 1
         start = (page - 1) * limit
         end = min(start + limit, total)
         
-        return TaskListResponse(
-            tasks=tasks[start:end],
-            total=total,
-            page=page,
-            limit=limit,
-            pages=pages
-        )
+        response_data = {
+            "data": tasks[start:end],
+            "total": total,
+            "page": page,
+            "limit": limit,
+            "pages": pages
+        }
+        
+        logger.info(f"返回数据: 返回{len(response_data['data'])}条任务")
+        
+        return response_data
         
     except Exception as e:
         logger.error(f"获取AI任务失败: {str(e)}", exc_info=True)
@@ -440,6 +448,19 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"AI任务不存在: id={task_id}"
             )
+        
+        # 清理关联的复判配置
+        try:
+            from app.models.task_review_config import TaskReviewConfig
+            review_config = db.query(TaskReviewConfig).filter(
+                TaskReviewConfig.task_type == "ai_task",
+                TaskReviewConfig.task_id == task_id
+            ).first()
+            if review_config:
+                db.delete(review_config)
+                logger.info(f"已清理AI任务 {task_id} 的复判配置")
+        except Exception as e:
+            logger.warning(f"清理AI任务复判配置失败: {str(e)}")
         
         # 删除任务
         success = AITaskService.delete_task(task_id, db)

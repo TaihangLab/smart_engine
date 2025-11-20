@@ -604,9 +604,9 @@ async def unpublish_review_skill(
             detail=f"技能不存在: {skill_id}"
         )
     
-    # 检查是否有任务在使用这个技能
-    from app.models.ai_task import AITask
-    using_tasks = db.query(AITask).filter(AITask.review_skill_class_id == skill.id).count()
+    # 检查是否有任务在使用这个技能（使用新的配置表）
+    from app.models.task_review_config import TaskReviewConfig
+    using_tasks = db.query(TaskReviewConfig).filter(TaskReviewConfig.review_skill_class_id == skill.id).count()
     
     if using_tasks > 0:
         raise HTTPException(
@@ -647,9 +647,9 @@ async def delete_review_skill(
             detail=f"技能不存在: {skill_id}"
         )
     
-    # 检查是否有任务在使用这个技能
-    from app.models.ai_task import AITask
-    using_tasks = db.query(AITask).filter(AITask.review_skill_class_id == skill.id).count()
+    # 检查是否有任务在使用这个技能（使用新的配置表）
+    from app.models.task_review_config import TaskReviewConfig
+    using_tasks = db.query(TaskReviewConfig).filter(TaskReviewConfig.review_skill_class_id == skill.id).count()
     
     if using_tasks > 0:
         raise HTTPException(
@@ -701,9 +701,9 @@ async def batch_delete_review_skills(
                 })
                 continue
             
-            # 检查是否有任务在使用这个技能
-            from app.models.ai_task import AITask
-            using_tasks = db.query(AITask).filter(AITask.review_skill_class_id == skill.id).count()
+            # 检查是否有任务在使用这个技能（使用新的配置表）
+            from app.models.task_review_config import TaskReviewConfig
+            using_tasks = db.query(TaskReviewConfig).filter(TaskReviewConfig.review_skill_class_id == skill.id).count()
             
             if using_tasks > 0:
                 failed_skills.append({

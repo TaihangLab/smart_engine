@@ -9,6 +9,7 @@ from app.models.llm_task import LLMTask
 from app.models.alert_archive import AlertArchive
 from app.models.alert_archive_link import AlertArchiveLink
 from app.models.review_record import ReviewRecord
+from app.models.local_video import LocalVideo
 
 # 🎯 导入零配置补偿机制相关模型
 from app.models.compensation import (

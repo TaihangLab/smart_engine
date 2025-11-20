@@ -43,19 +43,7 @@ async def health_check():
         db.close()
     except Exception:
         checks["database"] = False
-    
-    # 检查Nacos连接
-    try:
-        if settings.NACOS_ENABLED:
-            from app.services.nacos_client import nacos_client
-            nacos_health = nacos_client.check_health()
-            checks["nacos"] = nacos_health.get("status") == "healthy"
-            checks["nacos_details"] = nacos_health
-        else:
-            checks["nacos"] = None  # 未启用
-    except Exception as e:
-        checks["nacos"] = False
-        checks["nacos_error"] = str(e)
+
     
     # 确定整体状态
     critical_services = ["triton_server", "database"]

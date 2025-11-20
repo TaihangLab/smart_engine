@@ -1,3 +1,4 @@
+# noinspection PyUnreachableCode
 import logging
 import asyncio
 from typing import Dict, Any, Optional, List
@@ -6,7 +7,7 @@ from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.alert import Alert
 from app.models.ai_task import AITask
-from app.models.llm_skill import LLMSkillClass
+from app.models.review_llm_skill import ReviewSkillClass
 from app.services.llm_service import llm_service, LLMServiceResult
 from app.services.minio_client import minio_client
 from app.core.config import settings
@@ -15,98 +16,16 @@ logger = logging.getLogger(__name__)
 
 class AlertReviewService:
     """
-    简化的预警复判服务
-    基于AI任务配置进行复判，不使用复判记录表
+    预警复判服务（仅支持自动触发）
+    
+    说明：
+    - 仅支持预警生成时的自动复判（实时过滤误报）
+    - 不支持手动触发复判（人工查看预警时直接判断即可，无需AI参与）
+    - 复判结果会自动标记预警状态为误报
     """
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.review_queue = asyncio.Queue()
-        self.is_running = False
-    
-    async def start(self):
-        """启动复判服务"""
-        if not self.is_running:
-            self.is_running = True
-            asyncio.create_task(self._process_review_queue())
-            self.logger.info("预警复判服务已启动")
-    
-    async def stop(self):
-        """停止复判服务"""
-        self.is_running = False
-        self.logger.info("预警复判服务已停止")
-    
-    async def _process_review_queue(self):
-        """处理复判队列"""
-        while self.is_running:
-            try:
-                # 等待复判任务
-                review_task = await asyncio.wait_for(
-                    self.review_queue.get(), 
-                    timeout=1.0
-                )
-                
-                # 执行复判
-                await self._execute_review(review_task)
-                
-            except asyncio.TimeoutError:
-                # 超时继续循环
-                continue
-            except Exception as e:
-                self.logger.error(f"处理复判队列时发生错误: {str(e)}")
-                await asyncio.sleep(1)
-    
-    async def trigger_review_for_alert(self, alert_id: int, db: Session = None) -> Dict[str, Any]:
-        """
-        根据预警触发复判
-        
-        Args:
-            alert_id: 预警ID
-            db: 数据库会话
-            
-        Returns:
-            复判触发结果
-        """
-        try:
-            if db is None:
-                db = next(get_db())
-            
-            # 获取预警信息
-            alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
-            if not alert:
-                return {"success": False, "message": f"预警不存在: {alert_id}"}
-            
-            # 获取关联的AI任务
-            ai_task = db.query(AITask).filter(AITask.id == alert.task_id).first()
-            if not ai_task:
-                return {"success": False, "message": f"AI任务不存在: {alert.task_id}"}
-            
-            # 检查是否需要复判
-            if not ai_task.review_enabled or not ai_task.review_llm_skill_class_id:
-                return {"success": False, "message": "该任务未启用复判功能"}
-            
-            # 检查复判条件
-            if not self._check_review_conditions(alert, ai_task):
-                return {"success": False, "message": "不满足复判条件"}
-            
-            # 将复判任务加入队列
-            await self.review_queue.put({
-                "alert_id": alert_id,
-                "task_id": ai_task.id,
-                "llm_skill_class_id": ai_task.review_llm_skill_class_id,
-                "confidence_threshold": ai_task.review_confidence_threshold
-            })
-            
-            return {
-                "success": True,
-                "message": "已触发复判任务",
-                "alert_id": alert_id,
-                "task_id": ai_task.id
-            }
-            
-        except Exception as e:
-            self.logger.error(f"触发复判失败: {str(e)}")
-            return {"success": False, "message": f"触发复判失败: {str(e)}"}
     
     async def execute_review_for_alert_data(self, review_data: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -117,7 +36,6 @@ class AlertReviewService:
                 - task_id: 任务ID
                 - llm_skill_class_id: 复判技能ID
                 - alert_data: 预警数据
-                - confidence_threshold: 置信度阈值
                 - review_type: 复判类型（auto/manual）
                 - trigger_source: 触发源
                 
@@ -129,8 +47,8 @@ class AlertReviewService:
             db = next(get_db())
             
             # 获取复判技能
-            llm_skill_class = db.query(LLMSkillClass).filter(
-                LLMSkillClass.id == review_data["llm_skill_class_id"]
+            llm_skill_class = db.query(ReviewSkillClass).filter(
+                ReviewSkillClass.id == review_data["llm_skill_class_id"]
             ).first()
             
             if not llm_skill_class:
@@ -140,19 +58,44 @@ class AlertReviewService:
                 }
             
             alert_data = review_data["alert_data"]
-            confidence_threshold = review_data.get("confidence_threshold", 80)
             
-            # 下载预警图像
+            # 获取预警图像（三级降级：Redis → MinIO → 无图片）
             image_data = None
-            image_object_name = alert_data.get("minio_frame_object_name")
-            if image_object_name:
+            
+            # 优先从 Redis 缓存获取（最快，推荐）
+            image_cache_key = alert_data.get("image_cache_key")
+            if image_cache_key:
                 try:
-                    image_data = minio_client.get_object_data(
-                        settings.MINIO_BUCKET,
-                        image_object_name
-                    )
+                    from app.services.redis_client import redis_client
+                    image_data = redis_client.get_bytes(image_cache_key)
+                    if image_data:
+                        self.logger.info(f"从 Redis 缓存获取图片: {image_cache_key}")
+                    else:
+                        self.logger.warning(f"Redis 缓存已过期: {image_cache_key}")
                 except Exception as e:
-                    self.logger.warning(f"下载预警图像失败: {str(e)}")
+                    self.logger.warning(f"从 Redis 获取图片失败: {str(e)}")
+            
+            # 降级方案1：从 MinIO 下载
+            if not image_data:
+                image_object_name = alert_data.get("minio_frame_object_name")
+                if image_object_name:
+                    try:
+                        # 拼接完整路径：prefix/task_id/filename
+                        from app.core.config import settings
+                        task_id = alert_data.get("task_id")
+                        minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{task_id}"
+                        if not minio_prefix.endswith("/"):
+                            minio_prefix = f"{minio_prefix}/"
+                        full_object_name = f"{minio_prefix}{image_object_name}"
+                        
+                        image_data = minio_client.download_file(full_object_name)
+                        self.logger.info(f"从 MinIO 下载图片: {full_object_name}")
+                    except Exception as e:
+                        self.logger.warning(f"从 MinIO 下载图片失败: {str(e)}")
+            
+            # 降级方案2：无图片复判（仅文本）
+            if not image_data:
+                self.logger.warning("无法获取预警图片，将仅使用文本信息进行复判")
             
             # 构建复判提示
             prompt = self._build_review_prompt_from_data(alert_data, review_data)
@@ -163,20 +106,19 @@ class AlertReviewService:
             )
             
             # 判断复判结果
-            review_result = self._determine_review_result(llm_result, confidence_threshold, llm_skill_class)
+            review_result = self._determine_review_result(llm_result, llm_skill_class)
             
             # 处理复判结果
             await self._handle_review_result_for_data(alert_data, review_result, llm_result)
             
             self.logger.info(f"复判执行完成: task_id={review_data['task_id']}, "
-                           f"结果={review_result}, 置信度={llm_result.confidence}")
+                           f"结果={review_result}")
             
             return {
                 "success": True,
                 "result": {
                     "decision": review_result,
-                    "confidence": llm_result.confidence,
-                    "reasoning": llm_result.reasoning,
+                    "response": llm_result.response,
                     "summary": self._extract_summary(llm_result)
                 },
                 "alert_data": alert_data,
@@ -193,147 +135,6 @@ class AlertReviewService:
         finally:
             if db:
                 db.close()
-    
-    def _check_review_conditions(self, alert: Alert, ai_task: AITask) -> bool:
-        """
-        检查复判条件
-        
-        Args:
-            alert: 预警对象
-            ai_task: AI任务对象
-            
-        Returns:
-            是否满足复判条件
-        """
-        try:
-            conditions = ai_task.review_conditions
-            if not conditions:
-                return True  # 没有条件限制，默认都复判
-            
-            # 检查预警等级
-            if "alert_levels" in conditions:
-                if alert.alert_level not in conditions["alert_levels"]:
-                    return False
-            
-            # 检查预警类型
-            if "alert_types" in conditions:
-                if alert.alert_type not in conditions["alert_types"]:
-                    return False
-            
-            # 检查摄像头ID
-            if "camera_ids" in conditions:
-                if alert.camera_id not in conditions["camera_ids"]:
-                    return False
-            
-            # 检查时间范围（如果有）
-            if "time_range" in conditions:
-                time_range = conditions["time_range"]
-                alert_time = alert.alert_time.time()
-                start_time = datetime.strptime(time_range["start"], "%H:%M").time()
-                end_time = datetime.strptime(time_range["end"], "%H:%M").time()
-                
-                if not (start_time <= alert_time <= end_time):
-                    return False
-            
-            return True
-            
-        except Exception as e:
-            self.logger.error(f"检查复判条件失败: {str(e)}")
-            return False
-    
-    async def _execute_review(self, review_task: Dict[str, Any]):
-        """
-        执行复判任务
-        
-        Args:
-            review_task: 复判任务信息
-        """
-        db = None
-        try:
-            db = next(get_db())
-            
-            alert_id = review_task["alert_id"]
-            task_id = review_task["task_id"]
-            llm_skill_class_id = review_task["llm_skill_class_id"]
-            confidence_threshold = review_task["confidence_threshold"]
-            
-            # 获取相关数据
-            alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
-            ai_task = db.query(AITask).filter(AITask.id == task_id).first()
-            llm_skill_class = db.query(LLMSkillClass).filter(
-                LLMSkillClass.id == llm_skill_class_id
-            ).first()
-            
-            if not all([alert, ai_task, llm_skill_class]):
-                raise Exception("关联数据不完整")
-            
-            # 下载预警图像
-            image_data = None
-            if alert.minio_frame_object_name:
-                try:
-                    image_data = minio_client.get_object_data(
-                        settings.MINIO_BUCKET,
-                        alert.minio_frame_object_name
-                    )
-                except Exception as e:
-                    self.logger.warning(f"下载预警图像失败: {str(e)}")
-            
-            # 构建复判提示
-            prompt = self._build_review_prompt(alert, ai_task)
-            
-            # 执行LLM复判
-            llm_result = await self._perform_llm_review(
-                llm_skill_class, prompt, image_data
-            )
-            
-            # 判断复判结果
-            review_result = self._determine_review_result(llm_result, confidence_threshold, llm_skill_class)
-            
-            # 处理复判结果
-            await self._handle_review_result(alert, review_result, llm_result)
-            
-            self.logger.info(f"复判完成 - 预警ID: {alert_id}, 结果: {review_result}")
-            
-        except Exception as e:
-            self.logger.error(f"执行复判失败 - 预警ID: {review_task.get('alert_id')}: {str(e)}")
-        
-        finally:
-            if db:
-                db.close()
-    
-    def _build_review_prompt(self, alert: Alert, ai_task: AITask) -> str:
-        """
-        构建复判提示词
-        
-        Args:
-            alert: 预警对象
-            ai_task: AI任务对象
-            
-        Returns:
-            复判提示词
-        """
-        return f"""
-请对以下预警进行复判分析：
-
-预警信息：
-- 预警类型：{alert.alert_type}
-- 预警等级：{alert.alert_level}
-- 预警名称：{alert.alert_name}
-- 预警描述：{alert.alert_description}
-- 发生时间：{alert.alert_time}
-- 摄像头：{alert.camera_name} (ID: {alert.camera_id})
-- 位置：{alert.location}
-
-任务信息：
-- 任务名称：{ai_task.name}
-- 任务描述：{ai_task.description}
-
-请根据提供的图像和预警信息，判断这个预警是否为真实的安全事件。
-请提供详细的分析理由和置信度评分（0-100）。
-
-如果是误报，请说明可能的误报原因。
-如果是真实预警，请确认预警的准确性。
-"""
     
     def _build_review_prompt_from_data(self, alert_data: Dict[str, Any], review_data: Dict[str, Any]) -> str:
         """
@@ -369,8 +170,8 @@ class AlertReviewService:
 """
     
     async def _perform_llm_review(
-        self, 
-        llm_skill_class: LLMSkillClass, 
+        self,
+        llm_skill_class: ReviewSkillClass,
         prompt: str, 
         image_data: bytes = None
     ) -> LLMServiceResult:
@@ -386,13 +187,13 @@ class AlertReviewService:
             LLM调用结果
         """
         try:
-            # 调用LLM服务进行复判
+            # 调用LLM服务进行复判（使用复判技能的配置）
             result = llm_service.call_llm(
-                skill_type=llm_skill_class.type.value,
+                skill_type="multimodal_review",  # 复判技能统一类型
                 system_prompt=llm_skill_class.system_prompt or "你是专业的安全预警复判专家。",
                 user_prompt=prompt,
                 user_prompt_template=llm_skill_class.prompt_template,
-                response_format=llm_skill_class.config.get("response_format") if llm_skill_class.config else None,
+                response_format=None,  # ReviewSkillClass 不使用 response_format
                 image_data=image_data,
                 context={"task": "alert_review"},
                 use_backup=False
@@ -405,11 +206,11 @@ class AlertReviewService:
             # 尝试备用配置
             try:
                 result = llm_service.call_llm(
-                    skill_type=llm_skill_class.type.value,
+                    skill_type="multimodal_review",  # 复判技能统一类型
                     system_prompt=llm_skill_class.system_prompt or "你是专业的安全预警复判专家。",
                     user_prompt=prompt,
                     user_prompt_template=llm_skill_class.prompt_template,
-                    response_format=llm_skill_class.config.get("response_format") if llm_skill_class.config else None,
+                    response_format=None,  # ReviewSkillClass 不使用 response_format
                     image_data=image_data,
                     context={"task": "alert_review"},
                     use_backup=True
@@ -422,13 +223,12 @@ class AlertReviewService:
                     error_message=f"LLM复判失败: {str(e)}, 备用配置也失败: {str(backup_e)}"
                 )
     
-    def _determine_review_result(self, llm_result: LLMServiceResult, confidence_threshold: int, llm_skill_class: LLMSkillClass = None) -> str:
+    def _determine_review_result(self, llm_result: LLMServiceResult, llm_skill_class: ReviewSkillClass = None) -> str:
         """
         判断复判结果
         
         Args:
             llm_result: LLM调用结果
-            confidence_threshold: 置信度阈值
             llm_skill_class: LLM技能类配置（用于应用默认值）
             
         Returns:
@@ -438,17 +238,8 @@ class AlertReviewService:
             if not llm_result.success:
                 return "uncertain"
             
-            # 检查置信度
-            if llm_result.confidence < confidence_threshold:
-                return "uncertain"
-            
-            # 应用输出参数默认值（如果有技能类配置）
+            # 获取分析结果（ReviewSkillClass 不使用 output_parameters）
             analysis_result = llm_result.analysis_result
-            if llm_skill_class and llm_skill_class.output_parameters:
-                analysis_result = self._apply_output_parameter_defaults(
-                    analysis_result, 
-                    llm_skill_class.output_parameters
-                )
             
             # 分析LLM响应内容
             if analysis_result:
@@ -549,38 +340,12 @@ class AlertReviewService:
         
         return type_defaults.get(param_type.lower(), "")
     
-    async def _handle_review_result(
-        self, 
-        alert: Alert, 
-        review_result: str, 
-        llm_result: LLMServiceResult
-    ):
-        """
-        处理复判结果
-        
-        Args:
-            alert: 预警对象
-            review_result: 复判结果
-            llm_result: LLM调用结果
-        """
-        try:
-            # 如果判断为误报，调用其他人员开发的接口标记为复判
-            if review_result == "rejected":
-                await self._mark_alert_as_false_positive(alert, llm_result)
-            elif review_result == "confirmed":
-                self.logger.info(f"预警 {alert.alert_id} 被确认为真实预警")
-            else:
-                self.logger.info(f"预警 {alert.alert_id} 复判结果不确定，需要人工审核")
-                
-        except Exception as e:
-            self.logger.error(f"处理复判结果失败: {str(e)}")
-    
     async def _handle_review_result_for_data(
         self, 
         alert_data: Dict[str, Any], 
         review_result: str, 
         llm_result: LLMServiceResult
-    ):
+    ) -> bool:
         """
         处理预警数据的复判结果
         
@@ -588,78 +353,214 @@ class AlertReviewService:
             alert_data: 预警数据字典
             review_result: 复判结果
             llm_result: LLM调用结果
+            
+        Returns:
+            处理是否成功
         """
         try:
-            # 如果判断为误报，调用其他人员开发的接口标记为复判
             if review_result == "rejected":
-                await self._mark_alert_data_as_false_positive(alert_data, llm_result)
+                # 判断为误报，标记预警
+                success = await self._mark_alert_data_as_false_positive(alert_data, llm_result)
+                return success
+                
             elif review_result == "confirmed":
                 self.logger.info(f"预警 (task_id={alert_data.get('task_id')}) 被确认为真实预警")
+                return True
+                
             else:
                 self.logger.info(f"预警 (task_id={alert_data.get('task_id')}) 复判结果不确定，需要人工审核")
+                return True  # 不确定的结果也视为"处理成功"，只是不采取行动
                 
         except Exception as e:
-            self.logger.error(f"处理预警数据复判结果失败: {str(e)}")
+            self.logger.error(f"处理预警数据复判结果失败: {str(e)}", exc_info=True)
+            return False
     
-    async def _mark_alert_as_false_positive(self, alert: Alert, llm_result: LLMServiceResult):
+    def _update_alert_as_false_positive(
+        self, 
+        db: Session, 
+        alert: Alert, 
+        review_summary: str
+    ) -> bool:
         """
-        标记预警为误报（调用其他人员开发的接口）
+        核心逻辑：更新预警为误报并创建相关记录（提取公共逻辑）
         
         Args:
+            db: 数据库会话
             alert: 预警对象
-            llm_result: LLM调用结果
+            review_summary: 复判摘要
+            
+        Returns:
+            操作是否成功
         """
         try:
-            # TODO: 这里调用其他人员开发的接口
-            # 传入相关信息：预警ID、复判结果、LLM分析结果等
+            # 导入所需的模型
+            from app.models.alert import AlertStatus, AlertProcessingRecord, ProcessingActionType
+            from app.db.review_record_dao import ReviewRecordDAO
             
-            review_data = {
-                "alert_id": alert.alert_id,
-                "review_result": "false_positive",
-                "confidence_score": llm_result.confidence,
-                "analysis_result": llm_result.analysis_result,
-                "review_summary": self._extract_summary(llm_result),
-                "reviewed_at": datetime.now().isoformat(),
-                "review_method": "llm_automatic"
-            }
+            # 1. 更新预警状态为误报
+            old_status = alert.status
+            alert.status = AlertStatus.FALSE_ALARM
+            alert.processed_at = datetime.utcnow()
+            alert.processed_by = "AI复判系统"
+            alert.processing_notes = f"AI自动复判标记为误报：{review_summary}"
             
-            # 这里应该调用外部接口
-            # await external_api.mark_alert_as_reviewed(review_data)
+            # 2. 添加处理流程步骤
+            alert.add_process_step(
+                "AI自动复判", 
+                f"AI复判系统自动标记为误报：{review_summary}", 
+                "AI复判系统"
+            )
             
-            self.logger.info(f"预警 {alert.alert_id} 已标记为误报: {review_data}")
+            # 3. 创建复判记录
+            review_dao = ReviewRecordDAO(db)
+            review_record = review_dao.create_review_record(
+                alert_id=alert.alert_id,
+                review_type="automatic",  # 自动复判
+                reviewer_name="AI复判系统",
+                review_notes=review_summary
+            )
+            
+            if not review_record:
+                self.logger.warning(f"创建复判记录失败: alert_id={alert.alert_id}")
+            
+            # 4. 创建处理记录
+            processing_record = AlertProcessingRecord(
+                alert_id=alert.alert_id,
+                action_type=ProcessingActionType.MARK_FALSE_ALARM,
+                from_status=old_status,
+                to_status=AlertStatus.FALSE_ALARM,
+                operator_name="AI复判系统",
+                operator_role="自动复判",
+                notes=review_summary,
+                is_automated=True,  # 标记为自动化操作
+                created_at=datetime.utcnow()
+            )
+            db.add(processing_record)
+            
+            # 5. 提交所有更改
+            db.commit()
+            
+            self.logger.info(f"✅ 预警 {alert.alert_id} 已成功标记为误报（AI自动复判）")
+            return True
             
         except Exception as e:
-            self.logger.error(f"标记预警为误报失败: {str(e)}")
+            db.rollback()
+            self.logger.error(f"❌ 标记预警 {alert.alert_id} 为误报失败: {str(e)}", exc_info=True)
+            return False
     
-    async def _mark_alert_data_as_false_positive(self, alert_data: Dict[str, Any], llm_result: LLMServiceResult):
+    async def _mark_alert_data_as_false_positive(self, alert_data: Dict[str, Any], llm_result: LLMServiceResult) -> bool:
         """
-        标记预警数据为误报（调用其他人员开发的接口）
+        标记预警数据为误报（用于预警数据字典）
+        
+        注意：这个方法用于处理刚生成、可能还未保存到数据库的预警数据。
+        会尝试根据预警信息查找数据库中的对应记录。
         
         Args:
             alert_data: 预警数据字典
             llm_result: LLM调用结果
+            
+        Returns:
+            是否成功标记为误报
         """
         try:
-            # TODO: 这里调用其他人员开发的接口
-            # 传入相关信息：预警数据、复判结果、LLM分析结果等
+            # 获取数据库会话
+            db = next(get_db())
             
-            review_data = {
-                "alert_data": alert_data,
-                "review_result": "false_positive",
-                "confidence_score": llm_result.confidence,
-                "analysis_result": llm_result.analysis_result,
-                "review_summary": self._extract_summary(llm_result),
-                "reviewed_at": datetime.now().isoformat(),
-                "review_method": "llm_automatic"
-            }
+            # 提取复判摘要
+            review_summary = self._extract_summary(llm_result)
             
-            # 这里应该调用外部接口
-            # await external_api.mark_alert_data_as_reviewed(review_data)
+            # 尝试根据预警信息查找数据库中的预警记录
+            alert = self._find_alert_from_data(db, alert_data)
             
-            self.logger.info(f"预警数据 (task_id={alert_data.get('task_id')}) 已标记为误报: {review_data}")
+            # 如果没有找到对应的预警记录，可能是预警还未保存到数据库
+            if alert is None:
+                task_id = alert_data.get("task_id")
+                camera_id = alert_data.get("camera_id")
+                self.logger.warning(
+                    f"⚠️ 未找到对应的预警记录（task_id={task_id}, camera_id={camera_id}），"
+                    f"复判结果为误报，但无法立即更新数据库。复判摘要: {review_summary}"
+                )
+                # TODO: 可以考虑将复判结果缓存到 Redis，在预警保存时检查并应用
+                return False
+            
+            # 找到了对应的预警记录，开始标记为误报
+            self.logger.info(f"找到对应的预警记录: alert_id={alert.alert_id}，开始标记为误报")
+            
+            # 调用核心逻辑标记为误报
+            result = self._update_alert_as_false_positive(db, alert, review_summary)
+            
+            # 记录操作结果
+            task_id = alert_data.get('task_id')
+            if result:
+                self.logger.info(f"✅ 预警数据成功标记为误报: task_id={task_id}")
+            else:
+                self.logger.error(f"❌ 预警数据标记为误报失败: task_id={task_id}")
+            
+            return result
             
         except Exception as e:
-            self.logger.error(f"标记预警数据为误报失败: {str(e)}")
+            self.logger.error(f"❌ 处理预警数据误报标记时发生异常: {str(e)}", exc_info=True)
+            return False
+    
+    def _find_alert_from_data(self, db: Session, alert_data: Dict[str, Any]) -> Optional[Alert]:
+        """
+        根据预警数据查找数据库中的预警记录
+        
+        Args:
+            db: 数据库会话
+            alert_data: 预警数据字典
+            
+        Returns:
+            找到的Alert对象，未找到返回None
+        """
+        try:
+            # 提取必要字段
+            task_id = alert_data.get("task_id")
+            camera_id = alert_data.get("camera_id")
+            alert_time_str = alert_data.get("alert_time")
+            
+            # 验证必要字段是否存在
+            if not task_id or not camera_id or not alert_time_str:
+                self.logger.warning(
+                    f"预警数据缺少必要字段: task_id={task_id}, "
+                    f"camera_id={camera_id}, alert_time={alert_time_str}"
+                )
+                return None
+            
+            # 解析预警时间
+            alert_time: datetime
+            if isinstance(alert_time_str, str):
+                alert_time = datetime.fromisoformat(alert_time_str.replace('Z', '+00:00'))
+            elif isinstance(alert_time_str, datetime):
+                alert_time = alert_time_str
+            else:
+                self.logger.warning(f"预警时间格式不正确: {type(alert_time_str)}")
+                return None
+            
+            # 查找最近时间范围内的预警（允许±5秒误差）
+            from datetime import timedelta
+            time_window = timedelta(seconds=5)
+            
+            alert = db.query(Alert).filter(
+                Alert.task_id == task_id,
+                Alert.camera_id == camera_id,
+                Alert.alert_time >= alert_time - time_window,
+                Alert.alert_time <= alert_time + time_window
+            ).order_by(Alert.created_at.desc()).first()
+            
+            if alert:
+                self.logger.debug(f"找到预警记录: alert_id={alert.alert_id}")
+            else:
+                self.logger.debug(
+                    f"未找到预警记录: task_id={task_id}, camera_id={camera_id}, "
+                    f"alert_time={alert_time}"
+                )
+            
+            return alert
+            
+        except Exception as e:
+            self.logger.warning(f"查找预警记录时出错: {str(e)}", exc_info=True)
+            return None
     
     def _extract_summary(self, llm_result: LLMServiceResult) -> str:
         """
@@ -684,12 +585,4 @@ class AlertReviewService:
             return "摘要提取失败"
 
 # 全局复判服务实例
-alert_review_service = AlertReviewService()
-
-async def start_alert_review_service():
-    """启动预警复判服务"""
-    await alert_review_service.start()
-
-async def stop_alert_review_service():
-    """停止预警复判服务"""
-    await alert_review_service.stop() 
+alert_review_service = AlertReviewService() 

@@ -566,10 +566,40 @@ class LLMService:
                 chain = self.create_simple_chain(system_prompt=system_prompt, output_parser=output_parser, **config)
                 inputs = {"input": final_prompt}
             
-            # 同步执行（直接创建新的事件循环）
+            # 同步执行（处理事件循环）
             import asyncio
-            response = asyncio.run(chain.ainvoke(inputs))
-  
+            import threading
+            
+            try:
+                # 尝试获取当前事件循环
+                loop = asyncio.get_running_loop()
+                # 如果已经在事件循环中，使用线程来运行新的事件循环
+                result_container = []
+                exception_container = []
+                
+                def run_in_thread():
+                    try:
+                        new_loop = asyncio.new_event_loop()
+                        asyncio.set_event_loop(new_loop)
+                        try:
+                            result = new_loop.run_until_complete(chain.ainvoke(inputs))
+                            result_container.append(result)
+                        finally:
+                            new_loop.close()
+                    except Exception as e:
+                        exception_container.append(e)
+                
+                thread = threading.Thread(target=run_in_thread)
+                thread.start()
+                thread.join()
+                
+                if exception_container:
+                    raise exception_container[0]
+                response = result_container[0]
+                
+            except RuntimeError:
+                # 没有运行中的事件循环，可以使用 asyncio.run
+                response = asyncio.run(chain.ainvoke(inputs))
             
             # 解析响应
             if isinstance(response, dict):
