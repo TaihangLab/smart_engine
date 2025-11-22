@@ -2,7 +2,7 @@
 API包，提供REST API接口
 """
 from fastapi import APIRouter
-from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, task_review, chat_assistant, wvp_proxy, alert_archives, review_records, local_videos
+from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, task_review, chat_assistant, wvp_proxy, alert_archives, review_records, local_videos, realtime_monitor
 
 api_router = APIRouter()
 api_router.include_router(cameras.router, prefix="/cameras", tags=["cameras"])
@@ -21,6 +21,7 @@ api_router.include_router(alert_archives.router, prefix="/alert-archives", tags=
 api_router.include_router(review_records.router, prefix="/review-records", tags=["review_records"])
 api_router.include_router(wvp_proxy.router, prefix="", tags=["wvp_proxy"])
 api_router.include_router(local_videos.router, prefix="/local-videos", tags=["local_videos"])
+api_router.include_router(realtime_monitor.router, prefix="/realtime-monitor", tags=["realtime_monitor"])
 
 __all__ = ["api_router"]
 
