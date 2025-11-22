@@ -715,6 +715,8 @@ class AITaskExecutor:
         self.running_tasks = {}  # 存储正在运行的任务 {task_id: thread}
         self.stop_event = {}     # 存储任务停止事件 {task_id: threading.Event}
         self.task_jobs = {}      # 存储任务的调度作业 {task_id: [start_job_id, stop_job_id]}
+        self.frame_processors = {}  # 存储任务的帧处理器 {task_id: OptimizedAsyncProcessor}
+        self.task_camera_mapping = {}  # 存储任务与摄像头的映射 {task_id: camera_id}
         
         # 创建任务调度器
         self.scheduler = BackgroundScheduler()
@@ -1010,6 +1012,10 @@ class AITaskExecutor:
             # 初始化优化的异步帧处理器
             frame_processor = OptimizedAsyncProcessor(task.id, max_queue_size=2)
             
+            # 保存帧处理器引用和任务-摄像头映射
+            self.frame_processors[task.id] = frame_processor
+            self.task_camera_mapping[task.id] = task.camera_id
+            
             # 检查是否需要启用RTSP推流
             rtsp_streamer = None
             task_config = json.loads(task.config) if isinstance(task.config, str) else (task.config or {})
@@ -1143,6 +1149,12 @@ class AITaskExecutor:
             
             # 停止异步处理器
             frame_processor.stop()
+            
+            # 清理帧处理器引用
+            if task.id in self.frame_processors:
+                del self.frame_processors[task.id]
+            if task.id in self.task_camera_mapping:
+                del self.task_camera_mapping[task.id]
                 
             # 释放资源
             if frame_reader:
@@ -2103,6 +2115,143 @@ class AITaskExecutor:
                 
         except Exception as e:
             logger.error(f"执行任务清理时出错: {str(e)}")
+    
+    def get_task_detection_result(self, task_id: int) -> Optional[Dict]:
+        """获取指定任务的最新检测结果（用于实时OSD叠加）
+        
+        Args:
+            task_id: 任务ID
+            
+        Returns:
+            Dict: 检测结果数据
+            {
+                "task_id": 1,
+                "timestamp": "2024-01-01T12:00:00",
+                "detections": [
+                    {
+                        "class_name": "person",
+                        "confidence": 0.95,
+                        "bbox": [100, 200, 300, 400],  # [x1, y1, x2, y2] 像素坐标
+                        "label": "人员",
+                        "color": [0, 255, 0]
+                    }
+                ],
+                "frame_size": {
+                    "width": 1920,
+                    "height": 1080
+                }
+            }
+        """
+        try:
+            # 检查任务是否正在运行
+            if task_id not in self.frame_processors:
+                return None
+                
+            frame_processor = self.frame_processors[task_id]
+            
+            # 获取最新的检测结果
+            detection_result = frame_processor.get_latest_result()
+            
+            if not detection_result:
+                return None
+                
+            result = detection_result["result"]
+            
+            if not result.success:
+                return None
+                
+            # 提取检测框数据
+            data = result.data
+            detections = data.get("detections", [])
+            
+            # 格式化检测结果
+            formatted_detections = []
+            for det in detections:
+                class_name = det.get("class_name", "unknown")
+                # 如果没有label字段，使用class_name作为label
+                label = det.get("label", "") or class_name
+                
+                formatted_det = {
+                    "class_name": class_name,
+                    "confidence": det.get("confidence", 0.0),
+                    "bbox": det.get("bbox", [0, 0, 0, 0]),  # [x1, y1, x2, y2]
+                    "label": label,
+                    "color": det.get("color", [0, 255, 0])  # BGR格式
+                }
+                formatted_detections.append(formatted_det)
+            
+            # 构建返回数据
+            from datetime import datetime
+            return {
+                "task_id": task_id,
+                "timestamp": datetime.now().isoformat(),
+                "detections": formatted_detections,
+                "frame_size": {
+                    "width": detection_result.get("frame_width", 1920),
+                    "height": detection_result.get("frame_height", 1080)
+                }
+            }
+            
+        except Exception as e:
+            logger.error(f"获取任务{task_id}检测结果失败: {str(e)}")
+            return None
+    
+    def get_running_tasks_by_camera(self, camera_id: int) -> List[Dict]:
+        """获取指定摄像头的所有运行中AI任务
+        
+        Args:
+            camera_id: 摄像头ID
+            
+        Returns:
+            List[Dict]: 任务列表
+            [
+                {
+                    "task_id": 1,
+                    "task_name": "人员检测",
+                    "skill_name": "人员识别",
+                    "is_running": true
+                }
+            ]
+        """
+        try:
+            from app.services.ai_task_service import AITaskService
+            from app.services.skill_class_service import SkillClassService
+            
+            # 获取数据库会话
+            db = next(get_db())
+            
+            try:
+                # 查找该摄像头的所有运行中任务
+                running_tasks = []
+                
+                for task_id, camera_id_mapped in self.task_camera_mapping.items():
+                    if camera_id_mapped == camera_id:
+                        # 获取任务详情
+                        task_data = AITaskService.get_task_by_id(task_id, db)
+                        if task_data:
+                            # 获取技能名称
+                            skill_class = SkillClassService.get_by_id(
+                                task_data["skill_class_id"], 
+                                db, 
+                                is_detail=False
+                            )
+                            skill_name = skill_class["name_zh"] if skill_class else "未知技能"
+                            
+                            running_tasks.append({
+                                "task_id": task_id,
+                                "task_name": task_data["name"],
+                                "skill_name": skill_name,
+                                "is_running": task_id in self.running_tasks
+                            })
+                
+                return running_tasks
+                
+            finally:
+                db.close()
+                
+        except Exception as e:
+            logger.error(f"获取摄像头{camera_id}的运行任务失败: {str(e)}")
+            return []
     
     def shutdown(self):
         """优雅关闭AI任务执行器"""

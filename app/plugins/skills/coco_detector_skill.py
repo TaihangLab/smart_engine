@@ -152,8 +152,8 @@ class CocoDetectorSkill(BaseSkill):
                         filtered_results.append(detection)
                 results = filtered_results
                 self.log("info", f"围栏过滤后检测结果数量: {len(results)}")
-            elif fence_config:
-                self.log("info", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
+            # elif fence_config:
+                # self.log("info", f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
             
             # 5. 构建结果数据
             result_data = {
