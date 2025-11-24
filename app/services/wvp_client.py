@@ -1416,5 +1416,109 @@ class WVPClient:
             logger.error(f"一步到位获取全局通道截图时出错: {str(e)}")
             return None
 
+    @check_connection
+    @auto_relogin
+    def get_region_tree(self, parent: Optional[int] = None, 
+                       has_channel: bool = True) -> List[Dict[str, Any]]:
+        """
+        获取行政区划树
+        
+        Args:
+            parent: 父节点ID (Integer类型)
+            has_channel: 是否包含通道
+            
+        Returns:
+            List[Dict[str, Any]]: 行政区划树节点列表
+            
+        注意：RegionController没有query参数，只有parent和hasChannel
+        """
+        url = f"{self.base_url}/api/region/tree/list"
+        try:
+            logger.info(f"获取行政区划树: parent={parent}, has_channel={has_channel}")
+            
+            params = {
+                "hasChannel": has_channel
+            }
+            
+            if parent is not None:
+                params["parent"] = parent
+            
+            response = self.session.get(url, params=params)
+            logger.info(f"获取行政区划树响应状态: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"获取行政区划树失败，状态码: {response.status_code}")
+                return []
+            
+            result = response.json()
+            logger.debug(f"获取行政区划树原始响应: {result}")
+            
+            # WVP返回格式: {code: 0, msg: "success", data: [...]}
+            if result.get("code") == 0:
+                data = result.get("data", [])
+                logger.info(f"成功获取行政区划树，共 {len(data)} 个节点")
+                return data
+            else:
+                logger.warning(f"获取行政区划树失败: {result.get('msg')}")
+                return []
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"获取行政区划树时出错: {str(e)}")
+            return []
+
+    @check_connection
+    @auto_relogin
+    def get_group_tree(self, query: Optional[str] = None, parent: Optional[int] = None,
+                      has_channel: bool = True) -> List[Dict[str, Any]]:
+        """
+        获取业务分组树
+        
+        Args:
+            query: 搜索关键词 (String类型, 可选)
+            parent: 父节点ID (Integer类型, 可选)
+            has_channel: 是否包含通道
+            
+        Returns:
+            List[Dict[str, Any]]: 业务分组树节点列表
+            
+        注意：GroupController有query参数（与RegionController不同）
+        """
+        url = f"{self.base_url}/api/group/tree/list"
+        try:
+            logger.info(f"获取业务分组树: query={query}, parent={parent}, has_channel={has_channel}")
+            
+            params = {
+                "hasChannel": has_channel
+            }
+            
+            if query is not None and query != "":
+                params["query"] = query
+            
+            if parent is not None:
+                params["parent"] = parent
+            
+            response = self.session.get(url, params=params)
+            logger.info(f"获取业务分组树响应状态: {response.status_code}")
+            
+            if response.status_code != 200:
+                logger.error(f"获取业务分组树失败，状态码: {response.status_code}")
+                return []
+            
+            result = response.json()
+            logger.debug(f"获取业务分组树原始响应: {result}")
+            
+            # WVP返回格式: {code: 0, msg: "success", data: [...]}
+            if result.get("code") == 0:
+                data = result.get("data", [])
+                logger.info(f"成功获取业务分组树，共 {len(data)} 个节点")
+                return data
+            else:
+                logger.warning(f"获取业务分组树失败: {result.get('msg')}")
+                return []
+                
+        except requests.exceptions.RequestException as e:
+            logger.error(f"获取业务分组树时出错: {str(e)}")
+            return []
+
 # 创建全局WVP客户端实例
 wvp_client = WVPClient() 
