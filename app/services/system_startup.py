@@ -24,6 +24,9 @@ from datetime import datetime
 from app.core.config import settings
 from app.services.unified_compensation_service import start_unified_compensation, stop_unified_compensation
 
+# 导入Nacos服务
+from app.services.nacos_client import register_to_nacos, deregister_from_nacos
+
 # 导入数据库相关
 from app.db.session import engine, SessionLocal
 from app.db.base import Base
@@ -67,13 +70,22 @@ class SystemStartupService:
                 "startup_order": 0
             },
             {
+                "name": "nacos_registration",
+                "display_name": "Nacos服务注册",
+                "start_func": self._register_to_nacos,
+                "stop_func": self._deregister_from_nacos,
+                "enabled": settings.NACOS_ENABLED,
+                "critical": False,
+                "startup_order": 1
+            },
+            {
                 "name": "enterprise_minio_services",
                 "display_name": "企业级MinIO服务集群",
                 "start_func": self._initialize_enterprise_minio_services,
                 "stop_func": self._shutdown_enterprise_minio_services,
                 "enabled": True,
                 "critical": False,
-                "startup_order": 1
+                "startup_order": 2
             },
             {
                 "name": "unified_compensation",
@@ -82,7 +94,7 @@ class SystemStartupService:
                 "stop_func": stop_unified_compensation,
                 "enabled": settings.COMPENSATION_AUTO_START,
                 "critical": True,
-                "startup_order": 2
+                "startup_order": 3
             }
         ]
         
@@ -268,6 +280,33 @@ class SystemStartupService:
         except Exception as e:
             logger.error(f"❌ 企业级MinIO服务集群初始化失败: {str(e)}", exc_info=True)
             raise
+
+    async def _register_to_nacos(self):
+        """注册服务到Nacos"""
+        logger.info("🌐 开始注册服务到Nacos...")
+        
+        try:
+            success = register_to_nacos()
+            if success:
+                logger.info("✅ Nacos服务注册成功")
+            else:
+                logger.warning("⚠️ Nacos服务注册失败")
+        except Exception as e:
+            logger.error(f"❌ Nacos服务注册异常: {str(e)}", exc_info=True)
+            # 不抛出异常，允许系统继续运行
+    
+    async def _deregister_from_nacos(self):
+        """从Nacos注销服务"""
+        logger.info("🌐 开始从Nacos注销服务...")
+        
+        try:
+            success = deregister_from_nacos()
+            if success:
+                logger.info("✅ Nacos服务注销成功")
+            else:
+                logger.warning("⚠️ Nacos服务注销失败")
+        except Exception as e:
+            logger.error(f"❌ Nacos服务注销异常: {str(e)}")
 
     async def _shutdown_enterprise_minio_services(self):
         """关闭企业级MinIO服务集群"""
