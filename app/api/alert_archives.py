@@ -22,6 +22,9 @@ from app.models.alert_archive import (
     AlertArchiveStatistics
 )
 from app.services.minio_client import MinioClient
+# 导入JWT用户信息相关功能
+from app.models.user import UserInfo
+from app.core.auth import get_current_user_optional
 import json
 import uuid
 import os
@@ -387,11 +390,14 @@ async def upload_archive_image(
 @router.post("/link-alerts/{archive_id}", summary="将预警关联到档案")
 async def link_alerts_to_archive(
     archive_id: int = Path(..., gt=0, description="档案ID"),
-    request_data: dict = Body(..., description="关联请求数据")
+    request_data: dict = Body(..., description="关联请求数据"),
+    user: Optional[UserInfo] = Depends(get_current_user_optional)
 ):
     """
     将预警关联到指定档案
     支持批量关联
+    
+    操作人信息从JWT Token中自动获取
     """
     try:
         # 验证请求数据
@@ -403,7 +409,8 @@ async def link_alerts_to_archive(
             raise HTTPException(status_code=400, detail="单次最多只能关联100个预警")
         
         link_reason = request_data.get("link_reason", "批量关联预警到档案")
-        linked_by = "系统"
+        # 从JWT Token获取当前用户信息
+        linked_by = user.userName if user else "系统"
         
         logger.info(f"关联预警到档案 - 档案ID: {archive_id}, 预警数量: {len(alert_ids)}, 操作人: {linked_by}")
         
@@ -442,13 +449,17 @@ async def link_alerts_to_archive(
 async def unlink_alert_from_archive(
     archive_id: int = Path(..., gt=0, description="档案ID"),
     alert_id: int = Path(..., gt=0, description="预警ID"),
-    db: Session = Depends(get_db)
+    db: Session = Depends(get_db),
+    user: Optional[UserInfo] = Depends(get_current_user_optional)
 ):
     """
     从指定档案中移除预警关联
+    
+    操作人信息从JWT Token中自动获取
     """
     try:
-        unlinked_by = "系统"
+        # 从JWT Token获取当前用户信息
+        unlinked_by = user.userName if user else "系统"
         
         logger.info(f"移除预警关联 - 档案ID: {archive_id}, 预警ID: {alert_id}, 操作人: {unlinked_by}")
         
