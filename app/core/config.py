@@ -313,34 +313,6 @@ class Settings(BaseSettings):
         description="健康检查阈值配置"
     )
 
-    # 🔐 JWT认证配置
-    # ==============
-    JWT_DECODE_WITHOUT_VERIFY: bool = Field(
-        default=True, 
-        description="JWT解码时不验证签名（适用于内网环境，信任上游认证服务）"
-    )
-    JWT_TOKEN_PREFIX: str = Field(
-        default="Bearer", 
-        description="JWT Token前缀"
-    )
-    AUTH_HEADER_NAME: str = Field(
-        default="authorization", 
-        description="认证请求头名称（不区分大小写）"
-    )
-    # 保留原有的JWT配置（用于需要签名验证的场景）
-    SECRET_KEY: str = Field(
-        default="your-secret-key-here-change-in-production",
-        description="JWT签名密钥（当需要验证签名时使用）"
-    )
-    ALGORITHM: str = Field(
-        default="HS256",
-        description="JWT签名算法"
-    )
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
-        default=30,
-        description="访问令牌过期时间（分钟）"
-    )
-
     # RTSP推流配置
     RTSP_STREAMING_ENABLED: bool = Field(default=True, description="是否全局启用RTSP推流功能")
     RTSP_STREAMING_BACKEND: str = Field(default="pyav", description="推流后端选择: 'pyav'(推荐，高性能), 'ffmpeg'(兼容模式)")

@@ -78,33 +78,13 @@ class AlertProcessingService:
             self.cache_enabled = False
     
     @cached_method(timeout=CACHE_CONFIG['operator_info_timeout'], key_prefix="operator")
-    def get_operator_info(self, operator_id: int, user_info: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """
-        获取操作员信息（带缓存）
-        
-        Args:
-            operator_id: 操作员ID
-            user_info: 可选的用户信息字典，从JWT Token解析得到
-                      包含 userName, deptName 等字段
-        
-        Returns:
-            操作员信息字典
-        """
-        # 如果提供了用户信息，优先使用
-        if user_info:
-            return {
-                "operator_id": user_info.get("userId", operator_id),
-                "operator_name": user_info.get("userName", f"操作员_{operator_id}"),
-                "operator_role": "处理员",
-                "operator_department": user_info.get("deptName", "未知部门")
-            }
-        
-        # 否则使用默认值
+    def get_operator_info(self, operator_id: int) -> Dict[str, Any]:
+        """获取操作员信息（带缓存）"""
         return {
             "operator_id": operator_id,
             "operator_name": f"操作员_{operator_id}",
             "operator_role": "处理员",
-            "operator_department": "未知部门"
+            "operator_department": "安全部门"
         }
     
     def create_processing_record(self, alert_id: int, action_type: int, 
