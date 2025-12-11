@@ -231,7 +231,8 @@ class ConversationManager:
                                 title=current_title,
                                 message_count=conversation_info.get("message_count", 0),
                                 last_message_time=datetime.fromisoformat(conversation_info["last_message_time"]),
-                                created_at=datetime.fromisoformat(conversation_info["created_at"])
+                                created_at=datetime.fromisoformat(conversation_info["created_at"]),
+                                group_id=conversation_info.get("group_id")  # 添加分组ID
                         ))
                     else:
                         # 如果元数据不存在，检查是否有消息历史
@@ -245,7 +246,8 @@ class ConversationManager:
                                 title=generated_title,
                                 message_count=len(messages),
                                 last_message_time=datetime.now(),
-                                created_at=datetime.now()
+                                created_at=datetime.now(),
+                                group_id=None  # 新创建的会话默认无分组
                             ))
                 except Exception as e:
                     logger.warning(f"解析会话数据失败: {e}")
@@ -394,37 +396,53 @@ class ConversationManager:
             
             # 检查会话是否存在（通过元数据或消息历史）
             conversation_exists = False
+            conversation_data = None
             
             # 首先检查元数据是否存在
             if self.redis_client.exists(conv_key):
-                conversation_exists = True
-                logger.debug(f"找到会话元数据: {conversation_id}")
-            else:
+                conversation_data = self.redis_client.get(conv_key)
+                if conversation_data:
+                    conversation_exists = True
+                    logger.debug(f"找到会话元数据: {conversation_id}")
+            
+            if not conversation_exists:
                 # 如果元数据不存在，检查是否有消息历史
                 messages = self.memory_store.get_messages(conversation_id)
                 if messages:
                     conversation_exists = True
                     logger.info(f"会话 {conversation_id} 有消息历史但无元数据，重新创建元数据")
                     # 重新创建元数据
-                    self.save_conversation_metadata(conversation_id, self.auto_generate_conversation_title(conversation_id))
+                    self.save_conversation_metadata(conversation_id, self.auto_generate_conversation_title(conversation_id), user_id=user_id)
+                    conversation_data = self.redis_client.get(conv_key)
             
-            if not conversation_exists:
-                logger.warning(f"会话不存在: {conversation_id}")
+            if not conversation_exists or not conversation_data:
+                logger.warning(f"会话不存在或数据为空: {conversation_id}")
                 return False
+            
+            # 解析现有的会话数据（JSON字符串）
+            try:
+                conversation_info = json.loads(conversation_data)
+            except json.JSONDecodeError as e:
+                logger.error(f"解析会话数据失败: {e}, 数据: {conversation_data}")
+                return False
+            
+            # 更新分组信息
+            if group_id:
+                conversation_info["group_id"] = group_id
+                logger.info(f"会话 {conversation_id} 移动到分组: {group_id}")
+            else:
+                conversation_info.pop("group_id", None)
+                logger.info(f"会话 {conversation_id} 移动到无分组")
+            
+            # 更新时间戳
+            conversation_info["updated_at"] = datetime.now().isoformat()
+            
+            # 保存更新后的数据（使用setex保持字符串类型）
+            self.redis_client.setex(conv_key, self.ttl, json.dumps(conversation_info))
             
             # 确保会话在用户会话列表中
             user_conversations_key = f"{self.conversation_prefix}user_conversations:{user_id}"
             self.redis_client.sadd(user_conversations_key, conversation_id)
-            
-            # 更新分组信息
-            if group_id:
-                self.redis_client.hset(conv_key, "group_id", group_id)
-                logger.info(f"会话 {conversation_id} 移动到分组: {group_id}")
-            else:
-                self.redis_client.hdel(conv_key, "group_id")
-                logger.info(f"会话 {conversation_id} 移动到无分组")
-            
-            self.redis_client.hset(conv_key, "updated_at", datetime.now().isoformat())
             
             logger.info(f"更新会话分组成功: {conversation_id} -> {group_id}")
             return True
@@ -457,21 +475,27 @@ class ConversationManager:
                 # 使用正确的会话元数据键格式
                 conv_key = f"{self.conversation_prefix}{conv_id}"
                 
-                # 检查会话是否存在
-                if not self.redis_client.exists(conv_key):
+                # 检查会话是否存在并获取数据
+                conversation_data = self.redis_client.get(conv_key)
+                if not conversation_data:
                     # 如果元数据不存在，检查是否有消息历史
                     messages = self.memory_store.get_messages(conv_id)
                     if messages:
                         # 重新创建元数据
                         logger.info(f"为会话 {conv_id} 重新创建元数据")
                         self.save_conversation_metadata(conv_id, self.auto_generate_conversation_title(conv_id))
+                        conversation_data = self.redis_client.get(conv_key)
                     else:
                         # 会话不存在，跳过
                         continue
                 
-                conv_group = self.redis_client.hget(conv_key, "group_id")
-                if isinstance(conv_group, bytes):
-                    conv_group = conv_group.decode('utf-8')
+                # 解析会话数据（JSON字符串）
+                try:
+                    conversation_info = json.loads(conversation_data)
+                    conv_group = conversation_info.get("group_id")
+                except json.JSONDecodeError:
+                    logger.warning(f"解析会话数据失败，跳过: {conv_id}")
+                    continue
                 
                 # 匹配分组条件
                 if group_id is None and not conv_group:
@@ -582,26 +606,48 @@ class ChatService:
                               message: str,
                               system_prompt: Optional[str] = None,
                               **config) -> str:
-        """生成回复"""
+        """生成回复（非流式）"""
         try:
-            # 使用对话链
-            chain = self.llm_service.create_conversational_chain(
-                system_prompt=system_prompt or self.default_system_prompt,
-                session_id=conversation_id,
-                **config
+            from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
+            
+            # 获取历史消息
+            history_messages = conversation_manager.memory_store.get_messages(conversation_id)
+            
+            # 构建消息列表
+            messages = []
+            
+            # 添加系统提示（如果有）
+            if system_prompt:
+                messages.append(SystemMessage(content=system_prompt or self.default_system_prompt))
+            
+            # 添加历史消息
+            messages.extend(history_messages)
+            
+            # 添加当前用户消息
+            user_message = HumanMessage(content=message)
+            messages.append(user_message)
+            
+            # 保存用户消息
+            conversation_manager.memory_store.add_message(conversation_id, user_message)
+            
+            # 从llm_service获取纯文本LLM客户端（使用配置文件中的默认参数）
+            client = self.llm_service._get_client(
+                model_type="text",
+                use_backup=False
             )
             
-            # 调用链
-            response = await self.llm_service.ainvoke_chain(
-                chain,
-                {"input": message},
-                config=RunnableConfig(configurable={"session_id": conversation_id})
-            )
+            # 调用LLM
+            response = await client.ainvoke(messages)
+            response_text = response.content
             
-            return response
+            # 保存助手回复
+            assistant_message = AIMessage(content=response_text)
+            conversation_manager.memory_store.add_message(conversation_id, assistant_message)
+            
+            return response_text
             
         except Exception as e:
-            logger.error(f"生成回复失败: {e}")
+            logger.error(f"生成回复失败: {e}", exc_info=True)
             raise HTTPException(status_code=500, detail=f"生成回复失败: {str(e)}")
     
     async def stream_response(self, 
@@ -611,60 +657,47 @@ class ChatService:
                             **config) -> AsyncGenerator[str, None]:
         """流式生成回复（不自动保存消息，避免重复）"""
         try:
-            # 手动构建带历史的提示，避免LangChain自动保存消息
-            from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-            from langchain_core.output_parsers import StrOutputParser
+            from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
             
             # 获取历史消息
             history_messages = conversation_manager.memory_store.get_messages(conversation_id)
             
-            # 构建提示模板
+            # 构建消息列表
+            messages = []
+            
+            # 添加系统提示（如果有）
             if system_prompt:
-                prompt_messages = [
-                    ("system", system_prompt),
-                    *[(msg.__class__.__name__.lower().replace('message', ''), msg.content) for msg in history_messages],
-                    ("human", message)
-                ]
-            else:
-                prompt_messages = [
-                    *[(msg.__class__.__name__.lower().replace('message', ''), msg.content) for msg in history_messages],
-                    ("human", message)
-                ]
+                messages.append(SystemMessage(content=system_prompt))
             
-            prompt = ChatPromptTemplate.from_messages(prompt_messages)
+            # 添加历史消息
+            messages.extend(history_messages)
             
-            # 配置LLM
-            llm_config = {}
-            if "temperature" in config:
-                llm_config["temperature"] = config["temperature"]
-            if "max_tokens" in config:
-                llm_config["max_tokens"] = config["max_tokens"]
+            # 添加当前用户消息
+            messages.append(HumanMessage(content=message))
             
-            # 创建不带历史管理的简单链
-            chain = (
-                prompt 
-                | self.llm_service.configurable_llm.with_config(configurable=llm_config)
-                | StrOutputParser()
+            # 从llm_service获取纯文本LLM客户端（使用配置文件中的默认参数）
+            client = self.llm_service._get_client(
+                model_type="text",
+                use_backup=False
             )
             
             # 收集完整回复用于保存
             full_response = ""
             
-            # 流式调用链
-            async for chunk in self.llm_service.astream_chain(chain, {}):
-                if chunk:
-                    full_response += chunk
-                    yield chunk
+            # 流式调用
+            async for chunk in client.astream(messages):
+                if chunk.content:
+                    full_response += chunk.content
+                    yield chunk.content
             
             # 手动保存助手回复
-            from langchain_core.messages import AIMessage
             if full_response.strip():
                 assistant_message = AIMessage(content=full_response, id=str(uuid.uuid4()))
                 conversation_manager.memory_store.add_message(conversation_id, assistant_message)
                 logger.info(f"已保存助手回复: {full_response[:50]}...")
             
         except Exception as e:
-            logger.error(f"流式生成回复失败: {e}")
+            logger.error(f"流式生成回复失败: {e}", exc_info=True)
             yield f"错误: {str(e)}"
 
 
@@ -702,12 +735,9 @@ async def chat_completion(request: ChatRequest):
         # 流式响应
         if request.stream:
             message_id = str(uuid.uuid4())
-            # 获取默认模型名称
-            try:
-                default_model = llm_service.get_llm_config().get("model_name", "unknown")
-            except Exception as e:
-                logger.warning(f"获取默认模型失败: {e}")
-                default_model = "unknown"
+            # 获取默认模型名称（从配置文件）
+            from app.core.config import settings
+            default_model = settings.TEXT_LLM_MODEL
             model = config.get("model_name", default_model)
             
             async def generate():
@@ -845,12 +875,9 @@ async def chat_completion(request: ChatRequest):
                 timestamp=datetime.now()
             )
             
-            # 获取默认模型名称
-            try:
-                default_model = llm_service.get_llm_config().get("model_name", "unknown")
-            except Exception as e:
-                logger.warning(f"获取默认模型失败: {e}")
-                default_model = "unknown"
+            # 获取默认模型名称（从配置文件）
+            from app.core.config import settings
+            default_model = settings.TEXT_LLM_MODEL
             
             return ChatResponse(
                 conversation_id=conversation_id,
@@ -957,12 +984,9 @@ async def quick_chat(
             async def generate():
                 try:
                     message_id = str(uuid.uuid4())
-                    model_name = "unknown"
-                    try:
-                        config = llm_service.get_llm_config()
-                        model_name = config.get("model_name", "unknown")
-                    except:
-                        pass
+                    # 获取默认模型名称（从配置文件）
+                    from app.core.config import settings
+                    model_name = settings.TEXT_LLM_MODEL
                     
                     # 发送开始标记
                     start_chunk = {
@@ -1049,50 +1073,30 @@ async def quick_chat(
 async def get_available_models():
     """获取可用模型列表"""
     try:
+        from app.core.config import settings
+        
         models = []
         
-        # 获取主配置信息
-        try:
-            config = llm_service.get_llm_config()
+        # 添加主文本模型
+        models.append({
+            "id": settings.TEXT_LLM_MODEL,
+            "object": "model",
+            "created": int(time.time()),
+            "owned_by": settings.TEXT_LLM_PROVIDER,
+            "permission": [],
+            "root": settings.TEXT_LLM_MODEL,
+            "parent": None
+        })
+        
+        # 添加备用文本模型（如果不同）
+        if settings.BACKUP_TEXT_LLM_MODEL != settings.TEXT_LLM_MODEL:
             models.append({
-                "id": config.get("model_name", "unknown"),
+                "id": settings.BACKUP_TEXT_LLM_MODEL,
                 "object": "model",
                 "created": int(time.time()),
-                "owned_by": config.get("provider", "unknown"),
+                "owned_by": "ollama",
                 "permission": [],
-                "root": config.get("model_name", "unknown"),
-                "parent": None
-            })
-        except Exception as e:
-            logger.warning(f"获取主模型配置失败: {e}")
-        
-        # 获取备用配置信息
-        try:
-            backup_config = llm_service.get_llm_config(use_backup=True)
-            backup_model = backup_config.get("model_name", "unknown")
-            # 检查是否与主模型不同
-            if not models or backup_model != models[0]["id"]:
-                models.append({
-                    "id": backup_model,
-                    "object": "model",
-                    "created": int(time.time()),
-                    "owned_by": backup_config.get("provider", "unknown"),
-                    "permission": [],
-                    "root": backup_model,
-                    "parent": None
-                })
-        except Exception as e:
-            logger.warning(f"获取备用模型配置失败: {e}")
-        
-        # 如果没有获取到任何模型，返回默认模型
-        if not models:
-            models.append({
-                "id": "unknown",
-                "object": "model",
-                "created": int(time.time()),
-                "owned_by": "unknown",
-                "permission": [],
-                "root": "unknown",
+                "root": settings.BACKUP_TEXT_LLM_MODEL,
                 "parent": None
             })
         
@@ -1104,12 +1108,12 @@ async def get_available_models():
         return {
             "object": "list", 
             "data": [{
-                "id": "unknown",
+                "id": "qwen3:32b",
                 "object": "model",
                 "created": int(time.time()),
-                "owned_by": "unknown",
+                "owned_by": "ollama",
                 "permission": [],
-                "root": "unknown",
+                "root": "qwen3:32b",
                 "parent": None
             }]
         }
@@ -1119,18 +1123,25 @@ async def get_available_models():
 async def health_check():
     """健康检查"""
     try:
-        # 检查LLM服务
-        is_valid, error_msg = llm_service.validate_skill_config()
+        from app.core.config import settings
         
-        # 获取模型信息
+        # 获取模型信息（从配置文件）
+        model_name = settings.TEXT_LLM_MODEL
+        provider = settings.TEXT_LLM_PROVIDER
+        
+        # 检查LLM服务（尝试简单的调用）
+        llm_healthy = True
+        error_msg = None
         try:
-            config = llm_service.get_llm_config()
-            model_name = config.get("model_name", "unknown")
-            provider = config.get("provider", "unknown")
+            # 简单测试：创建一个客户端
+            client = llm_service._get_client(model_type="text", use_backup=False)
+            if not client:
+                llm_healthy = False
+                error_msg = "无法创建LLM客户端"
         except Exception as e:
-            model_name = "unknown"
-            provider = "unknown"
-            logger.warning(f"获取模型配置失败: {e}")
+            llm_healthy = False
+            error_msg = str(e)
+            logger.warning(f"LLM服务检查失败: {e}")
         
         # 检查Redis连接
         redis_healthy = True
@@ -1141,7 +1152,7 @@ async def health_check():
             logger.warning(f"Redis连接失败: {e}")
         
         # 根据测试脚本期望的格式返回
-        if not is_valid:
+        if not llm_healthy:
             return {
                 "status": "unhealthy",
                 "llm_service": False,
@@ -1167,8 +1178,8 @@ async def health_check():
             "status": "unhealthy",
             "llm_service": False,
             "redis_service": False,
-            "model": "unknown", 
-            "provider": "unknown",
+            "model": "qwen3:32b", 
+            "provider": "ollama",
             "llm_error": str(e),
             "timestamp": datetime.now().isoformat()
         }

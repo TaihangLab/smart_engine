@@ -408,8 +408,13 @@ class SkillFactory:
                         
                         # 遍历模块中的所有类，查找BaseSkill的子类
                         for name, obj in inspect.getmembers(module, inspect.isclass):
-                            # 检查是否是BaseSkill的子类，排除BaseSkill自身
+                            # 检查是否是BaseSkill的子类，排除BaseSkill自身和抽象基类
                             if issubclass(obj, BaseSkill) and obj != BaseSkill:
+                                # 排除抽象基类（如AgentSkillBase）
+                                if inspect.isabstract(obj):
+                                    logger.debug(f"跳过抽象基类: {obj.__name__}")
+                                    continue
+                                
                                 result["total_found"] += 1
                                 
                                 # 注册技能类
