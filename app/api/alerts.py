@@ -14,10 +14,6 @@ import io
 from app.db.session import get_db
 from app.models.alert import Alert, AlertResponse, AlertUpdate, AlertStatus
 from app.services.alert_service import alert_service, register_sse_client, unregister_sse_client, publish_test_alert, connected_clients
-# 导入JWT用户信息相关功能
-from app.models.user import UserInfo
-from app.core.auth import get_current_user, get_current_user_optional
-from app.utils.auth_helper import get_user_id_from_request, get_user_name_from_request, get_user_context
 
 logger = logging.getLogger(__name__)
 
@@ -1139,21 +1135,14 @@ def get_alert_processing_records(
 def update_alert_status(
     alert_id: int,
     alert_update: AlertUpdate,
-    db: Session = Depends(get_db),
-    user: Optional[UserInfo] = Depends(get_current_user_optional)
+    db: Session = Depends(get_db)
 ):
     """
     更新预警状态 - 前端确认处理按钮调用的API
     同时更新alerts表和自动创建alert_processing_records记录
-    
-    操作人信息从JWT Token中自动获取，无需前端传递
     """
     try:
-        # 从JWT Token获取当前用户信息
-        operator_name = user.userName if user else (alert_update.processed_by or "系统操作")
-        operator_dept = user.deptName if user else "未知部门"
-        
-        logger.info(f"🔄 开始处理预警状态更新: alert_id={alert_id}, status={alert_update.status}, 操作人={operator_name}")
+        logger.info(f"🔄 开始处理预警状态更新: alert_id={alert_id}, status={alert_update.status}")
         
         # 1. 查找预警记录
         alert = db.query(Alert).filter(Alert.alert_id == alert_id).first()
@@ -1171,9 +1160,9 @@ def update_alert_status(
             logger.error(error_msg)
             raise HTTPException(status_code=400, detail=error_msg)
         
-        # 4. 更新预警基本信息（使用当前登录用户信息）
+        # 4. 更新预警基本信息
         alert.status = alert_update.status
-        alert.processed_by = operator_name  # 使用当前登录用户
+        alert.processed_by = alert_update.processed_by
         alert.processing_notes = alert_update.processing_notes
         alert.processed_at = datetime.now()
         alert.updated_at = datetime.now()
@@ -1189,23 +1178,23 @@ def update_alert_status(
             action_type=action_type,
             from_status=original_status,
             to_status=alert_update.status,
-            operator_name=operator_name,  # 使用当前登录用户
+            operator_name=alert_update.processed_by or "系统操作",
             operator_role="处理员",
-            operator_department=operator_dept,  # 使用当前登录用户的部门
+            operator_department="安全部门",
             notes=alert_update.processing_notes,
             priority_level=0,
             is_automated=False,
             created_at=datetime.now()
         )
         
-        logger.info(f"📝 创建处理记录: action_type={action_type}, operator={operator_name}, dept={operator_dept}")
+        logger.info(f"📝 创建处理记录: action_type={action_type}, operator={processing_record.operator_name}")
         
         # 6. 同时更新JSON格式的process字段（兼容性）
         action_desc = _get_action_description(action_type, original_status, alert_update.status)
         alert.add_process_step(
             step=action_desc,
             desc=alert_update.processing_notes or action_desc,
-            operator=operator_name  # 使用当前登录用户
+            operator=alert_update.processed_by or "系统操作"
         )
         
         # 7. 保存到数据库
@@ -1264,29 +1253,23 @@ def update_alert_status(
 @router.put("/batch-update", description="批量更新预警状态并创建处理记录") 
 def batch_update_alert_status(
     batch_request: dict,
-    db: Session = Depends(get_db),
-    user: Optional[UserInfo] = Depends(get_current_user_optional)
+    db: Session = Depends(get_db)
 ):
     """
     批量更新预警状态 - 前端批量处理调用的API
     同时更新alerts表和创建alert_processing_records记录
-    
-    操作人信息从JWT Token中自动获取，无需前端传递
     """
     try:
         alert_ids = batch_request.get("alert_ids", [])
         if not alert_ids:
             raise HTTPException(status_code=400, detail="缺少预警ID列表")
         
-        # 从JWT Token获取当前用户信息
-        operator_name = user.userName if user else (batch_request.get("processed_by") or "系统操作")
-        operator_dept = user.deptName if user else "未知部门"
-        
-        logger.info(f"🔄 开始批量处理预警: {len(alert_ids)} 个预警, 操作人={operator_name}")
+        logger.info(f"🔄 开始批量处理预警: {len(alert_ids)} 个预警")
         
         # 提取更新数据
         status = batch_request.get("status")
         processing_notes = batch_request.get("processing_notes")
+        processed_by = batch_request.get("processed_by")
         
         if status is None:
             raise HTTPException(status_code=400, detail="缺少状态参数")
@@ -1321,9 +1304,9 @@ def batch_update_alert_status(
                     failure_count += 1
                     continue
                 
-                # 更新预警（使用当前登录用户信息）
+                # 更新预警
                 alert.status = status
-                alert.processed_by = operator_name  # 使用当前登录用户
+                alert.processed_by = processed_by
                 alert.processing_notes = processing_notes
                 alert.processed_at = datetime.now()
                 alert.updated_at = datetime.now()
@@ -1337,9 +1320,9 @@ def batch_update_alert_status(
                     action_type=action_type,
                     from_status=original_status,
                     to_status=status,
-                    operator_name=operator_name,  # 使用当前登录用户
+                    operator_name=processed_by or "系统操作",
                     operator_role="处理员",
-                    operator_department=operator_dept,  # 使用当前登录用户的部门
+                    operator_department="安全部门",
                     notes=processing_notes,
                     priority_level=0,
                     is_automated=False,
@@ -1351,7 +1334,7 @@ def batch_update_alert_status(
                 alert.add_process_step(
                     step=action_desc,
                     desc=processing_notes or action_desc,
-                    operator=operator_name  # 使用当前登录用户
+                    operator=processed_by or "系统操作"
                 )
                 
                 db.add(processing_record)
@@ -1749,292 +1732,3 @@ async def batch_mark_alerts_as_false_alarm(
         db.rollback()
         logger.error(f"批量标记误报失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"批量标记误报失败: {str(e)}")
-
-
-# ========== JWT用户信息使用示例接口 ==========
-# 以下接口演示如何在实际业务中使用JWT Token解析功能
-
-@router.get("/user/my-alerts", response_model=Dict[str, Any], description="获取当前用户的预警列表（示例）")
-async def get_my_alerts(
-    user: UserInfo = Depends(get_current_user),
-    db: Session = Depends(get_db),
-    page: int = Query(1, ge=1, description="页码"),
-    limit: int = Query(10, ge=1, le=100, description="每页数量")
-):
-    """
-    【示例接口1：强制要求用户登录】
-    获取当前登录用户创建的预警列表
-    
-    使用场景：
-    - 个人中心查看我的预警
-    - 需要用户认证的接口
-    
-    技术要点：
-    - 使用 Depends(get_current_user) 强制要求用户登录
-    - Token无效时自动返回401错误
-    - 可以直接使用 user.userId, user.userName 等属性
-    """
-    try:
-        logger.info(f"用户 {user.userName}(ID:{user.userId}) 查询自己的预警列表")
-        
-        # 这里可以根据用户ID查询预警
-        # 示例：查询该用户所在租户的预警
-        query = db.query(Alert)
-        
-        # 如果有租户ID，按租户过滤（多租户场景）
-        if user.tenantId:
-            logger.debug(f"按租户ID过滤: {user.tenantId}")
-            # query = query.filter(Alert.tenant_id == user.tenantId)
-        
-        # 分页
-        total = query.count()
-        alerts = query.order_by(desc(Alert.alert_time)).offset((page - 1) * limit).limit(limit).all()
-        
-        return {
-            "code": 0,
-            "msg": "success",
-            "data": {
-                "user_info": {
-                    "userId": user.userId,
-                    "userName": user.userName,
-                    "deptName": user.deptName,
-                    "tenantId": user.tenantId
-                },
-                "alerts": [
-                    {
-                        "id": alert.id,
-                        "alert_name": alert.alert_name,
-                        "alert_time": alert.alert_time.isoformat() if alert.alert_time else None,
-                        "alert_level": alert.alert_level,
-                        "status": alert.status
-                    }
-                    for alert in alerts
-                ],
-                "pagination": {
-                    "page": page,
-                    "limit": limit,
-                    "total": total,
-                    "pages": math.ceil(total / limit) if limit > 0 else 0
-                }
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"获取用户预警列表失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取预警列表失败: {str(e)}")
-
-
-@router.get("/user/info", response_model=Dict[str, Any], description="获取当前用户信息（示例）")
-async def get_current_user_info(
-    user: UserInfo = Depends(get_current_user)
-):
-    """
-    【示例接口2：获取当前用户信息】
-    返回JWT Token中的所有用户信息
-    
-    使用场景：
-    - 前端获取当前登录用户信息
-    - 用户个人信息展示
-    
-    技术要点：
-    - 直接返回UserInfo对象中的所有字段
-    - 演示如何访问Token中的所有字段
-    """
-    logger.info(f"用户 {user.userName}(ID:{user.userId}) 查询个人信息")
-    
-    return {
-        "code": 0,
-        "msg": "success",
-        "data": {
-            "loginType": user.loginType,
-            "loginId": user.loginId,
-            "clientid": user.clientid,
-            "tenantId": user.tenantId,
-            "userId": user.userId,
-            "userName": user.userName,
-            "deptId": user.deptId,
-            "deptName": user.deptName,
-            "deptCategory": user.deptCategory
-        }
-    }
-
-
-@router.get("/public/alerts", response_model=Dict[str, Any], description="公开预警列表（可选登录，示例）")
-async def get_public_alerts(
-    user: Optional[UserInfo] = Depends(get_current_user_optional),
-    db: Session = Depends(get_db),
-    page: int = Query(1, ge=1, description="页码"),
-    limit: int = Query(10, ge=1, le=100, description="每页数量")
-):
-    """
-    【示例接口3：可选用户登录】
-    获取预警列表，支持匿名访问，但登录用户可以看到更多信息
-    
-    使用场景：
-    - 公开API，但登录用户有额外功能
-    - 个性化推荐（登录用户基于偏好）
-    
-    技术要点：
-    - 使用 Depends(get_current_user_optional) 允许匿名访问
-    - user 可能为 None，需要判断
-    - 根据是否登录提供不同的数据
-    """
-    if user:
-        logger.info(f"用户 {user.userName}(ID:{user.userId}) 访问公开预警列表（已登录）")
-    else:
-        logger.info("匿名用户访问公开预警列表")
-    
-    try:
-        query = db.query(Alert)
-        
-        # 如果用户已登录且有租户ID，可以优先显示本租户的预警
-        if user and user.tenantId:
-            logger.debug(f"已登录用户，租户ID: {user.tenantId}")
-            # 可以添加租户相关的过滤或排序逻辑
-        
-        # 分页
-        total = query.count()
-        alerts = query.order_by(desc(Alert.alert_time)).offset((page - 1) * limit).limit(limit).all()
-        
-        response_data = {
-            "alerts": [
-                {
-                    "id": alert.id,
-                    "alert_name": alert.alert_name,
-                    "alert_time": alert.alert_time.isoformat() if alert.alert_time else None,
-                    "alert_level": alert.alert_level,
-                    "status": alert.status
-                }
-                for alert in alerts
-            ],
-            "pagination": {
-                "page": page,
-                "limit": limit,
-                "total": total,
-                "pages": math.ceil(total / limit) if limit > 0 else 0
-            }
-        }
-        
-        # 如果用户已登录，添加用户信息
-        if user:
-            response_data["user_info"] = {
-                "userId": user.userId,
-                "userName": user.userName,
-                "authenticated": True
-            }
-        else:
-            response_data["user_info"] = {
-                "authenticated": False
-            }
-        
-        return {
-            "code": 0,
-            "msg": "success",
-            "data": response_data
-        }
-        
-    except Exception as e:
-        logger.error(f"获取公开预警列表失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"获取预警列表失败: {str(e)}")
-
-
-@router.post("/alerts/{alert_id}/claim", response_model=Dict[str, Any], description="认领预警（示例）")
-async def claim_alert(
-    alert_id: int,
-    user: UserInfo = Depends(get_current_user),
-    db: Session = Depends(get_db)
-):
-    """
-    【示例接口4：使用用户信息更新数据】
-    认领预警，将当前用户设置为预警的处理人
-    
-    使用场景：
-    - 预警处理流程
-    - 需要记录操作人信息
-    
-    技术要点：
-    - 使用用户ID和用户名更新数据库
-    - 演示如何在业务逻辑中使用用户信息
-    """
-    try:
-        logger.info(f"用户 {user.userName}(ID:{user.userId}) 尝试认领预警 {alert_id}")
-        
-        # 查询预警
-        alert = db.query(Alert).filter(Alert.id == alert_id).first()
-        if not alert:
-            raise HTTPException(status_code=404, detail=ALERT_NOT_FOUND_MSG)
-        
-        # 检查预警状态
-        if alert.status != AlertStatus.PENDING.value:
-            raise HTTPException(status_code=400, detail="只能认领待处理状态的预警")
-        
-        # 更新预警状态和处理人信息
-        alert.status = AlertStatus.PROCESSING.value
-        # 假设Alert模型有这些字段（实际使用时需要确认）
-        # alert.handler_id = user.userId
-        # alert.handler_name = user.userName
-        # alert.claim_time = datetime.now()
-        
-        db.commit()
-        
-        logger.info(f"预警 {alert_id} 已被用户 {user.userName} 认领")
-        
-        return {
-            "code": 0,
-            "msg": "预警认领成功",
-            "data": {
-                "alert_id": alert_id,
-                "handler": {
-                    "userId": user.userId,
-                    "userName": user.userName,
-                    "deptName": user.deptName
-                },
-                "status": alert.status
-            }
-        }
-        
-    except HTTPException:
-        raise
-    except Exception as e:
-        db.rollback()
-        logger.error(f"认领预警失败: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=f"认领预警失败: {str(e)}")
-
-
-@router.get("/user/context-demo", response_model=Dict[str, Any], description="使用工具函数获取用户信息（示例）")
-async def get_user_context_demo(request: Request):
-    """
-    【示例接口5：使用工具函数】
-    演示如何使用 auth_helper 中的工具函数快速获取用户信息
-    
-    使用场景：
-    - 不想使用依赖注入
-    - 在中间件或其他地方需要获取用户信息
-    
-    技术要点：
-    - 使用 get_user_context() 获取完整用户上下文
-    - 使用 get_user_id_from_request() 等快捷函数
-    """
-    # 方式1：获取完整用户上下文
-    user_context = get_user_context(request)
-    
-    # 方式2：单独获取某个字段
-    user_id = get_user_id_from_request(request)
-    user_name = get_user_name_from_request(request)
-    
-    logger.info(f"工具函数获取用户信息: userId={user_id}, userName={user_name}")
-    
-    return {
-        "code": 0,
-        "msg": "success",
-        "data": {
-            "method": "auth_helper工具函数",
-            "user_context": user_context,
-            "individual_fields": {
-                "userId": user_id,
-                "userName": user_name
-            }
-        }
-    }
