@@ -50,7 +50,7 @@ class UserService:
             "user_name": user_name,
             "nick_name": display_name,
             "tenant_code": tenant_code,
-            "status": True,
+            "status": 0,
             "create_by": "system",
             "update_by": "system"
         }
@@ -136,3 +136,22 @@ class UserService:
     def get_user_count_by_tenant(db: Session, tenant_code: str) -> int:
         """获取租户下的用户数量"""
         return RbacDao.user.get_user_count_by_tenant(db, tenant_code)
+
+    @staticmethod
+    def get_users_advanced_search(db: Session, tenant_code: str, user_name: str = None, nick_name: str = None,
+                                 phone: str = None, status: int = None, dept_id: int = None,
+                                 gender: int = None, position_code: str = None, role_code: str = None,
+                                 skip: int = 0, limit: int = 100):
+        """高级搜索用户"""
+        return RbacDao.user.get_users_advanced_search(
+            db, tenant_code, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code, skip, limit
+        )
+
+    @staticmethod
+    def get_user_count_advanced_search(db: Session, tenant_code: str, user_name: str = None, nick_name: str = None,
+                                      phone: str = None, status: int = None, dept_id: int = None,
+                                      gender: int = None, position_code: str = None, role_code: str = None):
+        """高级搜索用户数量统计"""
+        return RbacDao.user.get_user_count_advanced_search(
+            db, tenant_code, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code
+        )

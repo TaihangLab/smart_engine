@@ -38,15 +38,14 @@ class RbacDao:
     @staticmethod
     def get_user_permissions(db: Session, user_name: str, tenant_code: str):
         """获取用户所有权限"""
-        from sqlalchemy.orm import joinedload
         from app.models.rbac import SysUser, SysRole, SysPermission, SysUserRole, SysRolePermission
 
         return db.query(SysPermission).join(
-            SysRolePermission, SysPermission.id == SysRolePermission.permission_id
+            SysRolePermission, SysPermission.permission_code == SysRolePermission.permission_code
         ).join(
-            SysRole, SysRole.id == SysRolePermission.role_id
+            SysRole, SysRole.role_code == SysRolePermission.role_code
         ).join(
-            SysUserRole, SysRole.id == SysUserRole.role_id
+            SysUserRole, SysRole.role_code == SysUserRole.role_code
         ).join(
             SysUser, SysUser.user_name == SysUserRole.user_name
         ).filter(
@@ -54,10 +53,7 @@ class RbacDao:
             SysUser.tenant_code == tenant_code,
             SysUser.is_deleted == False,
             SysRole.is_deleted == False,
-            SysPermission.is_deleted == False,
-            SysPermission.status == True,
-            SysRole.status == True,
-            SysUser.status == True
+            SysPermission.is_deleted == False
         ).all()
 
     @staticmethod

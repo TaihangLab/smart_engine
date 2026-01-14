@@ -30,7 +30,7 @@ user_router = APIRouter(tags=["用户管理"])
 @user_router.get("/users/{user_name}", response_model=UnifiedResponse, summary="获取用户详情")
 async def get_user(
     user_name: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """根据用户名获取用户详情"""
@@ -61,15 +61,33 @@ async def get_user(
 
 @user_router.get("/users", response_model=UnifiedResponse, summary="获取用户列表")
 async def get_users(
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
+    user_name: str = Query(None, description="用户名过滤条件（模糊查询）"),
+    nick_name: str = Query(None, description="用户昵称过滤条件（模糊查询）"),
+    phone: str = Query(None, description="手机号过滤条件（模糊查询）"),
+    status: int = Query(None, description="状态过滤条件"),
+    dept_id: int = Query(None, description="部门ID过滤条件"),
+    gender: int = Query(None, description="性别过滤条件"),
+    position_code: str = Query(None, description="岗位编码过滤条件（模糊查询）"),
+    role_code: str = Query(None, description="角色编码过滤条件"),
     db: Session = Depends(get_db)
 ):
-    """获取指定租户的用户列表"""
+    """获取指定租户的用户列表，支持高级搜索"""
     try:
-        users = RbacService.get_users_by_tenant(db, tenant_code, skip, limit)
-        total = RbacService.get_user_count_by_tenant(db, tenant_code)
+        # 如果提供了任何高级搜索参数，则使用高级搜索
+        if user_name or nick_name or phone or status is not None or dept_id is not None or gender is not None or position_code or role_code:
+            users = RbacService.get_users_advanced_search(
+                db, tenant_code, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code, skip, limit
+            )
+            total = RbacService.get_user_count_advanced_search(
+                db, tenant_code, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code
+            )
+        else:
+            # 否则使用基本查询
+            users = RbacService.get_users_by_tenant(db, tenant_code, skip, limit)
+            total = RbacService.get_user_count_by_tenant(db, tenant_code)
 
         user_list = [
             UserListResponse.model_validate(user).model_dump(by_alias=True)
@@ -107,6 +125,10 @@ async def create_user(
 ):
     """创建新用户"""
     try:
+        # 如果用户没有指定租户编码，使用默认值
+        if not user.tenant_code:
+            user.tenant_code = "default"
+
         # 检查用户是否已存在
         existing_user = RbacService.get_user_by_user_name(db, user.user_name, user.tenant_code)
         if existing_user:
@@ -145,7 +167,7 @@ async def create_user(
 async def update_user(
     user_name: str,
     user_update: UserUpdate,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """更新用户信息"""
@@ -177,7 +199,7 @@ async def update_user(
 @user_router.delete("/users/{user_name}", response_model=UnifiedResponse, summary="删除用户")
 async def delete_user(
     user_name: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """删除用户"""
@@ -213,7 +235,7 @@ async def delete_user(
 @user_router.get("/users/{user_name}/roles", response_model=UnifiedResponse, summary="获取用户角色")
 async def get_user_roles(
     user_name: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """获取用户的角色列表"""
@@ -333,7 +355,7 @@ async def remove_role_from_user(
 @user_router.get("/user-roles/users/{role_code}", response_model=UnifiedResponse, summary="获取拥有指定角色的用户")
 async def get_users_by_role(
     role_code: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """获取拥有指定角色的用户列表"""
@@ -358,7 +380,7 @@ async def get_users_by_role(
 @user_router.get("/permissions/user/{user_name}", response_model=UnifiedResponse, summary="获取用户权限列表")
 async def get_user_permissions(
     user_name: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """获取用户的完整权限列表"""

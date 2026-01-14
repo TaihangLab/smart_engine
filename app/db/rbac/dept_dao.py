@@ -112,6 +112,15 @@ class DeptDao:
         ).first()
 
     @staticmethod
+    def get_dept_by_code(db: Session, dept_code: str, tenant_code: str) -> Optional[SysDept]:
+        """根据部门编码和租户编码获取部门"""
+        return db.query(SysDept).filter(
+            SysDept.dept_code == dept_code,
+            SysDept.tenant_code == tenant_code,
+            SysDept.is_deleted == False
+        ).first()
+
+    @staticmethod
     def get_all_depts(db: Session) -> List[SysDept]:
         """获取所有部门"""
         return db.query(SysDept).filter(
@@ -119,11 +128,20 @@ class DeptDao:
         ).order_by(SysDept.path, SysDept.sort_order).all()
 
     @staticmethod
+    def get_all_active_depts(db: Session) -> List[SysDept]:
+        """获取所有激活的部门"""
+        return db.query(SysDept).filter(
+            SysDept.is_deleted == False,
+            SysDept.status == 0
+        ).order_by(SysDept.path, SysDept.sort_order).all()
+
+    @staticmethod
     def get_dept_by_parent(db: Session, parent_id: Optional[int]) -> List[SysDept]:
         """获取指定父部门下的所有直接子部门"""
         return db.query(SysDept).filter(
             SysDept.parent_id == parent_id,
-            SysDept.is_deleted == False
+            SysDept.is_deleted == False,
+            SysDept.status == 0  # 只返回激活的部门
         ).order_by(SysDept.sort_order).all()
 
     @staticmethod
@@ -150,7 +168,7 @@ class DeptDao:
         # 例如：当前部门路径是 /1/，则查询所有路径 like "/1/%" 的部门
         return db.query(SysDept).filter(
             SysDept.path.like(f"{dept.path}%"),
-            SysDept.status == "ACTIVE",
+            SysDept.status == 0,
             SysDept.is_deleted == False
         ).order_by(SysDept.path, SysDept.sort_order).all()
 
@@ -235,13 +253,37 @@ class DeptDao:
         return True
 
     @staticmethod
-    def get_dept_tree(db: Session) -> List[Dict[str, Any]]:
+    def get_dept_tree(db: Session, tenant_code: Optional[str] = None, name: Optional[str] = None, dept_code: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取部门树结构
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户代码，为None时返回所有租户的部门树
+            name: 部门名称（模糊查询）
+            dept_code: 部门编码（模糊查询）
 
         Returns:
             List[Dict[str, Any]]: 部门树，每个部门包含 children 字段
         """
-        all_depts = DeptDao.get_all_depts(db)
+        # 构建查询
+        query = db.query(SysDept).filter(
+            SysDept.is_deleted == False,
+            SysDept.status == 0  # 只返回激活的部门
+        )
+
+        # 添加租户过滤
+        if tenant_code:
+            query = query.filter(SysDept.tenant_code == tenant_code)
+
+        # 添加名称模糊查询
+        if name:
+            query = query.filter(SysDept.name.contains(name))
+
+        # 添加编码模糊查询
+        if dept_code:
+            query = query.filter(SysDept.dept_code.contains(dept_code))
+
+        all_depts = query.all()
 
         # 将部门转换为字典，并构建映射
         dept_map = {}
@@ -260,7 +302,6 @@ class DeptDao:
                 "updateTime": dept.update_time,
                 "createBy": dept.create_by,
                 "updateBy": dept.update_by,
-                "remark": dept.remark,
                 "children": []
             }
             dept_map[dept.id] = dept_dict
@@ -268,7 +309,64 @@ class DeptDao:
         # 构建树结构
         root_depts = []
         for dept_id, dept_dict in dept_map.items():
-            parent_id = dept_dict["parent_id"]
+            parent_id = dept_dict["parentId"]
+            if parent_id is None:
+                # 根部门
+                root_depts.append(dept_dict)
+            else:
+                # 子部门，添加到父部门的 children 中
+                if parent_id in dept_map:
+                    dept_map[parent_id]["children"].append(dept_dict)
+
+        return root_depts
+
+    @staticmethod
+    def get_full_dept_tree(db: Session, tenant_code: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取完整的部门树结构
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户代码，为None时返回所有租户的部门树
+
+        Returns:
+            List[Dict[str, Any]]: 完整的部门树，每个部门包含 children 字段
+        """
+        # 获取所有部门
+        query = db.query(SysDept).filter(
+            SysDept.is_deleted == False,
+            SysDept.status == 0  # 只返回激活的部门
+        )
+
+        if tenant_code:
+            query = query.filter(SysDept.tenant_code == tenant_code)
+
+        all_depts = query.all()
+
+        # 将部门转换为字典，并构建映射
+        dept_map = {}
+        for dept in all_depts:
+            dept_dict = {
+                "id": dept.id,
+                "name": dept.name,
+                "parentId": dept.parent_id,
+                "path": dept.path,
+                "depth": dept.depth,
+                "sortOrder": dept.sort_order,
+                "leaderId": dept.leader_id,
+                "status": dept.status,
+                "tenantCode": dept.tenant_code,
+                "createTime": dept.create_time,
+                "updateTime": dept.update_time,
+                "createBy": dept.create_by,
+                "updateBy": dept.update_by,
+                "children": []
+            }
+            dept_map[dept.id] = dept_dict
+
+        # 构建树结构
+        root_depts = []
+        for dept_id, dept_dict in dept_map.items():
+            parent_id = dept_dict["parentId"]
             if parent_id is None:
                 # 根部门
                 root_depts.append(dept_dict)
@@ -295,7 +393,8 @@ class DeptDao:
         """
         query = db.query(SysDept).filter(
             SysDept.tenant_code == tenant_code,
-            SysDept.is_deleted == False
+            SysDept.is_deleted == False,
+            SysDept.status == 0  # 只返回激活的部门
         )
 
         # 根据 parent_code 过滤
@@ -309,7 +408,8 @@ class DeptDao:
             parent_dept = db.query(SysDept).filter(
                 SysDept.dept_code == parent_code,
                 SysDept.tenant_code == tenant_code,
-                SysDept.is_deleted == False
+                SysDept.is_deleted == False,
+                SysDept.status == 0  # 只查找激活的父部门
             ).first()
 
             if parent_dept:
@@ -320,3 +420,22 @@ class DeptDao:
 
         # 应用分页
         return query.order_by(SysDept.sort_order).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_dept_count_by_tenant(db: Session, tenant_code: str) -> int:
+        """获取租户下的部门数量
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+
+        Returns:
+            int: 部门数量
+        """
+        return db.query(SysDept).filter(
+            and_(
+                SysDept.tenant_code == tenant_code,
+                SysDept.is_deleted == False,
+                SysDept.status == 0  # 只计算激活的部门
+            )
+        ).count()

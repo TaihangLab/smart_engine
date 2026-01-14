@@ -53,6 +53,8 @@ class RbacService:
     delete_user = UserService.delete_user
     get_users_by_tenant = UserService.get_users_by_tenant
     get_user_count_by_tenant = UserService.get_user_count_by_tenant
+    get_users_advanced_search = UserService.get_users_advanced_search
+    get_user_count_advanced_search = UserService.get_user_count_advanced_search
 
     # 角色相关方法
     get_role_by_code = RoleService.get_role_by_code
@@ -61,6 +63,8 @@ class RbacService:
     delete_role = RoleService.delete_role
     get_roles_by_tenant = RoleService.get_roles_by_tenant
     get_role_count_by_tenant = RoleService.get_role_count_by_tenant
+    get_roles_advanced_search = RoleService.get_roles_advanced_search
+    get_role_count_advanced_search = RoleService.get_role_count_advanced_search
 
     # 权限相关方法
     get_permission_by_code = PermissionService.get_permission_by_code
@@ -70,6 +74,8 @@ class RbacService:
     delete_permission = PermissionService.delete_permission
     get_permissions_by_tenant = PermissionService.get_permissions_by_tenant
     get_permission_count_by_tenant = PermissionService.get_permission_count_by_tenant
+    get_permissions_advanced_search = PermissionService.get_permissions_advanced_search
+    get_permission_count_advanced_search = PermissionService.get_permission_count_advanced_search
 
     # 租户相关方法
     get_tenant_by_code = TenantService.get_tenant_by_code
@@ -78,6 +84,12 @@ class RbacService:
     delete_tenant = TenantService.delete_tenant
     get_all_tenants = TenantService.get_all_tenants
     get_tenant_count = TenantService.get_tenant_count
+    get_tenants_by_name = TenantService.get_tenants_by_name
+    get_tenant_count_by_name = TenantService.get_tenant_count_by_name
+    get_tenants_by_code = TenantService.get_tenants_by_code
+    get_tenant_count_by_code = TenantService.get_tenant_count_by_code
+    get_tenants_by_company_name = TenantService.get_tenants_by_company_name
+    get_tenant_count_by_company_name = TenantService.get_tenant_count_by_company_name
 
     # 部门相关方法
     get_dept_by_id = DeptService.get_dept_by_id
@@ -87,7 +99,25 @@ class RbacService:
     update_dept = DeptService.update_dept
     delete_dept = DeptService.delete_dept
     get_dept_tree = DeptService.get_dept_tree
+    get_full_dept_tree = DeptService.get_full_dept_tree
     get_depts_by_tenant_and_parent = DeptService.get_depts_by_tenant_and_parent
+    get_dept_count_by_tenant = DeptService.get_dept_count_by_tenant
+    # 添加缺失的部门方法
+    create_dept = DeptService.create_dept
+    get_dept_by_code = DeptService.get_dept_by_code
+
+    # 岗位相关方法
+    create_position = PositionService.create_position
+    get_position_by_id = PositionService.get_position_by_id
+    get_position_by_code = PositionService.get_position_by_code
+    get_positions_by_tenant = PositionService.get_positions_by_tenant
+    update_position = PositionService.update_position
+    delete_position = PositionService.delete_position
+    get_position_count_by_tenant = PositionService.get_position_count_by_tenant
+    get_positions_by_name = PositionService.get_positions_by_name
+    get_positions_by_code = PositionService.get_positions_by_code
+    get_position_count_by_name = PositionService.get_position_count_by_name
+    get_position_count_by_code = PositionService.get_position_count_by_code
 
     # 关系相关方法
     get_user_roles = RelationService.get_user_roles

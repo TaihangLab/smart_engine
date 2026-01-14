@@ -1,5 +1,6 @@
 from typing import List
 from sqlalchemy.orm import Session
+from sqlalchemy import and_
 from app.models.rbac import SysRole
 
 
@@ -13,7 +14,7 @@ class RoleDao:
             SysRole.role_code == role_code,
             SysRole.tenant_code == tenant_code,
             SysRole.is_deleted == False,
-            SysRole.status == True
+            SysRole.status == 0
         ).first()
 
     @staticmethod
@@ -71,3 +72,65 @@ class RoleDao:
             SysRole.tenant_code == tenant_code,
             SysRole.is_deleted == False
         ).count()
+
+    @staticmethod
+    def get_roles_advanced_search(db: Session, tenant_code: str, role_name: str = None,
+                                 role_code: str = None, status: int = None,
+                                 data_scope: int = None, skip: int = 0, limit: int = 100):
+        """高级搜索角色
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+            role_name: 角色名称（模糊查询）
+            role_code: 角色编码（模糊查询）
+            status: 状态
+            data_scope: 数据权限范围
+            skip: 跳过的记录数
+            limit: 限制返回的记录数
+        """
+        query = db.query(SysRole).filter(
+            SysRole.tenant_code == tenant_code,
+            SysRole.is_deleted == False
+        )
+
+        if role_name:
+            query = query.filter(SysRole.role_name.contains(role_name))
+        if role_code:
+            query = query.filter(SysRole.role_code.contains(role_code))
+        if status is not None:
+            query = query.filter(SysRole.status == status)
+        if data_scope is not None:
+            query = query.filter(SysRole.data_scope == data_scope)
+
+        return query.offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_role_count_advanced_search(db: Session, tenant_code: str, role_name: str = None,
+                                      role_code: str = None, status: int = None,
+                                      data_scope: int = None):
+        """高级搜索角色数量统计
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+            role_name: 角色名称（模糊查询）
+            role_code: 角色编码（模糊查询）
+            status: 状态
+            data_scope: 数据权限范围
+        """
+        query = db.query(SysRole).filter(
+            SysRole.tenant_code == tenant_code,
+            SysRole.is_deleted == False
+        )
+
+        if role_name:
+            query = query.filter(SysRole.role_name.contains(role_name))
+        if role_code:
+            query = query.filter(SysRole.role_code.contains(role_code))
+        if status is not None:
+            query = query.filter(SysRole.status == status)
+        if data_scope is not None:
+            query = query.filter(SysRole.data_scope == data_scope)
+
+        return query.count()

@@ -158,3 +158,87 @@ class PositionDao:
                 SysPosition.is_deleted == False
             )
         ).count()
+
+    @staticmethod
+    def get_positions_by_name(db: Session, tenant_code: str, position_name: str, skip: int = 0, limit: int = 100) -> List[SysPosition]:
+        """根据岗位名称模糊查询岗位列表
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+            position_name: 岗位名称（模糊查询）
+            skip: 跳过的记录数
+            limit: 返回的最大记录数
+
+        Returns:
+            List[SysPosition]: 岗位列表
+        """
+        return db.query(SysPosition).filter(
+            and_(
+                SysPosition.tenant_code == tenant_code,
+                SysPosition.position_name.contains(position_name),
+                SysPosition.is_deleted == False
+            )
+        ).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_positions_by_code(db: Session, tenant_code: str, position_code: str, skip: int = 0, limit: int = 100) -> List[SysPosition]:
+        """根据岗位编码模糊查询岗位列表
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+            position_code: 岗位编码（模糊查询）
+            skip: 跳过的记录数
+            limit: 返回的最大记录数
+
+        Returns:
+            List[SysPosition]: 岗位列表
+        """
+        return db.query(SysPosition).filter(
+            and_(
+                SysPosition.tenant_code == tenant_code,
+                SysPosition.position_code.contains(position_code),
+                SysPosition.is_deleted == False
+            )
+        ).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_position_count_by_name(db: Session, tenant_code: str, position_name: str) -> int:
+        """根据岗位名称模糊查询岗位数量
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+            position_name: 岗位名称（模糊查询）
+
+        Returns:
+            int: 岗位数量
+        """
+        return db.query(SysPosition).filter(
+            and_(
+                SysPosition.tenant_code == tenant_code,
+                SysPosition.position_name.contains(position_name),
+                SysPosition.is_deleted == False
+            )
+        ).count()
+
+    @staticmethod
+    def get_position_count_by_code(db: Session, tenant_code: str, position_code: str) -> int:
+        """根据岗位编码模糊查询岗位数量
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+            position_code: 岗位编码（模糊查询）
+
+        Returns:
+            int: 岗位数量
+        """
+        return db.query(SysPosition).filter(
+            and_(
+                SysPosition.tenant_code == tenant_code,
+                SysPosition.position_code.contains(position_code),
+                SysPosition.is_deleted == False
+            )
+        ).count()

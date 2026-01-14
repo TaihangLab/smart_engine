@@ -38,7 +38,7 @@ class PermissionService:
         if existing_permission:
             raise ValueError(f"权限编码 {permission_data.get('permission_code')} 在租户 {permission_data.get('tenant_code')} 中已存在")
 
-        permission = RbacDao.permission.get_or_create_permission(db, permission_data)
+        permission = RbacDao.permission.create_permission(db, permission_data)
         logger.info(f"创建权限成功: {permission.permission_code}@{permission.tenant_code}")
         return permission
 
@@ -93,3 +93,21 @@ class PermissionService:
     def get_permission_count_by_tenant(db: Session, tenant_code: str) -> int:
         """获取租户下的权限数量"""
         return RbacDao.permission.get_permission_count_by_tenant(db, tenant_code)
+
+    @staticmethod
+    def get_permissions_advanced_search(db: Session, tenant_code: str, permission_name: str = None,
+                                     permission_code: str = None, permission_type: str = None,
+                                     status: int = None, creator: str = None, skip: int = 0, limit: int = 100):
+        """高级搜索权限"""
+        return RbacDao.permission.get_permissions_advanced_search(
+            db, tenant_code, permission_name, permission_code, permission_type, status, creator, skip, limit
+        )
+
+    @staticmethod
+    def get_permission_count_advanced_search(db: Session, tenant_code: str, permission_name: str = None,
+                                          permission_code: str = None, permission_type: str = None,
+                                          status: int = None, creator: str = None):
+        """高级搜索权限数量统计"""
+        return RbacDao.permission.get_permission_count_advanced_search(
+            db, tenant_code, permission_name, permission_code, permission_type, status, creator
+        )

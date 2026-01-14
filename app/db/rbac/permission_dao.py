@@ -22,7 +22,7 @@ class PermissionDao:
             SysPermission.permission_code == permission_code,
             SysPermission.tenant_code == tenant_code,
             SysPermission.is_deleted == False,
-            SysPermission.status == True
+            SysPermission.status == 0
         ).first()
 
     @staticmethod
@@ -33,7 +33,7 @@ class PermissionDao:
             SysPermission.method == method,
             SysPermission.tenant_code == tenant_code,
             SysPermission.is_deleted == False,
-            SysPermission.status == True
+            SysPermission.status == 0
         ).first()
 
     @staticmethod
@@ -83,3 +83,73 @@ class PermissionDao:
             SysPermission.tenant_code == tenant_code,
             SysPermission.is_deleted == False
         ).count()
+
+    @staticmethod
+    def get_permissions_advanced_search(db: Session, tenant_code: str, permission_name: str = None,
+                                      permission_code: str = None, permission_type: str = None,
+                                      status: int = None, creator: str = None, skip: int = 0, limit: int = 100):
+        """高级搜索权限
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+            permission_name: 权限名称（模糊查询）
+            permission_code: 权限编码（模糊查询）
+            permission_type: 权限类型
+            status: 状态
+            creator: 创建者
+            skip: 跳过的记录数
+            limit: 限制返回的记录数
+        """
+        query = db.query(SysPermission).filter(
+            SysPermission.tenant_code == tenant_code,
+            SysPermission.is_deleted == False
+        )
+
+        if permission_name:
+            query = query.filter(SysPermission.permission_name.contains(permission_name))
+        if permission_code:
+            query = query.filter(SysPermission.permission_code.contains(permission_code))
+        if permission_type:
+            query = query.filter(SysPermission.permission_type == permission_type)
+        if status is not None:
+            query = query.filter(SysPermission.status == status)
+        if creator:
+            # 假设创建者信息存储在 create_by 字段中
+            query = query.filter(SysPermission.create_by.contains(creator))
+
+        return query.offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_permission_count_advanced_search(db: Session, tenant_code: str, permission_name: str = None,
+                                           permission_code: str = None, permission_type: str = None,
+                                           status: int = None, creator: str = None):
+        """高级搜索权限数量统计
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户编码
+            permission_name: 权限名称（模糊查询）
+            permission_code: 权限编码（模糊查询）
+            permission_type: 权限类型
+            status: 状态
+            creator: 创建者
+        """
+        query = db.query(SysPermission).filter(
+            SysPermission.tenant_code == tenant_code,
+            SysPermission.is_deleted == False
+        )
+
+        if permission_name:
+            query = query.filter(SysPermission.permission_name.contains(permission_name))
+        if permission_code:
+            query = query.filter(SysPermission.permission_code.contains(permission_code))
+        if permission_type:
+            query = query.filter(SysPermission.permission_type == permission_type)
+        if status is not None:
+            query = query.filter(SysPermission.status == status)
+        if creator:
+            # 假设创建者信息存储在 create_by 字段中
+            query = query.filter(SysPermission.create_by.contains(creator))
+
+        return query.count()

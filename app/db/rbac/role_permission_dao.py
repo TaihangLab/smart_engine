@@ -37,7 +37,7 @@ class RolePermissionDao:
             SysRolePermission.role_code == role_code,
             SysRolePermission.tenant_code == tenant_code,
             SysPermission.is_deleted == False,
-            SysPermission.status == True
+            SysPermission.status == 0
         ).all()
 
     @staticmethod
@@ -49,7 +49,7 @@ class RolePermissionDao:
             SysRolePermission.permission_code == permission_code,
             SysRolePermission.tenant_code == tenant_code,
             SysRole.is_deleted == False,
-            SysRole.status == True
+            SysRole.status == 0
         ).all()
 
     @staticmethod
@@ -61,3 +61,17 @@ class RolePermissionDao:
             db.commit()
             return True
         return False
+
+    @staticmethod
+    def assign_permission_to_role(db: Session, role_code: str, permission_code: str, tenant_code: str) -> bool:
+        """为角色分配权限"""
+        try:
+            # 检查是否已存在
+            existing = RolePermissionDao.get_role_permission(db, role_code, permission_code, tenant_code)
+            if existing:
+                return False  # 已存在，不重复分配
+            # 创建新的角色权限关联
+            RolePermissionDao.create_role_permission(db, role_code, permission_code, tenant_code)
+            return True
+        except Exception as e:
+            return False

@@ -46,7 +46,7 @@ class TenantService:
             "address": tenant_data.get("address"),
             "company_code": tenant_data.get("company_code"),
             "description": tenant_data.get("description"),
-            "status": tenant_data.get("status", True),
+            "status": tenant_data.get("status", 0),
             "remark": tenant_data.get("remark"),
             "create_by": tenant_data.get("create_by"),
             "update_by": tenant_data.get("update_by")
@@ -97,3 +97,33 @@ class TenantService:
     def get_tenant_count(db: Session) -> int:
         """获取租户总数"""
         return RbacDao.tenant.get_tenant_count(db)
+
+    @staticmethod
+    def get_tenants_by_name(db: Session, tenant_name: str, skip: int = 0, limit: int = 100) -> List[SysTenant]:
+        """根据租户名称获取租户列表"""
+        return RbacDao.tenant.get_tenants_by_name(db, tenant_name, skip, limit)
+
+    @staticmethod
+    def get_tenant_count_by_name(db: Session, tenant_name: str) -> int:
+        """根据租户名称获取租户数量"""
+        return RbacDao.tenant.get_tenant_count_by_name(db, tenant_name)
+
+    @staticmethod
+    def get_tenants_by_code(db: Session, tenant_code: str, skip: int = 0, limit: int = 100) -> List[SysTenant]:
+        """根据租户编号模糊查询租户列表"""
+        return RbacDao.tenant.get_tenants_by_code(db, tenant_code, skip, limit)
+
+    @staticmethod
+    def get_tenant_count_by_code(db: Session, tenant_code: str) -> int:
+        """根据租户编号模糊查询租户数量"""
+        return RbacDao.tenant.get_tenant_count_by_code(db, tenant_code)
+
+    @staticmethod
+    def get_tenants_by_company_name(db: Session, company_name: str, skip: int = 0, limit: int = 100) -> List[SysTenant]:
+        """根据企业名称获取租户列表"""
+        return RbacDao.tenant.get_tenants_by_company_name(db, company_name, skip, limit)
+
+    @staticmethod
+    def get_tenant_count_by_company_name(db: Session, company_name: str) -> int:
+        """根据企业名称获取租户数量"""
+        return RbacDao.tenant.get_tenant_count_by_company_name(db, company_name)

@@ -38,7 +38,7 @@ class UserRoleDao:
             SysUserRole.user_name == user_name,
             SysUserRole.tenant_code == tenant_code,
             SysRole.is_deleted == False,
-            SysRole.status == True
+            SysRole.status == 0
         ).all()
 
     @staticmethod
@@ -50,7 +50,7 @@ class UserRoleDao:
             SysUserRole.role_code == role_code,
             SysUserRole.tenant_code == tenant_code,
             SysUser.is_deleted == False,
-            SysUser.status == True
+            SysUser.status == 0
         ).all()
 
     @staticmethod
@@ -62,3 +62,17 @@ class UserRoleDao:
             db.commit()
             return True
         return False
+
+    @staticmethod
+    def assign_role_to_user(db: Session, user_name: str, role_code: str, tenant_code: str) -> bool:
+        """为用户分配角色"""
+        try:
+            # 检查是否已存在
+            existing = UserRoleDao.get_user_role(db, user_name, role_code, tenant_code)
+            if existing:
+                return False  # 已存在，不重复分配
+            # 创建新的用户角色关联
+            UserRoleDao.create_user_role(db, user_name, role_code, tenant_code)
+            return True
+        except Exception as e:
+            return False

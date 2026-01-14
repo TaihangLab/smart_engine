@@ -61,11 +61,31 @@ class DeptService:
         return success
 
     @staticmethod
-    def get_dept_tree(db: Session) -> List[Dict[str, Any]]:
+    def get_dept_tree(db: Session, tenant_code: Optional[str] = None, name: Optional[str] = None, dept_code: Optional[str] = None) -> List[Dict[str, Any]]:
         """获取部门树结构"""
-        return RbacDao.dept.get_dept_tree(db)
+        return RbacDao.dept.get_dept_tree(db, tenant_code, name, dept_code)
+
+    @staticmethod
+    def get_full_dept_tree(db: Session, tenant_code: Optional[str] = None) -> List[Dict[str, Any]]:
+        """获取完整的部门树结构"""
+        return RbacDao.dept.get_full_dept_tree(db, tenant_code)
+
+    @staticmethod
+    def get_all_active_depts(db: Session) -> List[SysDept]:
+        """获取所有激活的部门"""
+        return RbacDao.dept.get_all_active_depts(db)
+
+    @staticmethod
+    def get_dept_by_code(db: Session, dept_code: str, tenant_code: str) -> Optional[SysDept]:
+        """根据部门编码和租户编码获取部门"""
+        return RbacDao.dept.get_dept_by_code(db, dept_code, tenant_code)
 
     @staticmethod
     def get_depts_by_tenant_and_parent(db: Session, tenant_code: str, parent_code: Optional[str], skip: int = 0, limit: int = 100) -> List[SysDept]:
         """根据租户和父部门代码获取部门列表"""
         return RbacDao.dept.get_depts_by_tenant_and_parent(db, tenant_code, parent_code, skip, limit)
+
+    @staticmethod
+    def get_dept_count_by_tenant(db: Session, tenant_code: str) -> int:
+        """获取租户下的部门数量"""
+        return RbacDao.dept.get_dept_count_by_tenant(db, tenant_code)

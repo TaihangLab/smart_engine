@@ -68,3 +68,21 @@ class RoleService:
     def get_role_count_by_tenant(db: Session, tenant_code: str) -> int:
         """获取租户下的角色数量"""
         return RbacDao.role.get_role_count_by_tenant(db, tenant_code)
+
+    @staticmethod
+    def get_roles_advanced_search(db: Session, tenant_code: str, role_name: str = None,
+                                role_code: str = None, status: int = None,
+                                data_scope: int = None, skip: int = 0, limit: int = 100):
+        """高级搜索角色"""
+        return RbacDao.role.get_roles_advanced_search(
+            db, tenant_code, role_name, role_code, status, data_scope, skip, limit
+        )
+
+    @staticmethod
+    def get_role_count_advanced_search(db: Session, tenant_code: str, role_name: str = None,
+                                     role_code: str = None, status: int = None,
+                                     data_scope: int = None):
+        """高级搜索角色数量统计"""
+        return RbacDao.role.get_role_count_advanced_search(
+            db, tenant_code, role_name, role_code, status, data_scope
+        )

@@ -27,7 +27,7 @@ tenant_router = APIRouter(tags=["租户管理"])
 
 @tenant_router.get("/tenants/{tenant_code}", response_model=UnifiedResponse, summary="获取租户详情")
 async def get_tenant(
-    tenant_code: str,
+    tenant_code: str = "default",
     db: Session = Depends(get_db)
 ):
     """根据租户编码获取租户详情"""
@@ -60,12 +60,26 @@ async def get_tenant(
 async def get_tenants(
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
+    tenant_name: str = Query(None, description="租户名称过滤条件"),
+    company_name: str = Query(None, description="企业名称过滤条件"),
+    tenant_code: str = Query(None, description="租户编号过滤条件"),
     db: Session = Depends(get_db)
 ):
     """获取租户列表"""
     try:
-        tenants = RbacService.get_all_tenants(db, skip, limit)
-        total = RbacService.get_tenant_count(db)
+        # 如果同时提供了多个过滤条件，则按优先级过滤：tenant_code > company_name > tenant_name
+        if tenant_code:
+            tenants = RbacService.get_tenants_by_code(db, tenant_code, skip, limit)
+            total = RbacService.get_tenant_count_by_code(db, tenant_code)
+        elif company_name:
+            tenants = RbacService.get_tenants_by_company_name(db, company_name, skip, limit)
+            total = RbacService.get_tenant_count_by_company_name(db, company_name)
+        elif tenant_name:
+            tenants = RbacService.get_tenants_by_name(db, tenant_name, skip, limit)
+            total = RbacService.get_tenant_count_by_name(db, tenant_name)
+        else:
+            tenants = RbacService.get_all_tenants(db, skip, limit)
+            total = RbacService.get_tenant_count(db)
 
         tenant_list = [
             TenantResponse.model_validate(tenant).model_dump(by_alias=True)
@@ -214,7 +228,7 @@ async def delete_tenant(
 
 @tenant_router.get("/tenants/{tenant_code}/stats", response_model=UnifiedResponse, summary="获取租户统计信息")
 async def get_tenant_stats(
-    tenant_code: str,
+    tenant_code: str = "default",
     db: Session = Depends(get_db)
 ):
     """获取租户的统计信息"""

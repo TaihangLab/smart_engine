@@ -30,7 +30,7 @@ role_router = APIRouter(tags=["角色管理"])
 @role_router.get("/roles/{role_code}", response_model=UnifiedResponse, summary="获取角色详情")
 async def get_role(
     role_code: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """根据角色编码获取角色详情"""
@@ -61,15 +61,29 @@ async def get_role(
 
 @role_router.get("/roles", response_model=UnifiedResponse, summary="获取角色列表")
 async def get_roles(
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
+    role_name: str = Query(None, description="角色名称过滤条件（模糊查询）"),
+    role_code: str = Query(None, description="角色编码过滤条件（模糊查询）"),
+    status: int = Query(None, description="角色状态过滤条件"),
+    data_scope: int = Query(None, description="数据权限范围过滤条件"),
     db: Session = Depends(get_db)
 ):
-    """获取指定租户的角色列表"""
+    """获取指定租户的角色列表，支持高级搜索"""
     try:
-        roles = RbacService.get_roles_by_tenant(db, tenant_code, skip, limit)
-        total = RbacService.get_role_count_by_tenant(db, tenant_code)
+        # 如果提供了任何高级搜索参数，则使用高级搜索
+        if role_name or role_code or status is not None or data_scope is not None:
+            roles = RbacService.get_roles_advanced_search(
+                db, tenant_code, role_name, role_code, status, data_scope, skip, limit
+            )
+            total = RbacService.get_role_count_advanced_search(
+                db, tenant_code, role_name, role_code, status, data_scope
+            )
+        else:
+            # 否则使用基本查询
+            roles = RbacService.get_roles_by_tenant(db, tenant_code, skip, limit)
+            total = RbacService.get_role_count_by_tenant(db, tenant_code)
 
         role_list = [
             RoleListResponse.model_validate(role).model_dump(by_alias=True)
@@ -107,6 +121,10 @@ async def create_role(
 ):
     """创建新角色"""
     try:
+        # 如果角色没有指定租户编码，使用默认值
+        if not role.tenant_code:
+            role.tenant_code = "default"
+
         # 检查角色编码在租户内是否已存在
         existing_role = RbacService.get_role_by_code(db, role.role_code, role.tenant_code)
         if existing_role:
@@ -145,7 +163,7 @@ async def create_role(
 async def update_role(
     role_code: str,
     role_update: RoleUpdate,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """更新角色信息"""
@@ -177,7 +195,7 @@ async def update_role(
 @role_router.delete("/roles/{role_code}", response_model=UnifiedResponse, summary="删除角色")
 async def delete_role(
     role_code: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """删除角色"""
@@ -250,7 +268,7 @@ async def assign_permission_to_role(
 @role_router.get("/role-permissions/roles/{permission_code}", response_model=UnifiedResponse, summary="获取拥有指定权限的角色")
 async def get_roles_by_permission(
     permission_code: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """获取拥有指定权限的角色列表"""

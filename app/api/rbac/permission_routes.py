@@ -30,7 +30,7 @@ permission_router = APIRouter(tags=["权限管理"])
 @permission_router.get("/permissions/{permission_code}", response_model=UnifiedResponse, summary="获取权限详情")
 async def get_permission(
     permission_code: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """根据权限编码获取权限详情"""
@@ -61,15 +61,30 @@ async def get_permission(
 
 @permission_router.get("/permissions", response_model=UnifiedResponse, summary="获取权限列表")
 async def get_permissions(
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
+    permission_name: str = Query(None, description="权限名称过滤条件（模糊查询）"),
+    permission_code: str = Query(None, description="权限编码过滤条件（模糊查询）"),
+    permission_type: str = Query(None, description="权限类型过滤条件"),
+    status: int = Query(None, description="权限状态过滤条件"),
+    creator: str = Query(None, description="创建者过滤条件"),
     db: Session = Depends(get_db)
 ):
-    """获取指定租户的权限列表"""
+    """获取指定租户的权限列表，支持高级搜索"""
     try:
-        permissions = RbacService.get_permissions_by_tenant(db, tenant_code, skip, limit)
-        total = RbacService.get_permission_count_by_tenant(db, tenant_code)
+        # 如果提供了任何高级搜索参数，则使用高级搜索
+        if permission_name or permission_code or permission_type or status is not None or creator:
+            permissions = RbacService.get_permissions_advanced_search(
+                db, tenant_code, permission_name, permission_code, permission_type, status, creator, skip, limit
+            )
+            total = RbacService.get_permission_count_advanced_search(
+                db, tenant_code, permission_name, permission_code, permission_type, status, creator
+            )
+        else:
+            # 否则使用基本查询
+            permissions = RbacService.get_permissions_by_tenant(db, tenant_code, skip, limit)
+            total = RbacService.get_permission_count_by_tenant(db, tenant_code)
 
         permission_list = [
             PermissionListResponse.model_validate(permission).model_dump(by_alias=True)
@@ -107,6 +122,10 @@ async def create_permission(
 ):
     """创建新权限"""
     try:
+        # 如果权限没有指定租户编码，使用默认值
+        if not permission.tenant_code:
+            permission.tenant_code = "default"
+
         # 检查权限编码在租户内是否已存在
         existing_permission = RbacService.get_permission_by_code(db, permission.permission_code, permission.tenant_code)
         if existing_permission:
@@ -145,7 +164,7 @@ async def create_permission(
 async def update_permission(
     permission_code: str,
     permission_update: PermissionUpdate,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """更新权限信息"""
@@ -177,7 +196,7 @@ async def update_permission(
 @permission_router.delete("/permissions/{permission_code}", response_model=UnifiedResponse, summary="删除权限")
 async def delete_permission(
     permission_code: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """删除权限"""
@@ -250,7 +269,7 @@ async def check_permission(
 @permission_router.get("/permissions/user/{user_name}", response_model=UnifiedResponse, summary="获取用户权限列表")
 async def get_user_permissions(
     user_name: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """获取用户的完整权限列表"""

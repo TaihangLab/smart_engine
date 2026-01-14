@@ -29,7 +29,7 @@ position_router = APIRouter(tags=["岗位管理"])
 @position_router.get("/positions/{position_code}", response_model=UnifiedResponse, summary="获取岗位详情")
 async def get_position(
     position_code: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """根据岗位编码获取岗位详情"""
@@ -60,7 +60,7 @@ async def get_position(
 
 @position_router.get("/positions", response_model=UnifiedResponse, summary="获取岗位列表")
 async def get_positions(
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
     db: Session = Depends(get_db)
@@ -106,6 +106,10 @@ async def create_position(
 ):
     """创建新岗位"""
     try:
+        # 如果岗位没有指定租户编码，使用默认值
+        if not position.tenant_code:
+            position.tenant_code = "default"
+
         # 检查岗位编码在租户内是否已存在
         existing_position = RbacService.get_position_by_code(db, position.position_code, position.tenant_code)
         if existing_position:
@@ -144,12 +148,23 @@ async def create_position(
 async def update_position(
     position_code: str,
     position_update: PositionUpdate,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """更新岗位信息"""
     try:
-        updated_position = RbacService.update_position(db, tenant_code, position_code, position_update.model_dump(exclude_unset=True))
+        # 需要先根据position_code和tenant_code获取岗位ID
+        position = RbacService.get_position_by_code(db, position_code, tenant_code)
+        if not position:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="岗位不存在",
+                data=None
+            )
+
+        # 使用岗位ID调用更新方法
+        updated_position = RbacService.update_position(db, position.id, position_update.model_dump(exclude_unset=True))
         if not updated_position:
             return UnifiedResponse(
                 success=False,
@@ -176,12 +191,23 @@ async def update_position(
 @position_router.delete("/positions/{position_code}", response_model=UnifiedResponse, summary="删除岗位")
 async def delete_position(
     position_code: str,
-    tenant_code: str = Query(..., description="租户编码"),
+    tenant_code: str = Query("default", description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """删除岗位"""
     try:
-        success = RbacService.delete_position(db, tenant_code, position_code)
+        # 需要先根据position_code和tenant_code获取岗位ID
+        position = RbacService.get_position_by_code(db, position_code, tenant_code)
+        if not position:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="岗位不存在",
+                data=None
+            )
+
+        # 使用岗位ID调用删除方法
+        success = RbacService.delete_position(db, position.id)
         if not success:
             return UnifiedResponse(
                 success=False,
