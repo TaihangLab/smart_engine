@@ -1,0 +1,280 @@
+#!/usr/bin/env python
+# -*- coding: utf-8 -*-
+
+"""
+RBAC权限管理API
+处理权限相关的增删改查操作
+"""
+
+from fastapi import APIRouter, Depends, Query
+from sqlalchemy.orm import Session
+from app.db.session import get_db
+from app.models.rbac import (
+    PermissionCreate, PermissionUpdate, PermissionResponse, PermissionListResponse,
+    PermissionCheckRequest, PermissionCheckResponse, UserPermissionResponse,
+    PaginatedResponse
+)
+from app.models.rbac import UnifiedResponse
+from app.services.rbac_service import RbacService
+import logging
+
+logger = logging.getLogger(__name__)
+
+# 创建权限管理路由器
+permission_router = APIRouter(tags=["权限管理"])
+
+# ===========================================
+# 权限管理API
+# ===========================================
+
+@permission_router.get("/permissions/{permission_code}", response_model=UnifiedResponse, summary="获取权限详情")
+async def get_permission(
+    permission_code: str,
+    tenant_code: str = Query(..., description="租户编码"),
+    db: Session = Depends(get_db)
+):
+    """根据权限编码获取权限详情"""
+    try:
+        permission = RbacService.get_permission_by_code(db, permission_code, tenant_code)
+        if not permission:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="权限不存在",
+                data=None
+            )
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取权限详情成功",
+            data=PermissionResponse.model_validate(permission)
+        )
+    except Exception as e:
+        logger.error(f"获取权限详情失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取权限详情失败",
+            data=None
+        )
+
+
+@permission_router.get("/permissions", response_model=UnifiedResponse, summary="获取权限列表")
+async def get_permissions(
+    tenant_code: str = Query(..., description="租户编码"),
+    skip: int = Query(0, ge=0, description="跳过的记录数"),
+    limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
+    db: Session = Depends(get_db)
+):
+    """获取指定租户的权限列表"""
+    try:
+        permissions = RbacService.get_permissions_by_tenant(db, tenant_code, skip, limit)
+        total = RbacService.get_permission_count_by_tenant(db, tenant_code)
+
+        permission_list = [
+            PermissionListResponse.model_validate(permission).model_dump(by_alias=True)
+            for permission in permissions
+        ]
+
+        paginated_response = PaginatedResponse(
+            total=total,
+            items=permission_list,
+            page=(skip // limit) + 1,
+            page_size=limit,
+            pages=(total + limit - 1) // limit
+        )
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取权限列表成功",
+            data=paginated_response
+        )
+    except Exception as e:
+        logger.error(f"获取权限列表失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取权限列表失败",
+            data=None
+        )
+
+
+@permission_router.post("/permissions", response_model=UnifiedResponse, summary="创建权限")
+async def create_permission(
+    permission: PermissionCreate,
+    db: Session = Depends(get_db)
+):
+    """创建新权限"""
+    try:
+        # 检查权限编码在租户内是否已存在
+        existing_permission = RbacService.get_permission_by_code(db, permission.permission_code, permission.tenant_code)
+        if existing_permission:
+            return UnifiedResponse(
+                success=False,
+                code=400,
+                message=f"权限编码 {permission.permission_code} 在租户 {permission.tenant_code} 中已存在",
+                data=None
+            )
+
+        permission_obj = RbacService.create_permission(db, permission.model_dump())
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="创建权限成功",
+            data=PermissionResponse.model_validate(permission_obj)
+        )
+    except ValueError as e:
+        return UnifiedResponse(
+            success=False,
+            code=400,
+            message=str(e),
+            data=None
+        )
+    except Exception as e:
+        logger.error(f"创建权限失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="创建权限失败",
+            data=None
+        )
+
+
+@permission_router.put("/permissions/{permission_code}", response_model=UnifiedResponse, summary="更新权限")
+async def update_permission(
+    permission_code: str,
+    permission_update: PermissionUpdate,
+    tenant_code: str = Query(..., description="租户编码"),
+    db: Session = Depends(get_db)
+):
+    """更新权限信息"""
+    try:
+        updated_permission = RbacService.update_permission(db, tenant_code, permission_code, permission_update.model_dump(exclude_unset=True))
+        if not updated_permission:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="权限不存在",
+                data=None
+            )
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="更新权限成功",
+            data=PermissionResponse.model_validate(updated_permission)
+        )
+    except Exception as e:
+        logger.error(f"更新权限失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="更新权限失败",
+            data=None
+        )
+
+
+@permission_router.delete("/permissions/{permission_code}", response_model=UnifiedResponse, summary="删除权限")
+async def delete_permission(
+    permission_code: str,
+    tenant_code: str = Query(..., description="租户编码"),
+    db: Session = Depends(get_db)
+):
+    """删除权限"""
+    try:
+        success = RbacService.delete_permission(db, tenant_code, permission_code)
+        if not success:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="权限不存在",
+                data=None
+            )
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="权限删除成功",
+            data=None
+        )
+    except Exception as e:
+        logger.error(f"删除权限失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="删除权限失败",
+            data=None
+        )
+
+
+# ===========================================
+# 权限验证API
+# ===========================================
+
+@permission_router.post("/permissions/check", response_model=UnifiedResponse, summary="权限检查")
+async def check_permission(
+    request: PermissionCheckRequest,
+    db: Session = Depends(get_db)
+):
+    """检查用户是否有指定URL和方法的访问权限"""
+    try:
+        has_permission = RbacService.has_permission(
+            db,
+            request.user_name,
+            request.tenant_code,
+            request.url,
+            request.method
+        )
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="权限检查成功",
+            data=PermissionCheckResponse(
+                has_permission=has_permission,
+                user_name=request.user_name,
+                tenant_code=request.tenant_code,
+                url=request.url,
+                method=request.method
+            )
+        )
+    except Exception as e:
+        logger.error(f"权限检查失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="权限检查失败",
+            data=None
+        )
+
+
+@permission_router.get("/permissions/user/{user_name}", response_model=UnifiedResponse, summary="获取用户权限列表")
+async def get_user_permissions(
+    user_name: str,
+    tenant_code: str = Query(..., description="租户编码"),
+    db: Session = Depends(get_db)
+):
+    """获取用户的完整权限列表"""
+    try:
+        permissions = RbacService.get_user_permission_list(db, user_name, tenant_code)
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取用户权限列表成功",
+            data=UserPermissionResponse(
+                user_name=user_name,
+                tenant_code=tenant_code,
+                permissions=permissions
+            )
+        )
+    except Exception as e:
+        logger.error(f"获取用户权限列表失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取用户权限列表失败",
+            data=None
+        )
+
+
+__all__ = ["permission_router"]

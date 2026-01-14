@@ -21,12 +21,25 @@ class Settings(BaseSettings):
     DEBUG: bool = Field(default=True, description="是否启用调试模式")
     LOG_LEVEL: str = Field(default="DEBUG", description="日志级别")
     
+    # 服务控制配置
+    SYSTEM_CORE_ENABLED: bool = Field(default=True, description="是否启用系统核心服务")
+    TRITON_SYNC_ENABLED: bool = Field(default=False, description="是否启用Triton模型同步")
+    SKILL_MANAGER_ENABLED: bool = Field(default=False, description="是否启用技能管理器")
+    AI_TASK_EXECUTOR_ENABLED: bool = Field(default=False, description="是否启用AI任务执行器")
+    SSE_MANAGER_ENABLED: bool = Field(default=False, description="是否启用SSE连接管理器")
+    REDIS_ENABLED: bool = Field(default=False, description="是否启用Redis连接")
+    LLM_TASK_EXECUTOR_ENABLED: bool = Field(default=False, description="是否启用LLM任务执行器")
+    MINIO_ENABLED: bool = Field(default=False, description="是否启用MinIO服务集群")
+    RABBITMQ_ENABLED: bool = Field(default=False, description="是否启用RabbitMQ客户端")
+    LLM_ENABLED: bool = Field(default=False, description="是否启用LLM服务")
+    
     # 线程池配置
     ALERT_GENERATION_POOL_SIZE: int = Field(default=10, description="预警生成线程池大小")
     MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=5, description="消息处理线程池大小")
     IMAGE_PROCESSING_POOL_SIZE: int = Field(default=8, description="图像处理线程池大小")
     
     # Triton服务器配置
+    TRITON_ENABLED: bool = Field(default=False, description="是否启用Triton客户端")
     TRITON_URL: str = Field(default="172.18.1.1:8201", description="Triton服务器地址")
     TRITON_MODEL_REPOSITORY: str = Field(default="/models", description="Triton模型仓库路径")
     TRITON_TIMEOUT: int = Field(default=30, description="Triton连接超时时间（秒）")
@@ -57,6 +70,7 @@ class Settings(BaseSettings):
     DB_AUTOFLUSH: bool = Field(default=False, description="数据库自动刷新")
     
     # WVP配置
+    WVP_ENABLED: bool = Field(default=False, description="是否启用WVP客户端")
     WVP_API_URL: str = Field(default="http://192.168.0.14:18080", description="WVP API地址")
     WVP_USERNAME: str = Field(default="admin", description="WVP用户名")
     WVP_PASSWORD: str = Field(default="admin", description="WVP密码")
@@ -77,6 +91,7 @@ class Settings(BaseSettings):
     MINIO_ALERT_VIDEO_PREFIX: str = Field(default="alert-videos/", description="报警视频前缀")
 
     # RabbitMQ配置
+    RABBITMQ_ENABLED: bool = Field(default=False, description="是否启用RabbitMQ客户端")
     RABBITMQ_HOST: str = Field(default="127.0.0.1", description="RabbitMQ服务器地址")
     RABBITMQ_PORT: int = Field(default=5672, description="RabbitMQ端口")
     RABBITMQ_USER: str = Field(default="admin", description="RabbitMQ用户名")
