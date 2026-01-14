@@ -3,11 +3,22 @@ import logging
 import threading
 import time
 from typing import Callable, Dict, List, Any, Optional, Tuple
-import pika
-from pika.adapters.blocking_connection import BlockingChannel
-from datetime import datetime
 
+# 项目模块
 from app.core.config import settings
+
+# 检查RabbitMQ是否启用
+RABBITMQ_ENABLED = getattr(settings, 'RABBITMQ_ENABLED', True)
+
+# 只有在RabbitMQ启用时才导入pika
+pika = None
+if RABBITMQ_ENABLED:
+    try:
+        import pika
+        from pika.adapters.blocking_connection import BlockingChannel
+    except ImportError:
+        logging.warning(f"⚠️ 未安装pika库，RabbitMQ功能将不可用")
+        RABBITMQ_ENABLED = False
 
 logger = logging.getLogger(__name__)
 
@@ -15,12 +26,19 @@ class RabbitMQClient:
     """RabbitMQ客户端，用于消息发布和订阅，支持死信队列"""
     
     def __init__(self):
+        # 初始化基础属性，无论RabbitMQ是否启用
         self.connection = None
         self.channel = None
         self.is_connected = False
         self.consumer_thread = None
         self._subscribers = {}  # 用于存储消息订阅回调函数
         self.health_monitor_thread = None  # 健康监控线程
+        
+        if not RABBITMQ_ENABLED:
+            logger.info(f"⏭️ RabbitMQ客户端已禁用")
+            return
+            
+        logger.info(f"🚀 初始化RabbitMQ客户端...")
         
         # 死信队列配置
         self.dead_letter_exchange = f"{settings.RABBITMQ_ALERT_EXCHANGE}.dlx"
@@ -35,6 +53,10 @@ class RabbitMQClient:
     
     def _connect(self) -> bool:
         """连接到RabbitMQ服务器"""
+        if not RABBITMQ_ENABLED or pika is None:
+            logger.info(f"⏭️ RabbitMQ客户端已禁用，跳过连接")
+            return False
+            
         try:
             # 连接参数
             credentials = pika.PlainCredentials(
@@ -721,5 +743,17 @@ class RabbitMQClient:
         
         return status
 
-# 创建全局RabbitMQ客户端实例
-rabbitmq_client = RabbitMQClient() 
+# 全局单例 - 懒加载
+_rabbitmq_client_instance = None
+
+def get_rabbitmq_client():
+    """
+    获取RabbitMQ客户端单例（懒加载）
+    """
+    global _rabbitmq_client_instance
+    if _rabbitmq_client_instance is None:
+        _rabbitmq_client_instance = RabbitMQClient()
+    return _rabbitmq_client_instance
+
+# 为了兼容现有代码，提供一个可导入的名称
+rabbitmq_client = None

@@ -323,3 +323,8 @@ test_videos/
 debug_output/
 experimental/
 /.history/
+
+
+
+# ai tools
+.wiki

@@ -73,7 +73,7 @@ async def get_depts(
         total = RbacService.get_dept_count_by_tenant(db, tenant_code)
 
         dept_list = [
-            DeptListResponse.model_validate(dept).model_dump(by_alias=True)
+            DeptResponse.model_validate(dept).model_dump(by_alias=True)
             for dept in depts
         ]
 

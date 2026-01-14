@@ -1,4 +1,3 @@
-import tritonclient.grpc as grpcclient
 import logging
 import numpy as np
 import json
@@ -9,6 +8,19 @@ from app.core.config import settings
 # 配置日志
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
+
+# 检查TRITON是否启用
+TRITON_ENABLED = getattr(settings, 'TRITON_ENABLED', True)
+
+# 只有在TRITON_ENABLED为True时才导入tritonclient库
+tritonclient = None
+grpcclient = None
+if TRITON_ENABLED:
+    try:
+        import tritonclient.grpc as grpcclient
+    except ImportError:
+        logger.warning(f"⚠️ 未安装tritonclient库，Triton功能将不可用")
+        TRITON_ENABLED = False
 
 class TritonClient:
     """
@@ -31,13 +43,25 @@ class TritonClient:
         self._client = None  # 懒加载，不在初始化时连接
         self._last_connection_attempt = 0
         self._connection_retry_interval = 5  # 重连间隔（秒）
-        logger.info(f"初始化Triton客户端配置，目标服务器: {url}")
+        
+        if TRITON_ENABLED:
+            logger.info(f"初始化Triton客户端配置，目标服务器: {url}")
+        else:
+            logger.info(f"⏭️ Triton客户端已禁用")
     
     def _get_client(self):
         """
         懒加载获取Triton客户端连接
         包含自动重连机制
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            raise Exception("Triton客户端已禁用")
+        
+        # 检查grpcclient是否已导入
+        if grpcclient is None:
+            raise Exception("Triton客户端库未安装")
+        
         current_time = time.time()
         
         # 如果客户端存在且连接正常，直接返回
@@ -83,6 +107,10 @@ class TritonClient:
         """
         检查当前是否连接到Triton服务器
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            return False
+        
         try:
             return self._client is not None and self._client.is_server_live()
         except Exception:
@@ -92,6 +120,11 @@ class TritonClient:
         """
         强制重新连接到Triton服务器
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            logger.info(f"⏭️ Triton客户端已禁用，跳过重新连接")
+            return False
+        
         try:
             self._client = None
             self._last_connection_attempt = 0  # 重置重连时间限制
@@ -108,9 +141,13 @@ class TritonClient:
         返回:
             bool: 服务器是否在线
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            return False
+        
         try:
             return self.client.is_server_live()
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"检查服务器状态失败: {e}")
             return False
     
@@ -121,9 +158,13 @@ class TritonClient:
         返回:
             bool: 服务器是否就绪
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            return False
+        
         try:
             return self.client.is_server_ready()
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"检查服务器就绪状态失败: {e}")
             return False
     
@@ -138,9 +179,13 @@ class TritonClient:
         返回:
             bool: 模型是否就绪
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            return False
+        
         try:
             return self.client.is_model_ready(model_name, model_version)
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"检查模型 {model_name} 就绪状态失败: {e}")
             return False
     
@@ -155,10 +200,14 @@ class TritonClient:
         返回:
             Dict: 模型元数据，如果获取失败则返回None
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            return None
+        
         try:
             metadata = self.client.get_model_metadata(model_name, model_version, as_json=True)
             return metadata
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"获取模型 {model_name} 元数据失败: {e}")
             return None
     
@@ -173,10 +222,14 @@ class TritonClient:
         返回:
             Dict: 模型配置，如果获取失败则返回None
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            return None
+        
         try:
             config = self.client.get_model_config(model_name, model_version, as_json=True)
             return config
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"获取模型 {model_name} 配置失败: {e}")
             return None
     
@@ -187,10 +240,14 @@ class TritonClient:
         返回:
             Dict: 服务器元数据，如果获取失败则返回None
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            return None
+        
         try:
             metadata = self.client.get_server_metadata(as_json=True)
             return metadata
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"获取服务器元数据失败: {e}")
             return None
     
@@ -201,10 +258,14 @@ class TritonClient:
         返回:
             Dict: 模型仓库索引，如果获取失败则返回None
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            return None
+        
         try:
             index = self.client.get_model_repository_index(as_json=True)
             return index
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"获取模型仓库索引失败: {e}")
             return None
     
@@ -221,6 +282,11 @@ class TritonClient:
         返回:
             bool: 模型是否成功加载
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            logger.info(f"⏭️ Triton客户端已禁用，跳过加载模型 {model_name}")
+            return False
+        
         try:
             self.client.load_model(model_name, config=config, files=files)
             logger.info(f"模型 {model_name} 加载请求已发送")
@@ -232,7 +298,7 @@ class TritonClient:
             else:
                 logger.warning(f"模型 {model_name} 加载请求已发送，但模型尚未就绪")
                 return False
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"加载模型 {model_name} 失败: {e}")
             return False
     
@@ -247,6 +313,11 @@ class TritonClient:
         返回:
             bool: 模型是否成功卸载
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            logger.info(f"⏭️ Triton客户端已禁用，跳过卸载模型 {model_name}")
+            return False
+        
         try:
             self.client.unload_model(model_name, unload_dependents=unload_dependents)
             logger.info(f"模型 {model_name} 卸载请求已发送")
@@ -258,7 +329,7 @@ class TritonClient:
             else:
                 logger.warning(f"模型 {model_name} 卸载请求已发送，但模型仍然就绪")
                 return False
-        except grpcclient.InferenceServerException as e:
+        except Exception as e:
             logger.error(f"卸载模型 {model_name} 失败: {e}")
             return False
     
@@ -278,6 +349,11 @@ class TritonClient:
         返回:
             Dict[str, np.ndarray]: 推理结果，键为输出名称，值为输出数据，如果推理失败则返回None
         """
+        # 检查Triton是否启用
+        if not TRITON_ENABLED:
+            logger.info(f"⏭️ Triton客户端已禁用，跳过执行推理 {model_name}")
+            return None
+        
         try:
             # 获取模型元数据，用于确定输入输出格式
             metadata = self.get_model_metadata(model_name, model_version)
@@ -327,17 +403,26 @@ class TritonClient:
             
             return outputs
             
-        except grpcclient.InferenceServerException as e:
-            logger.error(f"推理失败: {e}")
-            return None
         except Exception as e:
-            logger.error(f"推理过程中发生错误: {e}")
+            logger.error(f"推理失败: {e}")
             return None
     
     # 移除了原来的async_infer方法，可以根据需要添加
 
-# 全局单例
-triton_client = TritonClient()
+# 全局单例 - 懒加载
+_triton_client_instance = None
+
+def get_triton_client():
+    """
+    获取Triton客户端单例（懒加载）
+    """
+    global _triton_client_instance
+    if _triton_client_instance is None:
+        _triton_client_instance = TritonClient()
+    return _triton_client_instance
+
+# 为了兼容现有代码，提供一个可导入的名称
+triton_client = None
 
 # 测试代码
 if __name__ == "__main__":

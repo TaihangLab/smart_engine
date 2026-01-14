@@ -64,3 +64,8 @@ class DeptService:
     def get_dept_tree(db: Session) -> List[Dict[str, Any]]:
         """获取部门树结构"""
         return RbacDao.dept.get_dept_tree(db)
+
+    @staticmethod
+    def get_depts_by_tenant_and_parent(db: Session, tenant_code: str, parent_code: Optional[str], skip: int = 0, limit: int = 100) -> List[SysDept]:
+        """根据租户和父部门代码获取部门列表"""
+        return RbacDao.dept.get_depts_by_tenant_and_parent(db, tenant_code, parent_code, skip, limit)

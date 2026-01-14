@@ -7,10 +7,26 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
+# 检查WVP是否启用
+WVP_ENABLED = getattr(settings, 'WVP_ENABLED', True)
+
 def check_connection(func):
     """装饰器：检查WVP连接状态，如果不可用则返回默认值"""
     @functools.wraps(func)
     def wrapper(self, *args, **kwargs):
+        # 检查WVP是否启用
+        if not WVP_ENABLED:
+            # WVP已禁用，返回默认值
+            method_name = func.__name__
+            if method_name.startswith('get_') and 'list' in method_name:
+                return {"total": 0, "list": []}
+            elif method_name.startswith('get_'):
+                return None
+            elif method_name.startswith('start_') or method_name.startswith('stop_'):
+                return False
+            else:
+                return None
+        
         # 检查连接状态
         if not self.ensure_connection():
             # 根据方法名返回合适的默认值
@@ -105,7 +121,12 @@ class WVPClient:
         self.session = requests.Session()
         self.is_connected = False
         self.connection_error = None
-        self._initialize_connection()
+        
+        # 只有在WVP_ENABLED为True时才初始化连接
+        if WVP_ENABLED:
+            self._initialize_connection()
+        else:
+            logger.info(f"⏭️ WVP客户端已禁用")
 
     def _initialize_connection(self) -> None:
         """初始化WVP连接 - 优雅降级处理"""
@@ -1520,5 +1541,17 @@ class WVPClient:
             logger.error(f"获取业务分组树时出错: {str(e)}")
             return []
 
-# 创建全局WVP客户端实例
-wvp_client = WVPClient() 
+# 全局单例 - 懒加载
+_wvp_client_instance = None
+
+def get_wvp_client():
+    """
+    获取WVP客户端单例（懒加载）
+    """
+    global _wvp_client_instance
+    if _wvp_client_instance is None:
+        _wvp_client_instance = WVPClient()
+    return _wvp_client_instance
+
+# 为了兼容现有代码，提供一个可导入的名称
+wvp_client = None

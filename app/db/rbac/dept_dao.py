@@ -62,34 +62,41 @@ class DeptDao:
         """
         parent_id = dept_data.get('parent_id')
 
-        # 生成路径
-        path = DeptDao.generate_dept_path(db, parent_id)
+        # 生成 initial path (will be corrected after insertion)
+        initial_path = "/0/" if parent_id is None else DeptDao.generate_dept_path(db, parent_id)
 
-        # 计算深度
-        depth = DeptDao.calculate_dept_depth(path)
+        # Calculate initial depth
+        initial_depth = 0 if parent_id is None else DeptDao.calculate_dept_depth(initial_path)
 
-        # 创建部门对象
+        # Create department object with initial values
         dept = SysDept(
             **dept_data,
-            path=path,
-            depth=depth
+            path=initial_path,
+            depth=initial_depth
         )
 
         db.add(dept)
         db.commit()
         db.refresh(dept)
 
-        # 更新路径，将部门ID添加到路径中
-        # 例如：根部门初始路径是 /0/，创建后更新为 /{dept.id}/
+        # Now update the path with the correct department ID
         if parent_id is None:
+            # Root department: path should be /{dept.id}/
             dept.path = f"/{dept.id}/"
             dept.depth = 0
         else:
-            # 子部门路径：父部门路径 + 部门ID + /
-            parent = db.query(SysDept).filter(SysDept.id == parent_id).first()
-            parent_path = parent.path if parent.path.endswith('/') else f"{parent.path}/"
-            dept.path = f"{parent_path}{dept.id}/"
-            dept.depth = parent.depth + 1
+            # Sub-department: get parent and construct correct path
+            parent = db.query(SysDept).filter(
+                SysDept.id == parent_id,
+                SysDept.is_deleted == False
+            ).first()
+            if parent:
+                parent_path = parent.path if parent.path.endswith('/') else f"{parent.path}/"
+                dept.path = f"{parent_path}{dept.id}/"
+                dept.depth = parent.depth + 1
+            else:
+                # Parent department not found, raise an error
+                raise ValueError(f"Parent department with id {parent_id} not found")
 
         db.commit()
         db.refresh(dept)
@@ -248,6 +255,7 @@ class DeptDao:
                 "sortOrder": dept.sort_order,
                 "leaderId": dept.leader_id,
                 "status": dept.status,
+                "tenantCode": dept.tenant_code,
                 "createTime": dept.create_time,
                 "updateTime": dept.update_time,
                 "createBy": dept.create_by,
@@ -270,3 +278,45 @@ class DeptDao:
                     dept_map[parent_id]["children"].append(dept_dict)
 
         return root_depts
+
+    @staticmethod
+    def get_depts_by_tenant_and_parent(db: Session, tenant_code: str, parent_code: Optional[str], skip: int = 0, limit: int = 100) -> List[SysDept]:
+        """根据租户和父部门代码获取部门列表
+
+        Args:
+            db: 数据库会话
+            tenant_code: 租户代码
+            parent_code: 父部门代码，None表示根部门
+            skip: 跳过的记录数
+            limit: 限制返回的记录数
+
+        Returns:
+            List[SysDept]: 部门列表
+        """
+        query = db.query(SysDept).filter(
+            SysDept.tenant_code == tenant_code,
+            SysDept.is_deleted == False
+        )
+
+        # 根据 parent_code 过滤
+        if parent_code is None:
+            # 获取根部门（parent_id 为 None）
+            query = query.filter(SysDept.parent_id.is_(None))
+        else:
+            # 获取指定 parent_code 的部门
+            # Note: This assumes there's a way to map parent_code to parent_id
+            # For now, we'll assume parent_code refers to the dept_code of the parent
+            parent_dept = db.query(SysDept).filter(
+                SysDept.dept_code == parent_code,
+                SysDept.tenant_code == tenant_code,
+                SysDept.is_deleted == False
+            ).first()
+
+            if parent_dept:
+                query = query.filter(SysDept.parent_id == parent_dept.id)
+            else:
+                # If parent_dept not found, return empty list
+                return []
+
+        # 应用分页
+        return query.order_by(SysDept.sort_order).offset(skip).limit(limit).all()

@@ -79,6 +79,16 @@ class RbacService:
     get_all_tenants = TenantService.get_all_tenants
     get_tenant_count = TenantService.get_tenant_count
 
+    # 部门相关方法
+    get_dept_by_id = DeptService.get_dept_by_id
+    get_all_depts = DeptService.get_all_depts
+    get_dept_by_parent = DeptService.get_dept_by_parent
+    get_dept_subtree = DeptService.get_dept_subtree
+    update_dept = DeptService.update_dept
+    delete_dept = DeptService.delete_dept
+    get_dept_tree = DeptService.get_dept_tree
+    get_depts_by_tenant_and_parent = DeptService.get_depts_by_tenant_and_parent
+
     # 关系相关方法
     get_user_roles = RelationService.get_user_roles
     assign_role_to_user = RelationService.assign_role_to_user

@@ -13,13 +13,26 @@ from fastapi import Depends
 
 from app.db.session import get_db
 from app.models.alert import Alert, AlertCreate, AlertResponse, AlertUpdate, AlertStatus
-from app.services.rabbitmq_client import rabbitmq_client
-from app.services.sse_connection_manager import sse_manager
+from app.services.sse_connection_manager import get_sse_manager
+
+# 仅在需要时导入rabbitmq_client
+def get_rabbitmq_client():
+    from app.services.rabbitmq_client import get_rabbitmq_client as _get_rabbitmq_client
+    return _get_rabbitmq_client()
 
 logger = logging.getLogger(__name__)
 
-# 为向后兼容保留这个变量，但实际使用sse_manager.connected_clients
-connected_clients = sse_manager.connected_clients
+# 为向后兼容保留这个变量，但实际使用get_sse_manager().connected_clients
+def get_connected_clients():
+    return get_sse_manager().connected_clients
+
+# 使用属性描述符来模拟直接访问
+class ConnectedClientsDescriptor:
+    def __get__(self, instance, owner):
+        return get_connected_clients()
+
+# 为向后兼容保留这个变量
+connected_clients = property(get_connected_clients)
 
 # ⚠️ REMOVED: SSE_PUBLISH_QUEUE - 移除冗余的中间队列以减少延迟和复杂度
 # SSE_PUBLISH_QUEUE = asyncio.Queue()
@@ -37,7 +50,7 @@ class AlertService:
     def __init__(self):
         # 订阅RabbitMQ的报警消息
         logger.info("初始化优化后的报警服务（直接广播架构）")
-        rabbitmq_client.subscribe_to_alerts(self.handle_alert_message)
+        get_rabbitmq_client().subscribe_to_alerts(self.handle_alert_message)
     
     def handle_alert_message(self, alert_data: Dict[str, Any]) -> None:
         """处理从RabbitMQ收到的报警消息 - 优化后直接异步广播"""
@@ -698,7 +711,8 @@ class AlertService:
         sse_message = f"data: {message}\n\n"
         
         # 🚀 使用连接管理器的高性能批量广播
-        success_count = await sse_manager.broadcast_message(sse_message)
+        from app.services.sse_connection_manager import get_sse_manager
+        success_count = await get_sse_manager().broadcast_message(sse_message)
         
         logger.info(f"📡 高性能广播完成 [ID={alert_id}]: 成功发送给 {success_count} 个客户端")
 
@@ -708,7 +722,8 @@ alert_service = AlertService()
 # 注册SSE客户端连接 - 使用连接管理器
 async def register_sse_client(client_ip: str = "unknown", user_agent: str = "unknown") -> asyncio.Queue:
     """注册一个新的SSE客户端连接"""
-    client_queue = await sse_manager.register_client(client_ip, user_agent)
+    from app.services.sse_connection_manager import get_sse_manager
+    client_queue = await get_sse_manager().register_client(client_ip, user_agent)
     
 
     
@@ -717,7 +732,8 @@ async def register_sse_client(client_ip: str = "unknown", user_agent: str = "unk
 # 注销SSE客户端连接 - 使用连接管理器
 def unregister_sse_client(client: asyncio.Queue) -> None:
     """注销一个SSE客户端连接"""
-    sse_manager.unregister_client(client)
+    from app.services.sse_connection_manager import get_sse_manager
+    get_sse_manager().unregister_client(client)
 
 # 发布测试报警（仅用于测试）
 def publish_test_alert() -> bool:
@@ -752,7 +768,7 @@ def publish_test_alert() -> bool:
         "minio_video_object_name": "test_video.mp4"
     }
     
-    success = rabbitmq_client.publish_alert(test_alert)
+    success = get_rabbitmq_client().publish_alert(test_alert)
     if success:
         logger.info(f"✅ 测试报警消息已发送")
     else:

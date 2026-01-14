@@ -71,7 +71,7 @@ async def get_positions(
         total = RbacService.get_position_count_by_tenant(db, tenant_code)
 
         position_list = [
-            PositionListResponse.model_validate(position).model_dump(by_alias=True)
+            PositionResponse.model_validate(position).model_dump(by_alias=True)
             for position in positions
         ]
 

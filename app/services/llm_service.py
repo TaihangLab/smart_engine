@@ -12,29 +12,51 @@
 - 图片/视频输入 → MULTIMODAL_LLM_* (千问3VL)
 - 失败时自动降级到BACKUP_*
 """
+from __future__ import annotations
 import logging
 import base64
 import json
 import re
 from typing import Dict, Any, Optional, List, Union
 from io import BytesIO
-from PIL import Image
-import numpy as np
-
-# LangChain 1.0.7+
-from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.language_models import BaseChatModel
-from langchain_openai import ChatOpenAI
-
-# 注意：vllm的OpenAI兼容API直接支持视频帧列表，无需qwen_vl_utils
-# qwen_vl_utils仅用于本地transformers模型加载
 
 # 项目模块
 from app.core.config import settings
-from app.services.redis_client import redis_client
+
+# 只有在LLM服务启用时才导入PIL和numpy
+PIL_Image = None
+np = None
+
+# 检查LLM是否启用
+LLM_ENABLED = getattr(settings, 'LLM_ENABLED', True)
+
+if LLM_ENABLED:
+    try:
+        from PIL import Image as PIL_Image
+        import numpy as np
+    except ImportError:
+        logging.warning(f"⚠️ 未安装PIL或numpy库，LLM多模态功能将不可用")
+
+# LangChain 1.0.7+ - 仅在LLM启用时导入
+if LLM_ENABLED:
+    try:
+        from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
+        from langchain_core.prompts import ChatPromptTemplate
+        from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
+        from langchain_core.chat_history import BaseChatMessageHistory
+        from langchain_core.language_models import BaseChatModel
+        from langchain_openai import ChatOpenAI
+    except ImportError:
+        logging.warning(f"⚠️ 未安装langchain相关库，LLM功能将不可用")
+        LLM_ENABLED = False
+
+# Redis客户端 - 仅在LLM启用时导入
+redis_client = None
+if LLM_ENABLED:
+    try:
+        from app.services.redis_client import redis_client
+    except ImportError:
+        logging.warning(f"⚠️ 未找到redis_client模块，LLM历史记录功能将不可用")
 
 logger = logging.getLogger(__name__)
 
@@ -59,91 +81,92 @@ class LLMServiceResult:
         }
 
 
-class RedisMemoryStore:
-    """基于Redis的消息历史存储"""
-    
-    def __init__(self, redis_client, ttl: int = 7 * 24 * 3600):
-        self.redis_client = redis_client
-        self.ttl = ttl
-        self.prefix = "llm_chat_history:"
-    
-    def get_messages(self, session_id: str) -> List[BaseMessage]:
-        """获取会话消息历史"""
-        try:
-            key = f"{self.prefix}{session_id}"
-            messages_data = self.redis_client.lrange(key, 0, -1)
-            
-            messages = []
-            for message_json in messages_data:
-                try:
-                    message_dict = json.loads(message_json)
-                    message_type = message_dict.get('type', 'human')
-                    content = message_dict.get('content', '')
-                    
-                    if message_type == 'human':
-                        messages.append(HumanMessage(content=content))
-                    elif message_type == 'ai':
-                        messages.append(AIMessage(content=content))
-                    elif message_type == 'system':
-                        messages.append(SystemMessage(content=content))
-                except (json.JSONDecodeError, KeyError) as e:
-                    logger.warning(f"解析消息失败: {e}")
-                    continue
-            
-            return messages
-        except Exception as e:
-            logger.error(f"获取会话历史失败: {e}")
-            return []
-    
-    def add_message(self, session_id: str, message: BaseMessage) -> None:
-        """添加消息到历史"""
-        try:
-            key = f"{self.prefix}{session_id}"
-            message_type = 'human' if isinstance(message, HumanMessage) else \
-                          'ai' if isinstance(message, AIMessage) else 'system'
-            
-            message_data = json.dumps({
-                'type': message_type,
-                'content': message.content
-            })
-            
-            self.redis_client.rpush(key, message_data)
-            self.redis_client.expire(key, self.ttl)
-        except Exception as e:
-            logger.error(f"添加消息到历史失败: {e}")
-    
-    def clear(self, session_id: str) -> None:
-        """清除会话历史"""
-        try:
-            key = f"{self.prefix}{session_id}"
-            self.redis_client.delete(key)
-        except Exception as e:
-            logger.error(f"清除会话历史失败: {e}")
+# 仅在LLM启用时定义Redis相关类
+if LLM_ENABLED:
+    class RedisMemoryStore:
+        """基于Redis的消息历史存储"""
+        
+        def __init__(self, redis_client, ttl: int = 7 * 24 * 3600):
+            self.redis_client = redis_client
+            self.ttl = ttl
+            self.prefix = "llm_chat_history:"
+        
+        def get_messages(self, session_id: str) -> List[BaseMessage]:
+            """获取会话消息历史"""
+            try:
+                key = f"{self.prefix}{session_id}"
+                messages_data = self.redis_client.lrange(key, 0, -1)
+                
+                messages = []
+                for message_json in messages_data:
+                    try:
+                        message_dict = json.loads(message_json)
+                        message_type = message_dict.get('type', 'human')
+                        content = message_dict.get('content', '')
+                        
+                        if message_type == 'human':
+                            messages.append(HumanMessage(content=content))
+                        elif message_type == 'ai':
+                            messages.append(AIMessage(content=content))
+                        elif message_type == 'system':
+                            messages.append(SystemMessage(content=content))
+                    except (json.JSONDecodeError, KeyError) as e:
+                        logger.warning(f"解析消息失败: {e}")
+                        continue
+                
+                return messages
+            except Exception as e:
+                logger.error(f"获取会话历史失败: {e}")
+                return []
+        
+        def add_message(self, session_id: str, message: BaseMessage) -> None:
+            """添加消息到历史"""
+            try:
+                key = f"{self.prefix}{session_id}"
+                message_type = 'human' if isinstance(message, HumanMessage) else \
+                              'ai' if isinstance(message, AIMessage) else 'system'
+                
+                message_data = json.dumps({
+                    'type': message_type,
+                    'content': message.content
+                })
+                
+                self.redis_client.rpush(key, message_data)
+                self.redis_client.expire(key, self.ttl)
+            except Exception as e:
+                logger.error(f"添加消息到历史失败: {e}")
+        
+        def clear(self, session_id: str) -> None:
+            """清除会话历史"""
+            try:
+                key = f"{self.prefix}{session_id}"
+                self.redis_client.delete(key)
+            except Exception as e:
+                logger.error(f"清除会话历史失败: {e}")
 
-
-class RedisChatMessageHistory(BaseChatMessageHistory):
-    """Redis聊天消息历史实现（LangChain 1.0.7兼容）"""
-    
-    def __init__(self, session_id: str, memory_store: RedisMemoryStore):
-        self.session_id = session_id
-        self.memory_store = memory_store
-        self._messages = None
-    
-    @property
-    def messages(self) -> List[BaseMessage]:
-        """获取消息列表"""
-        self._messages = self.memory_store.get_messages(self.session_id)
-        return self._messages
-    
-    def add_message(self, message: BaseMessage) -> None:
-        """添加消息"""
-        self.memory_store.add_message(self.session_id, message)
-        self._messages = None
-    
-    def clear(self) -> None:
-        """清除历史"""
-        self.memory_store.clear(self.session_id)
-        self._messages = []
+    class RedisChatMessageHistory(BaseChatMessageHistory):
+        """Redis聊天消息历史实现（LangChain 1.0.7兼容）"""
+        
+        def __init__(self, session_id: str, memory_store: RedisMemoryStore):
+            self.session_id = session_id
+            self.memory_store = memory_store
+            self._messages = None
+        
+        @property
+        def messages(self) -> List[BaseMessage]:
+            """获取消息列表"""
+            self._messages = self.memory_store.get_messages(self.session_id)
+            return self._messages
+        
+        def add_message(self, message: BaseMessage) -> None:
+            """添加消息"""
+            self.memory_store.add_message(self.session_id, message)
+            self._messages = None
+        
+        def clear(self) -> None:
+            """清除历史"""
+            self.memory_store.clear(self.session_id)
+            self._messages = []
 
 
 class LLMService:
@@ -158,9 +181,17 @@ class LLMService:
     """
     
     def __init__(self):
+        if not LLM_ENABLED:
+            logging.warning(f"⏭️ LLM服务已禁用")
+            return
+            
         self.logger = logging.getLogger(__name__)
-        self.memory_store = RedisMemoryStore(redis_client)
         self._client_cache = {}
+        
+        # 仅在LLM启用时初始化RedisMemoryStore
+        if LLM_ENABLED:
+            from app.services.redis_client import redis_client
+            self.memory_store = RedisMemoryStore(redis_client)
         
         self.logger.info("🚀 LLM服务初始化 (LangChain 1.0.7 + OpenAI兼容API)")
         self.logger.info(f"   纯文本模型: {settings.TEXT_LLM_MODEL} @ {settings.TEXT_LLM_BASE_URL}")
@@ -213,7 +244,7 @@ class LLMService:
         self._client_cache[cache_key] = client
         return client
     
-    def _encode_image(self, image_data: Union[str, bytes, np.ndarray, Image.Image]) -> str:
+    def _encode_image(self, image_data: Union[str, bytes, np.ndarray, 'PIL_Image']) -> str:
         """
         将图片编码为base64或URL字符串
         
@@ -236,17 +267,17 @@ class LLMService:
                         image_data = f.read()
             
             # numpy数组转PIL
-            if isinstance(image_data, np.ndarray):
+            if PIL_Image is not None and isinstance(image_data, np.ndarray):
                 if image_data.dtype != np.uint8:
                     image_data = (image_data * 255).astype(np.uint8) if image_data.max() <= 1.0 else image_data.astype(np.uint8)
                 if len(image_data.shape) == 3 and image_data.shape[2] == 3:
                     # BGR to RGB (OpenCV uses BGR)
-                    image_data = Image.fromarray(image_data[..., ::-1])
+                    image_data = PIL_Image.fromarray(image_data[..., ::-1])
                 else:
-                    image_data = Image.fromarray(image_data)
+                    image_data = PIL_Image.fromarray(image_data)
             
             # PIL图片转bytes
-            if isinstance(image_data, Image.Image):
+            if PIL_Image is not None and isinstance(image_data, PIL_Image):
                 buffer = BytesIO()
                 image_data.save(buffer, format="JPEG")
                 image_data = buffer.getvalue()
@@ -321,7 +352,7 @@ class LLMService:
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        image_data: Optional[Union[str, bytes, np.ndarray, Image.Image, List]] = None,
+        image_data: Optional[Union[str, bytes, np.ndarray, 'PIL_Image', List]] = None,
         video_frames: Optional[List] = None,
         fps: Optional[float] = None
     ) -> List[BaseMessage]:
@@ -412,7 +443,7 @@ class LLMService:
         self,
         prompt: str,
         system_prompt: Optional[str] = None,
-        image_data: Optional[Union[str, bytes, np.ndarray, Image.Image, List]] = None,
+        image_data: Optional[Union[str, bytes, np.ndarray, 'PIL_Image', List]] = None,
         video_frames: Optional[List] = None,
         fps: Optional[float] = None,
         response_format: Optional[Dict] = None,
@@ -582,6 +613,13 @@ class LLMService:
             **kwargs: 其他参数传递给call_llm
         """
         try:
+            # 检查LLM是否启用
+            if not LLM_ENABLED:
+                return LLMServiceResult(
+                    success=False,
+                    error_message="LLM服务已禁用"
+                )
+                
             # 获取历史消息
             history = RedisChatMessageHistory(session_id, self.memory_store)
             messages = []
@@ -619,8 +657,24 @@ class LLMService:
     
     def clear_history(self, session_id: str) -> None:
         """清除会话历史"""
+        # 检查LLM是否启用
+        if not LLM_ENABLED or not hasattr(self, 'memory_store'):
+            return
+            
         self.memory_store.clear(session_id)
 
 
-# 全局单例
-llm_service = LLMService()
+# 全局单例 - 懒加载
+_llm_service_instance = None
+
+def get_llm_service():
+    """
+    获取LLM服务单例（懒加载）
+    """
+    global _llm_service_instance
+    if _llm_service_instance is None:
+        _llm_service_instance = LLMService()
+    return _llm_service_instance
+
+# 为了兼容现有代码，提供一个可导入的名称
+llm_service = None

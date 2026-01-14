@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field, validator
 from langchain_core.runnables import RunnableConfig
 
-from app.services.llm_service import llm_service
+from app.services.llm_service import get_llm_service
 from app.services.redis_client import redis_client
 
 router = APIRouter()
@@ -88,7 +88,9 @@ class ConversationManager:
     
     def __init__(self):
         self.redis_client = redis_client
-        self.memory_store = llm_service.memory_store
+        # 使用get_llm_service()获取实例，并检查LLM服务是否启用
+        self.llm_service = get_llm_service()
+        self.memory_store = getattr(self.llm_service, 'memory_store', None)
         self.conversation_prefix = "chat_conversation:"
         self.conversation_list_key = "chat_conversations"
         self.ttl = 7 * 24 * 3600  # 7天
@@ -582,7 +584,7 @@ class ChatService:
     """现代化聊天服务 - 使用LCEL链和流式响应"""
     
     def __init__(self):
-        self.llm_service = llm_service
+        self.llm_service = get_llm_service()
         self.conversation_manager = ConversationManager()
         self.default_system_prompt = "你是太行智能助手，全名是太行·问道，小名是小行。你是一个专业的智能助手，擅长解答问题、提供信息和完成各种任务。你可以帮助用户处理与太行智能系统相关的问题，包括AI技能管理、视频分析、智能监控等功能。请用友好、专业的语气与用户交流。"
     

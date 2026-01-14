@@ -5,15 +5,26 @@ import logging
 from typing import Optional, Dict, Any, List
 import os
 import uuid
-from datetime import timedelta
-
-from minio import Minio
-from minio.error import S3Error
+import tempfile
+from pathlib import Path
 from fastapi import HTTPException
-
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# 检查MINIO是否启用
+MINIO_ENABLED = getattr(settings, 'MINIO_ENABLED', True)
+
+# 只有在MINIO_ENABLED为True时才导入minio库
+Minio = None
+S3Error = None
+if MINIO_ENABLED:
+    try:
+        from minio import Minio
+        from minio.error import S3Error
+    except ImportError:
+        logger.warning(f"⚠️ 未安装minio库，MinIO功能将不可用")
+        MINIO_ENABLED = False
 
 class MinioClient:
     """MinIO客户端服务类"""
@@ -28,7 +39,17 @@ class MinioClient:
     
     def _connect(self) -> None:
         """建立MinIO连接"""
+        # 检查MinIO是否启用
+        if not MINIO_ENABLED:
+            logger.info(f"⏭️ MinIO客户端已禁用，跳过连接")
+            return
+            
         if self.client is not None:
+            return
+            
+        # 检查Minio类是否已导入
+        if Minio is None:
+            logger.info(f"⏭️ MinIO客户端库未安装，跳过连接")
             return
             
         try:
@@ -45,6 +66,12 @@ class MinioClient:
     
     def _ensure_bucket(self) -> None:
         """确保存储桶存在，如果不存在则创建"""
+        # 检查MinIO是否启用
+        if not MINIO_ENABLED:
+            logger.info(f"⏭️ MinIO客户端已禁用，跳过确保存储桶存在")
+            self._bucket_checked = True
+            return
+            
         if self._bucket_checked:
             return
             
@@ -88,8 +115,18 @@ class MinioClient:
         Returns:
             str: 对象名称（不包含前缀）
         """
+        # 检查MinIO是否启用
+        if not MINIO_ENABLED:
+            logger.info(f"⏭️ MinIO客户端已禁用，跳过上传数据: {object_name}")
+            return object_name
+        
         try:
             self._ensure_bucket()
+            
+            # 如果客户端未初始化，返回默认值
+            if self.client is None:
+                logger.info(f"⏭️ MinIO客户端未连接，跳过上传数据: {object_name}")
+                return object_name
             
             # 如果提供了前缀，确保它以 / 结尾
             if prefix and not prefix.endswith("/"):
@@ -110,7 +147,7 @@ class MinioClient:
             
             logger.info(f"数据上传成功: {full_object_name}")
             return object_name  # 只返回文件名，不包含前缀
-        except S3Error as err:
+        except Exception as err:
             logger.error(f"数据上传失败: {err}")
             raise HTTPException(status_code=500, detail=f"数据上传失败: {str(err)}")
     
@@ -126,8 +163,18 @@ class MinioClient:
         Returns:
             str: 临时访问URL
         """
+        # 检查MinIO是否启用
+        if not MINIO_ENABLED:
+            logger.info(f"⏭️ MinIO客户端已禁用，跳过获取临时URL: {object_name}")
+            return ""
+        
         try:
             self._ensure_bucket()
+            
+            # 如果客户端未初始化，返回默认值
+            if self.client is None:
+                logger.info(f"⏭️ MinIO客户端未连接，跳过获取临时URL: {object_name}")
+                return ""
             
             object_name = f"{prefix}{object_name}"
 
@@ -138,7 +185,7 @@ class MinioClient:
                 expires=timedelta(seconds=expires)
             )
             return url
-        except S3Error as err:
+        except Exception as err:
             logger.error(f"获取文件URL失败: {err}")
             raise HTTPException(status_code=500, detail=f"获取文件URL失败: {str(err)}")
     
@@ -152,6 +199,11 @@ class MinioClient:
         Returns:
             str: 公共访问URL
         """
+        # 检查MinIO是否启用
+        if not MINIO_ENABLED:
+            logger.info(f"⏭️ MinIO客户端已禁用，跳过获取公共URL: {object_name}")
+            return ""
+        
         protocol = "https" if settings.MINIO_SECURE else "http"
         return f"{protocol}://{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}/{settings.MINIO_BUCKET}/{object_name}"
     
@@ -165,8 +217,18 @@ class MinioClient:
         Returns:
             bytes: 文件内容
         """
+        # 检查MinIO是否启用
+        if not MINIO_ENABLED:
+            logger.info(f"⏭️ MinIO客户端已禁用，跳过下载文件: {object_name}")
+            return b""
+        
         try:
             self._ensure_bucket()
+            
+            # 如果客户端未初始化，返回默认值
+            if self.client is None:
+                logger.info(f"⏭️ MinIO客户端未连接，跳过下载文件: {object_name}")
+                return b""
             
             # 获取对象数据
             response = self.client.get_object(
@@ -180,7 +242,7 @@ class MinioClient:
             response.release_conn()
             
             return data
-        except S3Error as err:
+        except Exception as err:
             logger.error(f"文件下载失败: {err}")
             raise HTTPException(status_code=500, detail=f"文件下载失败: {str(err)}")
     
@@ -194,8 +256,18 @@ class MinioClient:
         Returns:
             bool: 删除是否成功
         """
+        # 检查MinIO是否启用
+        if not MINIO_ENABLED:
+            logger.info(f"⏭️ MinIO客户端已禁用，跳过删除文件: {object_name}")
+            return True
+        
         try:
             self._ensure_bucket()
+            
+            # 如果客户端未初始化，返回默认值
+            if self.client is None:
+                logger.info(f"⏭️ MinIO客户端未连接，跳过删除文件: {object_name}")
+                return True
             
             self.client.remove_object(
                 bucket_name=settings.MINIO_BUCKET,
@@ -203,7 +275,7 @@ class MinioClient:
             )
             logger.info(f"文件删除成功: {object_name}")
             return True
-        except S3Error as err:
+        except Exception as err:
             logger.error(f"文件删除失败: {err}")
             return False
     
@@ -218,8 +290,18 @@ class MinioClient:
         Returns:
             List[Dict]: 文件信息列表
         """
+        # 检查MinIO是否启用
+        if not MINIO_ENABLED:
+            logger.info(f"⏭️ MinIO客户端已禁用，跳过列出文件: {prefix}")
+            return []
+        
         try:
             self._ensure_bucket()
+            
+            # 如果客户端未初始化，返回默认值
+            if self.client is None:
+                logger.info(f"⏭️ MinIO客户端未连接，跳过列出文件: {prefix}")
+                return []
             
             objects = self.client.list_objects(
                 bucket_name=settings.MINIO_BUCKET,
@@ -237,7 +319,7 @@ class MinioClient:
                 })
             
             return files
-        except S3Error as err:
+        except Exception as err:
             logger.error(f"列出文件失败: {err}")
             raise HTTPException(status_code=500, detail=f"列出文件失败: {str(err)}")
 

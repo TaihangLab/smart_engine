@@ -35,7 +35,11 @@ from app.db.base import Base
 from app.services.model_service import sync_models_from_triton
 from app.skills.skill_manager import skill_manager
 from app.services.ai_task_executor import task_executor
-from app.services.sse_connection_manager import sse_manager
+from app.services.sse_connection_manager import get_sse_manager
+from app.services.triton_client import get_triton_client
+from app.services.llm_service import get_llm_service
+from app.services.rabbitmq_client import get_rabbitmq_client
+from app.services.wvp_client import get_wvp_client
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +69,7 @@ class SystemStartupService:
                 "display_name": "系统核心初始化",
                 "start_func": self._initialize_system_core,
                 "stop_func": None,
-                "enabled": True,
+                "enabled": settings.SYSTEM_CORE_ENABLED,
                 "critical": True,
                 "startup_order": 0
             },
@@ -83,7 +87,7 @@ class SystemStartupService:
                 "display_name": "企业级MinIO服务集群",
                 "start_func": self._initialize_enterprise_minio_services,
                 "stop_func": self._shutdown_enterprise_minio_services,
-                "enabled": True,
+                "enabled": settings.MINIO_ENABLED,
                 "critical": False,
                 "startup_order": 2
             },
@@ -138,92 +142,94 @@ class SystemStartupService:
             
             # 1.5. 初始化预警表重构 (暂时禁用)
             logger.info("⚪ 预警表重构功能暂时禁用（开发中）")
-            # try:
-            #     from app.db.init_alert_redesign import initialize_alert_redesign
-            #     redesign_result = initialize_alert_redesign()
-            #     
-            #     if redesign_result["status"] == "success":
-            #         logger.info(f"✅ 预警表重构初始化成功: {redesign_result['message']}")
-            #     elif redesign_result["status"] == "warning":
-            #         logger.warning(f"⚠️ 预警表重构初始化有警告: {redesign_result['message']}")
-            #     elif redesign_result["status"] == "skipped":
-            #         logger.info(f"⚪ 预警表重构跳过: {redesign_result['message']}")
-            #     elif redesign_result["status"] == "disabled":
-            #         logger.info(f"⚪ 预警表重构已禁用: {redesign_result['message']}")
-            #     else:
-            #         logger.error(f"❌ 预警表重构初始化失败: {redesign_result['message']}")
-            #         
-            # except Exception as e:
-            #     logger.error(f"❌ 预警表重构初始化异常: {str(e)}")
             
             # 2. 同步Triton模型到数据库（如果Triton可用）
-            logger.info("🔄 正在同步Triton模型到数据库...")
-            try:
-                result = sync_models_from_triton()
-                logger.info(f"✅ 模型同步结果: {result['message']}")
-            except Exception as e:
-                logger.warning(f"⚠️ 模型同步失败（Triton可能未启动）: {str(e)}")
-                logger.info("🔗 Triton客户端已配置自动重连，首次调用时会自动连接")
+            if settings.TRITON_SYNC_ENABLED:
+                logger.info("🔄 正在同步Triton模型到数据库...")
+                try:
+                    result = sync_models_from_triton()
+                    logger.info(f"✅ 模型同步结果: {result['message']}")
+                except Exception as e:
+                    logger.warning(f"⚠️ 模型同步失败（Triton可能未启动）: {str(e)}")
+                    logger.info("🔗 Triton客户端已配置自动重连，首次调用时会自动连接")
+            else:
+                logger.info("⏭️ 跳过Triton模型同步（已禁用）")
             
             # 3. 初始化技能管理器
-            logger.info("🎯 初始化技能管理器...")
-            db = SessionLocal()
-            try:
-                skill_manager.initialize_with_db(db)
-                available_skills = skill_manager.get_available_skill_classes()
-                logger.info(f"✅ SkillManager初始化完成，已加载 {len(available_skills)} 个技能类")
-            except Exception as e:
-                logger.error(f"❌ 初始化SkillManager失败: {str(e)}", exc_info=True)
-            finally:
-                db.close()
+            if settings.SKILL_MANAGER_ENABLED:
+                logger.info("🎯 初始化技能管理器...")
+                db = SessionLocal()
+                try:
+                    skill_manager.initialize_with_db(db)
+                    available_skills = skill_manager.get_available_skill_classes()
+                    logger.info(f"✅ SkillManager初始化完成，已加载 {len(available_skills)} 个技能类")
+                except Exception as e:
+                    logger.error(f"❌ 初始化SkillManager失败: {str(e)}", exc_info=True)
+                finally:
+                    db.close()
+            else:
+                logger.info("⏭️ 跳过技能管理器初始化（已禁用）")
             
             # 4. 初始化AI任务执行器
-            logger.info("🤖 初始化AI任务执行器...")
-            try:
-                task_executor.schedule_all_tasks()
-                logger.info("✅ 已为所有AI任务创建调度计划")
-            except Exception as e:
-                logger.error(f"❌ 初始化AI任务执行器失败: {str(e)}", exc_info=True)
+            if settings.AI_TASK_EXECUTOR_ENABLED:
+                logger.info("🤖 初始化AI任务执行器...")
+                try:
+                    task_executor.schedule_all_tasks()
+                    logger.info("✅ 已为所有AI任务创建调度计划")
+                except Exception as e:
+                    logger.error(f"❌ 初始化AI任务执行器失败: {str(e)}", exc_info=True)
+            else:
+                logger.info("⏭️ 跳过AI任务执行器初始化（已禁用）")
             
             # 5. 启动SSE连接管理器
-            logger.info("📡 启动SSE连接管理器...")
-            try:
-                await sse_manager.start()
-                logger.info("✅ SSE连接管理器已启动")
-            except Exception as e:
-                logger.error(f"❌ 启动SSE连接管理器失败: {str(e)}")
+            if settings.SSE_MANAGER_ENABLED:
+                logger.info("📡 启动SSE连接管理器...")
+                try:
+                    sse_manager = get_sse_manager()
+                    await sse_manager.start()
+                    logger.info("✅ SSE连接管理器已启动")
+                except Exception as e:
+                    logger.error(f"❌ 启动SSE连接管理器失败: {str(e)}")
+            else:
+                logger.info("⏭️ 跳过SSE连接管理器启动（已禁用）")
             
             # 6. 初始化Redis连接
-            logger.info("🔧 初始化Redis连接...")
-            try:
-                from app.services.redis_client import init_redis
-                if init_redis():
-                    logger.info("✅ Redis连接初始化成功")
-                else:
-                    logger.warning("⚠️ Redis连接初始化失败，复判队列服务将不可用")
-            except Exception as e:
-                logger.error(f"❌ 初始化Redis连接失败: {str(e)}")
+            if settings.REDIS_ENABLED:
+                logger.info("🔧 初始化Redis连接...")
+                try:
+                    from app.services.redis_client import init_redis
+                    if init_redis():
+                        logger.info("✅ Redis连接初始化成功")
+                    else:
+                        logger.warning("⚠️ Redis连接初始化失败，复判队列服务将不可用")
+                except Exception as e:
+                    logger.error(f"❌ 初始化Redis连接失败: {str(e)}")
+            else:
+                logger.info("⏭️ 跳过Redis连接初始化（已禁用）")
             
             # 7. 启动预警复判队列服务
-            logger.info("🔄 启动预警复判队列服务...")
-            try:
-                from app.services.alert_review_queue_service import start_alert_review_queue_service
-                if getattr(settings, 'ALERT_REVIEW_QUEUE_ENABLED', True):
+            if getattr(settings, 'ALERT_REVIEW_QUEUE_ENABLED', True) and settings.REDIS_ENABLED:
+                logger.info("🔄 启动预警复判队列服务...")
+                try:
+                    from app.services.alert_review_queue_service import start_alert_review_queue_service
                     start_alert_review_queue_service()
                     logger.info("✅ 预警复判队列服务已启动")
-                else:
-                    logger.info("⚪ 预警复判队列服务已禁用")
-            except Exception as e:
-                logger.error(f"❌ 启动预警复判队列服务失败: {str(e)}")
+                except Exception as e:
+                    logger.error(f"❌ 启动预警复判队列服务失败: {str(e)}")
+            else:
+                logger.info("⏭️ 跳过预警复判队列服务启动（已禁用）")
             
             # 8. 启动LLM任务执行器
-            logger.info("🚀 启动LLM任务执行器...")
-            try:
-                from app.services.llm_task_executor import llm_task_executor
-                llm_task_executor.start()
-                logger.info("✅ LLM任务执行器已启动")
-            except Exception as e:
-                logger.error(f"❌ 启动LLM任务执行器失败: {str(e)}")
+            if settings.LLM_TASK_EXECUTOR_ENABLED:
+                logger.info("🚀 启动LLM任务执行器...")
+                try:
+                    from app.services.llm_task_executor import llm_task_executor
+                    llm_task_executor.start()
+                    logger.info("✅ LLM任务执行器已启动")
+                except Exception as e:
+                    logger.error(f"❌ 启动LLM任务执行器失败: {str(e)}")
+            else:
+                logger.info("⏭️ 跳过LLM任务执行器启动（已禁用）")
             
             self.database_initialized = True
             logger.info("🎉 系统核心初始化完成！")
@@ -466,59 +472,68 @@ class SystemStartupService:
         logger.info("🔧 关闭系统核心服务...")
         
         # 关闭LLM任务执行器
-        try:
-            from app.services.llm_task_executor import llm_task_executor
-            llm_task_executor.stop()
-            logger.info("✅ LLM任务执行器已关闭")
-        except Exception as e:
-            logger.error(f"❌ 关闭LLM任务执行器失败: {str(e)}")
+        if settings.LLM_TASK_EXECUTOR_ENABLED:
+            try:
+                from app.services.llm_task_executor import llm_task_executor
+                llm_task_executor.stop()
+                logger.info("✅ LLM任务执行器已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭LLM任务执行器失败: {str(e)}")
         
         # 关闭预警复判队列服务
-        try:
-            from app.services.alert_review_queue_service import stop_alert_review_queue_service
-            stop_alert_review_queue_service()
-            logger.info("✅ 预警复判队列服务已关闭")
-        except Exception as e:
-            logger.error(f"❌ 关闭预警复判队列服务失败: {str(e)}")
+        if getattr(settings, 'ALERT_REVIEW_QUEUE_ENABLED', True) and settings.REDIS_ENABLED:
+            try:
+                from app.services.alert_review_queue_service import stop_alert_review_queue_service
+                stop_alert_review_queue_service()
+                logger.info("✅ 预警复判队列服务已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭预警复判队列服务失败: {str(e)}")
         
         # 关闭Redis连接
-        try:
-            from app.services.redis_client import close_redis
-            close_redis()
-            logger.info("✅ Redis连接已关闭")
-        except Exception as e:
-            logger.error(f"❌ 关闭Redis连接失败: {str(e)}")
+        if settings.REDIS_ENABLED:
+            try:
+                from app.services.redis_client import close_redis
+                close_redis()
+                logger.info("✅ Redis连接已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭Redis连接失败: {str(e)}")
         
         # 关闭SSE连接管理器
-        try:
-            await sse_manager.stop()
-            logger.info("✅ SSE连接管理器已关闭")
-        except Exception as e:
-            logger.error(f"❌ 关闭SSE连接管理器失败: {str(e)}")
+        if settings.SSE_MANAGER_ENABLED:
+            try:
+                sse_manager = get_sse_manager()
+                await sse_manager.stop()
+                logger.info("✅ SSE连接管理器已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭SSE连接管理器失败: {str(e)}")
         
         # 关闭RabbitMQ连接
-        try:
-            from app.services.rabbitmq_client import rabbitmq_client
-            rabbitmq_client.close()
-            logger.info("✅ RabbitMQ连接已关闭")
-        except Exception as e:
-            logger.error(f"❌ 关闭RabbitMQ连接失败: {str(e)}")
+        if getattr(settings, 'RABBITMQ_ENABLED', True):
+            try:
+                rabbitmq_client = get_rabbitmq_client()
+                rabbitmq_client.close()
+                logger.info("✅ RabbitMQ连接已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭RabbitMQ连接失败: {str(e)}")
         
         # 关闭技能管理器
-        try:
-            skill_manager.cleanup_all()
-            logger.info("✅ 技能管理器已清理")
-        except Exception as e:
-            logger.error(f"❌ 清理技能管理器失败: {str(e)}")
+        if settings.SKILL_MANAGER_ENABLED:
+            try:
+                skill_manager.cleanup_all()
+                logger.info("✅ 技能管理器已清理")
+            except Exception as e:
+                logger.error(f"❌ 清理技能管理器失败: {str(e)}")
         
         # 关闭任务执行器
-        try:
-            task_executor.shutdown()
-            logger.info("✅ AI任务执行器已关闭")
-        except Exception as e:
-            logger.error(f"❌ 关闭AI任务执行器失败: {str(e)}")
+        if settings.AI_TASK_EXECUTOR_ENABLED:
+            try:
+                task_executor.shutdown()
+                logger.info("✅ AI任务执行器已关闭")
+            except Exception as e:
+                logger.error(f"❌ 关闭AI任务执行器失败: {str(e)}")
         
         # 关闭全局帧读取器管理池
+        # 暂时不添加配置项，因为没有对应的启动配置
         try:
             from app.services.adaptive_frame_reader import frame_reader_manager
             frame_reader_manager.shutdown()

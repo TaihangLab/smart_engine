@@ -23,12 +23,29 @@ from datetime import datetime
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
-from app.db.session import SessionLocal
-from app.models.compensation import (
-    AlertNotificationLog, AlertNotificationLogCreate,
-    NotificationStatus, NotificationChannel
-)
-from app.utils.message_id_generator import generate_message_id
+
+# 检查SSE管理器是否启用
+SSE_ENABLED = getattr(settings, 'SSE_MANAGER_ENABLED', True)
+
+# 仅在SSE启用时导入依赖
+SessionLocal = None
+AlertNotificationLog = None
+AlertNotificationLogCreate = None
+NotificationStatus = None
+NotificationChannel = None
+generate_message_id = None
+
+if SSE_ENABLED:
+    try:
+        from app.db.session import SessionLocal
+        from app.models.compensation import (
+            AlertNotificationLog, AlertNotificationLogCreate,
+            NotificationStatus, NotificationChannel
+        )
+        from app.utils.message_id_generator import generate_message_id
+    except ImportError as e:
+        logging.warning(f"⚠️ 导入SSE依赖失败，SSE功能将不可用: {e}")
+        SSE_ENABLED = False
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +54,10 @@ class SSEConnectionManager:
     """企业级SSE连接管理器 - 支持自动补偿机制"""
     
     def __init__(self):
+        if not SSE_ENABLED:
+            logger.info(f"⏭️ SSE连接管理器已禁用")
+            return
+            
         self.connected_clients: Set[asyncio.Queue] = set()
         self.started = False
         
@@ -372,5 +393,17 @@ class SSEConnectionManager:
         }
 
 
-# 创建全局连接管理器实例
-sse_manager = SSEConnectionManager() 
+# 全局单例 - 懒加载
+_sse_manager_instance = None
+
+def get_sse_manager():
+    """
+    获取SSE连接管理器单例（懒加载）
+    """
+    global _sse_manager_instance
+    if _sse_manager_instance is None:
+        _sse_manager_instance = SSEConnectionManager()
+    return _sse_manager_instance
+
+# 为了兼容现有代码，提供一个可导入的名称
+sse_manager = None
