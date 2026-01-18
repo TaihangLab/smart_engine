@@ -11,31 +11,19 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import logging
 from datetime import datetime
-from slowapi import Limiter, _rate_limit_exceeded_handler
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
 
 from app.db.session import get_db
-from app.models.auth import LoginRequest, LoginResponse, TokenRefreshRequest, PasswordChangeRequest
+from app.models.auth import LoginRequest, LoginResponse, TokenRefreshRequest, PasswordChangeRequest, NewLoginResponse
 from app.services.auth_service import AuthenticationService
 from app.models.rbac import UnifiedResponse
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# 初始化限速器
-limiter = Limiter(key_func=get_remote_address)
-
 # 创建认证路由器
 auth_router = APIRouter(tags=["认证"])
 
-# 应用限速器错误处理器
-# 注意：在实际应用中，你可能需要在主应用中设置这个处理器
-# app.state.limiter = limiter
-# app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
-
 # 登录接口
-@limiter.limit("5/minute")  # 限制每分钟最多5次登录尝试
 @auth_router.post("/login", response_model=UnifiedResponse, summary="用户登录")
 async def login(
     login_request: LoginRequest,
@@ -49,16 +37,17 @@ async def login(
     try:
         # 获取客户端IP地址
         client_ip = request.client.host
-        
-        logger.info(f"用户登录尝试: {login_request.username}, IP: {client_ip}")
-        
+
+        logger.info(f"用户登录尝试: {login_request.username}, 租户: {login_request.tenantCode}, IP: {client_ip}")
+
         # 验证用户凭据
         user, error_msg = AuthenticationService.authenticate_user(
-            db, 
-            login_request.username, 
-            login_request.password
+            db,
+            login_request.username,
+            login_request.password,
+            login_request.tenantCode
         )
-        
+
         if not user:
             # 登录失败
             logger.warning(f"登录失败: {login_request.username}, IP: {client_ip}, 原因: {error_msg}")
@@ -68,19 +57,27 @@ async def login(
                 message=error_msg,
                 data=None
             )
-        
-        # 创建登录响应
-        login_response = AuthenticationService.create_login_response(user)
-        
+
+        # 获取用户角色和权限
+        roles = AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
+        permissions = AuthenticationService.get_user_permissions(db, user.id, user.user_name, user.tenant_id)
+
+        # 生成adminToken
+        admin_token = AuthenticationService.generate_admin_token(user, roles, permissions)
+
+        # 创建新的登录响应
+        login_response = AuthenticationService.create_new_login_response(user, roles, permissions, admin_token)
+
         logger.info(f"用户登录成功: {user.user_name}, ID: {user.id}, IP: {client_ip}")
-        
+
+        # 返回符合新API规范的响应
         return UnifiedResponse(
             success=True,
             code=200,
             message="登录成功",
             data=login_response
         )
-        
+
     except Exception as e:
         logger.error(f"登录过程发生异常: {str(e)}", exc_info=True)
         return UnifiedResponse(
