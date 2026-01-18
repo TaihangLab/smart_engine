@@ -10,7 +10,7 @@ RBAC权限管理相关的Pydantic模型
 from typing import Optional, List, Any
 from datetime import datetime, date
 from pydantic import BaseModel, Field, EmailStr, validator, field_validator
-from pydantic import ConfigDict
+from pydantic import ConfigDict, model_validator
 
 
 # ===========================================
@@ -389,13 +389,34 @@ class RoleListResponse(BaseModel):
 
 class UserRoleAssign(BaseModel):
     """用户角色分配请求模型"""
-    user_name: str = Field(..., description="用户名")
-    role_code: str = Field(..., description="角色编码")
+    user_name: Optional[str] = Field(None, description="用户名")
+    role_code: Optional[str] = Field(None, description="角色编码")
+    user_id: Optional[int] = Field(None, description="用户ID")
+    role_ids: Optional[List[int]] = Field(None, description="角色ID列表")
     tenant_id: Optional[int] = Field(None, description="租户ID", max_length=32)
 
     model_config = ConfigDict(
         populate_by_name=True
     )
+
+    @model_validator(mode='before')
+    def validate_either_user_role_or_id_list(cls, values):
+        """验证必须提供用户名/角色码或用户ID/角色ID列表之一"""
+        user_name = values.get('user_name')
+        role_code = values.get('role_code')
+        user_id = values.get('user_id')
+        role_ids = values.get('role_ids')
+
+        # 检查是否提供了用户名和角色码
+        has_name_params = user_name is not None and role_code is not None
+        # 检查是否提供了用户ID和角色ID列表
+        has_id_params = user_id is not None and role_ids is not None
+
+        # 至少要有一组完整的参数
+        if not (has_name_params or has_id_params):
+            raise ValueError("必须提供 user_name 和 role_code 或者 user_id 和 role_ids")
+
+        return values
 
 
 class UserRoleResponse(BaseModel):
