@@ -268,9 +268,9 @@ class PermissionService:
             # 创建权限节点
             perm_node = {
                 "id": perm.id,
-                "type": perm.permission_type,
-                "name": perm.permission_name,
-                "code": perm.permission_code,
+                "permission_type": perm.permission_type,
+                "permission_name": perm.permission_name,
+                "permission_code": perm.permission_code,
                 "path": perm.path,
                 "description": perm.remark,
                 "parent_id": perm.parent_id,
