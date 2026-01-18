@@ -215,15 +215,37 @@ class AuthenticationService:
         Returns:
             Base64编码的管理员令牌
         """
-        # 构建管理员令牌数据
+        # 获取部门信息
+        dept_name = ""
+        if user.dept_id:
+            from app.db.session import SessionLocal
+            from app.services.rbac_service import RbacService
+            db = SessionLocal()
+            try:
+                dept = RbacService.get_dept_by_id(db, user.dept_id)
+                if dept:
+                    dept_name = dept.name  # SysDept 的字段名是 name
+            finally:
+                db.close()
+
+        # 获取租户信息
+        tenant_name = f"Tenant-{user.tenant_id}"
+        company_name = f"Company-{user.tenant_id}"
+        company_code = f"COMP-{user.tenant_id}"
+
+        # 构建管理员令牌数据（符合 token.md 规范）
         admin_data = {
-            "userId": user.id,
-            "username": user.user_name,
+            "userId": str(user.id),
+            "userName": user.user_name,
             "tenantId": user.tenant_id,
-            "deptId": user.dept_id,  # 添加部门ID
+            "tenantName": tenant_name,
+            "companyName": company_name,
+            "companyCode": company_code,
+            "deptId": user.dept_id if user.dept_id else 0,
+            "deptName": dept_name if dept_name else f"Dept-{user.dept_id}",
+            "clientid": "02bb9cfe8d7844ecae8dbe62b1ba971a",  # 固定值
             "roles": roles,
-            "permissions": permissions,
-            "createTime": datetime.utcnow().isoformat()
+            "permissions": permissions
         }
 
         # 将数据转换为JSON字符串

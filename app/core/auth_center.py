@@ -164,15 +164,29 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
     if isinstance(tenant_id, str):
         tenant_id = int(tenant_id)
 
-    # deptId 是必需的，如果没有则抛出异常
-    if 'deptId' not in user_info:
-        raise ValueError("用户信息中缺少必需的 deptId 字段")
-    dept_id = user_info['deptId']
-    # 转换为整数
-    if isinstance(dept_id, str):
-        dept_id = int(dept_id)
+    # deptId 是必需的，如果没有则创建默认部门
+    if 'deptId' not in user_info or user_info['deptId'] is None:
+        # 创建该租户的默认部门
+        default_dept_id = tenant_id  # 使用租户ID作为默认部门ID
+        default_dept_name = f'{tenant_id}_默认部门'
 
-    dept_name = user_info.get('deptName', f'Dept-{dept_id}')
+        dept_info = {
+            'deptId': default_dept_id,
+            'deptName': default_dept_name,
+            'tenantId': tenant_id
+        }
+
+        ensure_dept_exists(dept_info, db)
+
+        dept_id = default_dept_id
+        dept_name = default_dept_name
+    else:
+        dept_id = user_info['deptId']
+        # 转换为整数
+        if isinstance(dept_id, str):
+            dept_id = int(dept_id)
+
+        dept_name = user_info.get('deptName', f'Dept-{dept_id}')
 
     # 检查用户是否已存在（根据 user_name + tenant_id 检查用户）
     existing_user = RbacService.get_user_by_user_name_and_tenant_id(db, user_name, tenant_id)
