@@ -125,6 +125,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(AuthMiddleware)
 
+# 添加 CORS 头中间件（确保所有响应都包含 CORS 头，包括错误响应）
+class CORSSecurityHeadersMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        response = await call_next(request)
+        # 确保所有响应都包含 CORS 头
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept"
+        response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range"
+        return response
+
+app.add_middleware(CORSSecurityHeadersMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 允许所有来源，生产环境应该限制
@@ -170,10 +184,14 @@ async def global_exception_handler(request: Request, exc: Exception):
                 message=exc.detail,
                 data=None
             )
-        return JSONResponse(
+        response = JSONResponse(
             status_code=exc.status_code,
             content=response_data.model_dump()
         )
+        # 添加 CORS 头
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
 
     # 检查是否是ValueError（通常是我们自定义的业务错误）
     if isinstance(exc, ValueError):
@@ -183,10 +201,14 @@ async def global_exception_handler(request: Request, exc: Exception):
             message=str(exc),
             data=None
         )
-        return JSONResponse(
+        response = JSONResponse(
             status_code=403,
             content=response_data.model_dump()
         )
+        # 添加 CORS 头
+        response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
+        response.headers["Access-Control-Allow-Credentials"] = "true"
+        return response
 
     # 其他未捕获的异常
     response_data = UnifiedResponse(
@@ -195,10 +217,14 @@ async def global_exception_handler(request: Request, exc: Exception):
         message=f"服务器内部错误: {str(exc)}",
         data=None
     )
-    return JSONResponse(
+    response = JSONResponse(
         status_code=500,
         content=response_data.model_dump()
     )
+    # 添加 CORS 头
+    response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
 
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
