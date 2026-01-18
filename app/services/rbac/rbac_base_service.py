@@ -17,14 +17,14 @@ class BaseRbacService:
     """RBAC基础服务类"""
     
     @staticmethod
-    def has_permission(db: Session, user_name: str, tenant_code: str, url: str, method: str) -> bool:
+    def has_permission(db: Session, user_name: str, tenant_id: int, url: str, method: str) -> bool:
         """
         检查用户是否有权限访问指定URL和方法
 
         Args:
             db: 数据库会话
             user_name: 用户名
-            tenant_code: 租户编码
+            tenant_id: 租户编码
             url: 请求URL路径
             method: 请求方法（GET, POST, PUT, DELETE等）
 
@@ -33,19 +33,19 @@ class BaseRbacService:
         """
         try:
             # 获取用户权限列表
-            permissions = RbacDao.get_user_permissions(db, user_name, tenant_code)
+            permissions = RbacDao.get_user_permissions(db, user_name, tenant_id)
 
             if not permissions:
-                logger.warning(f"用户 {user_name}@{tenant_code} 没有任何权限")
+                logger.warning(f"用户 {user_name}@{tenant_id} 没有任何权限")
                 return False
 
             # 检查权限匹配
             for perm in permissions:
                 if perm.url == url and perm.method == method:
-                    logger.debug(f"权限匹配成功: {user_name}@{tenant_code} -> {method} {url}")
+                    logger.debug(f"权限匹配成功: {user_name}@{tenant_id} -> {method} {url}")
                     return True
 
-            logger.warning(f"权限匹配失败: {user_name}@{tenant_code} -> {method} {url}")
+            logger.warning(f"权限匹配失败: {user_name}@{tenant_id} -> {method} {url}")
             return False
 
         except Exception as e:
@@ -53,19 +53,19 @@ class BaseRbacService:
             return False
 
     @staticmethod
-    def get_user_permission_list(db: Session, user_name: str, tenant_code: str) -> list:
+    def get_user_permission_list(db: Session, user_name: str, tenant_id: int) -> list:
         """
         获取用户权限列表
 
         Args:
             db: 数据库会话
             user_name: 用户名
-            tenant_code: 租户编码
+            tenant_id: 租户编码
 
         Returns:
             权限列表，每个权限包含url和method字段
         """
-        permissions = RbacDao.get_user_permissions(db, user_name, tenant_code)
+        permissions = RbacDao.get_user_permissions(db, user_name, tenant_id)
         return [
             {
                 "url": perm.url,

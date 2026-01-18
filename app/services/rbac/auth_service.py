@@ -17,25 +17,25 @@ class AuthService(BaseRbacService):
     """认证授权服务"""
     
     @staticmethod
-    def check_permission(db: Session, user_name: str, tenant_code: str, url: str, method: str) -> Dict[str, Any]:
+    def check_permission(db: Session, user_name: str, tenant_id: int, url: str, method: str) -> Dict[str, Any]:
         """检查用户权限"""
-        has_permission = BaseRbacService.has_permission(db, user_name, tenant_code, url, method)
+        has_permission = BaseRbacService.has_permission(db, user_name, tenant_id, url, method)
         
         return {
             "has_permission": has_permission,
             "user_name": user_name,
-            "tenant_code": tenant_code,
+            "tenant_id": tenant_id,
             "url": url,
             "method": method
         }
 
     @staticmethod
-    def get_user_permissions(db: Session, user_name: str, tenant_code: str) -> Dict[str, Any]:
+    def get_user_permissions(db: Session, user_name: str, tenant_id: int) -> Dict[str, Any]:
         """获取用户权限列表"""
-        permissions = BaseRbacService.get_user_permission_list(db, user_name, tenant_code)
+        permissions = BaseRbacService.get_user_permission_list(db, user_name, tenant_id)
         
         return {
             "user_name": user_name,
-            "tenant_code": tenant_code,
+            "tenant_id": tenant_id,
             "permissions": permissions
         }

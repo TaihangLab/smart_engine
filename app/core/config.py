@@ -77,6 +77,13 @@ class Settings(BaseSettings):
     
     # 数据库URL
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
+
+    @property
+    def database_uri(self) -> str:
+        """生成数据库连接URI"""
+        if self.SQLALCHEMY_DATABASE_URI:
+            return self.SQLALCHEMY_DATABASE_URI
+        return f"mysql+pymysql://{self.MYSQL_USER}:{self.MYSQL_PASSWORD}@{self.MYSQL_SERVER}:{self.MYSQL_PORT}/{self.MYSQL_DB}?charset=utf8mb4"
     
     # MinIO配置
     MINIO_ENDPOINT: str = Field(default="192.168.0.14", description="MinIO服务器地址")

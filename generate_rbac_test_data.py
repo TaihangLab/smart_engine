@@ -69,16 +69,21 @@ class RBACTestDataGenerator:
     
     def generate_tenant_data(self) -> List[Dict[str, Any]]:
         """生成租户数据"""
-        logger.info(f"生成 {self.count} 条租户数据...")
+        # 确保生成15个租户
+        tenant_count = 15
+        logger.info(f"生成 {tenant_count} 条租户数据...")
         tenants = []
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
         # 套餐选项
         packages = ["basic", "standard", "premium", "enterprise"]
 
+        from app.utils.id_generator import generate_id
+
         # 保留默认租户
+        default_tenant_id = generate_id(1, "tenant")  # 使用固定的租户ID 1
         tenants.append({
-            "tenant_code": "default",
+            "id": default_tenant_id,
             "tenant_name": "默认租户",
             "company_name": "默认企业",
             "contact_person": "管理员",
@@ -92,7 +97,7 @@ class RBACTestDataGenerator:
             "address": "北京市朝阳区",
             "company_code": "91110000MA12345678",
             "description": "默认租户，用于系统管理",
-            "status": True,
+            "status": 0,  # 0=启用
             "is_deleted": False,
             "create_by": "system",
             "update_by": "system",
@@ -100,10 +105,11 @@ class RBACTestDataGenerator:
             "update_time": current_time
         })
 
-        for i in range(1, self.count):
-            tenant_code = f"{random.choice(self.tenant_prefixes)}_{i:03d}"
-            tenant_name = f"{tenant_code} 有限公司"
-            company_name = f"{tenant_code} 企业"
+        for i in range(1, tenant_count):
+            tenant_id = generate_id(i + 1, "tenant")  # 生成合成ID
+            tenant_tag = f"{random.choice(self.tenant_prefixes)}_{i:03d}"
+            tenant_name = f"{tenant_tag} 有限公司"
+            company_name = f"{tenant_tag} 企业"
 
             # 生成随机联系人信息
             contact_first = random.choice(self.user_first_names)
@@ -118,7 +124,7 @@ class RBACTestDataGenerator:
             description = f"这是 {company_name} 的企业简介，主要从事 {random.choice(['软件开发', '人工智能', '数据分析', '云计算', '物联网'])} 业务。"
 
             tenants.append({
-                "tenant_code": tenant_code,
+                "id": tenant_id,
                 "tenant_name": tenant_name,
                 "company_name": company_name,
                 "contact_person": contact_person,
@@ -128,11 +134,11 @@ class RBACTestDataGenerator:
                 "package": random.choice(packages),
                 "expire_time": (datetime.now() + timedelta(days=random.randint(30, 730))).date(),
                 "user_count": random.randint(10, 500),
-                "domain": f"{tenant_code}.example.com",
+                "domain": f"{tenant_tag}.example.com",
                 "address": address,
                 "company_code": company_code,
                 "description": description,
-                "status": random.choice([True, False]),
+                "status": random.choice([0, 1]),  # 0=启用, 1=禁用
                 "is_deleted": False,
                 "create_by": "system",
                 "update_by": "system",
@@ -144,24 +150,35 @@ class RBACTestDataGenerator:
     
     def generate_dept_data(self) -> List[Dict[str, Any]]:
         """生成部门数据"""
-        logger.info(f"生成 {self.count} 条部门数据...")
+        logger.info(f"生成部门数据...")
+
         depts = []
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
+        from app.utils.id_generator import generate_id
+
         # 为每个租户生成部门数据
+        dept_counter = 0
         for tenant in self.tenants:
-            tenant_code = tenant['tenant_code']
+            tenant_id = tenant['id']
+
+            # 默认租户生成较多部门，其他租户生成较少部门
+            if tenant_id == 1000000000000001:  # 默认租户ID
+                depts_per_tenant = 10
+            else:
+                depts_per_tenant = random.randint(1, 2)  # 其他租户生成1-2个部门
 
             # 生成根部门
+            root_dept_id = generate_id(dept_counter + 1, "dept")
             depts.append({
-                "tenant_code": tenant_code,
-                "dept_code": f"{tenant_code}_root",
+                "id": root_dept_id,
+                "tenant_id": tenant_id,
                 "name": f"{tenant['tenant_name']}总公司",
                 "parent_id": None,
-                "path": f"/{tenant_code}/0",
+                "path": f"/{root_dept_id}",
                 "depth": 0,
                 "sort_order": 0,
-                "status": "ACTIVE",
+                "status": 0,  # 0=启用
                 "is_deleted": False,
                 "create_by": "system",
                 "update_by": "system",
@@ -170,52 +187,62 @@ class RBACTestDataGenerator:
             })
 
             # 生成子部门
-            for i in range(1, self.count // len(self.tenants) + 1):
+            for i in range(1, depts_per_tenant + 1):
+                dept_id = generate_id(dept_counter + i + 1, "dept")
                 # 使用索引而不是 id 来选择父部门
-                parent_index = random.randint(0, len(depts)-1)
-                parent_dept = depts[parent_index]
+                parent_dept = depts[-1]  # 选择上一个部门作为父部门
                 depth = parent_dept['depth'] + 1
-                path = f"{parent_dept['path']}/{i}"
+                path = f"{parent_dept['path']}/{dept_id}"
 
                 depts.append({
-                    "tenant_code": tenant_code,
-                    "dept_code": f"{tenant_code}_dept_{i}",
+                    "id": dept_id,
+                    "tenant_id": tenant_id,
                     "name": f"{random.choice(self.dept_names)}{i}",
-                    "parent_id": None,  # 先设为 None，插入后再更新
+                    "parent_id": parent_dept['id'],  # 设置父部门ID
                     "path": path,
                     "depth": depth,
                     "sort_order": random.randint(0, 100),
-                    "status": random.choice(["ACTIVE", "INACTIVE"]),
+                    "status": random.choice([0, 1]),  # 0=启用, 1=禁用
                     "is_deleted": False,
                     "create_by": "system",
                     "update_by": "system",
                     "create_time": current_time,
                     "update_time": current_time
                 })
+
+            dept_counter += depts_per_tenant + 1  # +1 for root dept
 
         return depts
     
     def generate_position_data(self) -> List[Dict[str, Any]]:
         """生成岗位数据"""
-        logger.info(f"生成 {self.count} 条岗位数据...")
+        logger.info(f"生成岗位数据...")
+
         positions = []
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # 为每个租户生成岗位数据
-        for tenant in self.tenants:
-            tenant_code = tenant['tenant_code']
+        from app.utils.id_generator import generate_id
 
-            for i in range(1, self.count // len(self.tenants) + 1):
-                category = random.choice(self.position_categories)
+        # 为每个租户生成岗位数据
+        position_counter = 0
+        for tenant in self.tenants:
+            tenant_id = tenant['id']
+
+            # 默认租户生成较多岗位，其他租户生成较少岗位
+            if tenant_id == 1000000000000001:  # 默认租户ID
+                positions_per_tenant = 15
+            else:
+                positions_per_tenant = random.randint(1, 2)  # 其他租户生成1-2个岗位
+
+            for i in range(1, positions_per_tenant + 1):
+                position_id = generate_id(position_counter + i, "position")
                 positions.append({
-                    "tenant_code": tenant_code,
-                    "position_code": f"{category[:2]}_{i:03d}",
-                    "category_code": category,
+                    "id": position_id,
+                    "tenant_id": tenant_id,
                     "position_name": f"{random.choice(self.position_names)}{i}",
                     "department": random.choice(self.dept_names),
                     "order_num": random.randint(0, 100),
-                    "level": f"P{random.randint(1, 8)}",
-                    "status": True,
+                    "status": 0,  # 0=启用
                     "is_deleted": False,
                     "create_by": "system",
                     "update_by": "system",
@@ -223,31 +250,48 @@ class RBACTestDataGenerator:
                     "update_time": current_time
                 })
 
+            position_counter += positions_per_tenant
+
         return positions
     
     def generate_role_data(self) -> List[Dict[str, Any]]:
         """生成角色数据"""
-        logger.info(f"生成 {self.count} 条角色数据...")
+        logger.info(f"生成角色数据...")
+
         roles = []
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # 为每个租户生成角色
-        for tenant in self.tenants:
-            tenant_code = tenant['tenant_code']
+        from app.utils.id_generator import generate_id
 
-            for i in range(1, 6):  # 每个租户生成5个角色
+        # 为每个租户生成角色
+        role_counter = 0
+        for tenant in self.tenants:
+            tenant_id = tenant['id']
+
+            # 默认租户生成较多角色，其他租户生成较少角色
+            if tenant_id == 1000000000000001:  # 默认租户ID
+                roles_per_tenant = 8
+            else:
+                roles_per_tenant = random.randint(1, 2)  # 其他租户生成1-2个角色
+
+            for i in range(1, roles_per_tenant + 1):
+                role_id = generate_id(role_counter + i, "role")
                 role_name = f"{random.choice(self.role_names)}{i}"
+                role_code = f"ROLE_{role_name.upper().replace(' ', '_')}_{i}"
                 roles.append({
-                    "tenant_code": tenant_code,
+                    "id": role_id,
                     "role_name": role_name,
-                    "role_code": f"{role_name.lower()}_{i}",
-                    "status": True,
+                    "role_code": role_code,
+                    "tenant_id": tenant_id,
+                    "status": 0,  # 0=启用
                     "sort_order": i,
                     "create_by": "system",
                     "update_by": "system",
                     "create_time": current_time,
                     "update_time": current_time
                 })
+
+            role_counter += roles_per_tenant
 
         return roles
     
@@ -257,59 +301,128 @@ class RBACTestDataGenerator:
         permissions = []
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # 为每个租户生成权限
-        for tenant in self.tenants:
-            tenant_code = tenant['tenant_code']
+        from app.utils.id_generator import generate_id
 
-            perm_counter = 0
-            for resource in self.resource_types:
-                for action in self.permission_names:
-                    perm_counter += 1
-                    permission_code = f"{resource}_{action.lower()}"
-                    permissions.append({
-                        "tenant_code": tenant_code,
-                        "permission_name": f"{resource} {action}",
-                        "permission_code": permission_code,
-                        "status": True,
-                        "sort_order": perm_counter,
-                        "create_by": "system",
-                        "update_by": "system",
-                        "create_time": current_time,
-                        "update_time": current_time
-                    })
+        # 权限表与租户无关，所以只生成一次
+        perm_counter = 0
+        for resource in self.resource_types:
+            # 生成文件夹类型的权限（父权限）
+            folder_id = generate_id(perm_counter + 1, "permission")
+            folder_permission_code = f"{resource}_management"
+            folder_permission = {
+                "id": folder_id,
+                "permission_name": f"{resource.title()} Management",
+                "permission_code": folder_permission_code,
+                "permission_type": "folder",
+                "parent_id": None,
+                "path": f"/{folder_id}",
+                "depth": 0,
+                "status": 0,  # 0=启用
+                "sort_order": perm_counter,
+                "create_by": "system",
+                "update_by": "system",
+                "create_time": current_time,
+                "update_time": current_time
+            }
+            permissions.append(folder_permission)
+
+            # 生成菜单类型的权限（子权限）
+            menu_id = generate_id(perm_counter + 2, "permission")
+            menu_permission_code = f"{resource}:view"
+            menu_permission = {
+                "id": menu_id,
+                "permission_name": f"{resource.title()} View",
+                "permission_code": menu_permission_code,
+                "permission_type": "menu",
+                "parent_id": folder_id,  # 设置父权限ID
+                "path": f"/{folder_id}/{menu_id}",
+                "depth": 1,
+                "url": f"/{resource}",
+                "component": f"@/pages/{resource}/index.vue",
+                "icon": "el-icon-menu",
+                "status": 0,  # 0=启用
+                "sort_order": perm_counter + 1,
+                "create_by": "system",
+                "update_by": "system",
+                "create_time": current_time,
+                "update_time": current_time
+            }
+            permissions.append(menu_permission)
+
+            # 为每个菜单生成按钮类型的权限（孙权限）
+            for action in self.permission_names:
+                button_id = generate_id(perm_counter + 3, "permission")
+                button_permission_code = f"{resource}:{action.lower()}"
+                button_permission = {
+                    "id": button_id,
+                    "permission_name": f"{resource.title()} {action}",
+                    "permission_code": button_permission_code,
+                    "permission_type": "button",
+                    "parent_id": menu_id,  # 设置父权限ID
+                    "path": f"/{folder_id}/{menu_id}/{button_id}",
+                    "depth": 2,
+                    "api_path": f"/api/{resource}",
+                    "methods": '["GET", "POST", "PUT", "DELETE"]',  # 存储为JSON字符串
+                    "category": "WRITE" if action in ["添加", "编辑", "删除"] else "READ",
+                    "resource": resource,
+                    "status": 0,  # 0=启用
+                    "sort_order": perm_counter + 2,
+                    "create_by": "system",
+                    "update_by": "system",
+                    "create_time": current_time,
+                    "update_time": current_time
+                }
+                permissions.append(button_permission)
+
+                perm_counter += 3
 
         return permissions
     
     def generate_user_data(self) -> List[Dict[str, Any]]:
         """生成用户数据"""
-        logger.info(f"生成 {self.count} 条用户数据...")
+        logger.info(f"生成用户数据...")
+
         users = []
         current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
 
-        # 为每个租户生成用户
-        for tenant in self.tenants:
-            tenant_code = tenant['tenant_code']
+        from app.utils.id_generator import generate_id
 
-            for i in range(1, self.count // len(self.tenants) + 1):
+        # 为每个租户生成用户
+        user_counter = 0
+        for tenant in self.tenants:
+            tenant_id = tenant['id']
+
+            # 默认租户（ID为1000000000000001）生成较多用户，其他租户生成较少用户
+            if tenant_id == 1000000000000001:  # 默认租户ID
+                users_per_tenant = 20
+            else:
+                users_per_tenant = random.randint(1, 2)  # 其他租户生成1-2个用户
+
+            for i in range(1, users_per_tenant + 1):
+                user_id = generate_id(user_counter + i, "user")
                 first_name = random.choice(self.user_first_names)
                 last_name = random.choice(self.user_last_names)
-                username = f"{first_name.lower()}{last_name.lower()}{i}"
+                username = f"{first_name.lower()}{last_name.lower()}{i}_{tenant_id}"
 
                 users.append({
+                    "id": user_id,
                     "user_name": username,
-                    "tenant_code": tenant_code,
+                    "tenant_id": tenant_id,
                     "password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW",  # bcrypt加密的 "password"
                     "nick_name": f"{first_name}{last_name}{i}",
                     "avatar": f"https://example.com/avatar/{i}.jpg",
                     "phone": f"13{random.randint(100000000, 999999999)}",
                     "email": f"{username}@example.com",
                     "signature": f"这是 {first_name}{last_name}{i} 的个性签名",
-                    "status": random.choice([True, False]),
+                    "status": random.choice([0, 1]),  # 0=启用, 1=禁用
+                    "is_deleted": False,
                     "create_by": "system",
                     "update_by": "system",
                     "create_time": current_time,
                     "update_time": current_time
                 })
+
+            user_counter += users_per_tenant
 
         return users
     
@@ -318,17 +431,24 @@ class RBACTestDataGenerator:
         logger.info(f"生成用户角色关联数据...")
         user_roles = []
 
+        from app.utils.id_generator import generate_id
+
+        counter = 0
         for user in self.users:
             # 为每个用户分配1-3个角色
-            user_tenant_roles = [r for r in self.roles if r['tenant_code'] == user['tenant_code']]
+            # 由于权限表现在与租户无关，我们为用户分配其租户内的角色
+            user_tenant_roles = [r for r in self.roles if r['tenant_id'] == user['tenant_id']]
             if user_tenant_roles:
-                assigned_roles = random.sample(user_tenant_roles, k=random.randint(1, min(3, len(user_tenant_roles))))
+                num_roles = random.randint(1, min(3, len(user_tenant_roles)))
+                assigned_roles = random.sample(user_tenant_roles, k=num_roles)
                 for role in assigned_roles:
+                    assoc_id = generate_id(counter, "user_role")
                     user_roles.append({
-                        "user_name": user['user_name'],
-                        "role_code": role['role_code'],
-                        "tenant_code": user['tenant_code']
+                        "id": assoc_id,
+                        "user_id": user['id'],
+                        "role_id": role['id']
                     })
+                    counter += 1
 
         return user_roles
     
@@ -337,17 +457,23 @@ class RBACTestDataGenerator:
         logger.info(f"生成角色权限关联数据...")
         role_permissions = []
 
+        from app.utils.id_generator import generate_id
+
+        counter = 0
+        # 由于权限表现在与租户无关，我们为每个角色分配一些通用权限
         for role in self.roles:
-            # 为每个角色分配5-15个权限
-            role_tenant_permissions = [p for p in self.permissions if p['tenant_code'] == role['tenant_code']]
-            if role_tenant_permissions:
-                assigned_permissions = random.sample(role_tenant_permissions, k=random.randint(5, min(15, len(role_tenant_permissions))))
+            # 为每个角色分配3-8个权限
+            if self.permissions:
+                num_permissions = random.randint(3, min(8, len(self.permissions)))
+                assigned_permissions = random.sample(self.permissions, k=num_permissions)
                 for perm in assigned_permissions:
+                    assoc_id = generate_id(counter, "role_permission")
                     role_permissions.append({
-                        "role_code": role['role_code'],
-                        "permission_code": perm['permission_code'],
-                        "tenant_code": role['tenant_code']
+                        "id": assoc_id,
+                        "role_id": role['id'],
+                        "permission_id": perm['id']
                     })
+                    counter += 1
 
         return role_permissions
     
@@ -355,40 +481,109 @@ class RBACTestDataGenerator:
         """插入数据到数据库"""
         if not data:
             return []
-        
+
         logger.info(f"插入 {len(data)} 条数据到 {table_name} 表...")
-        
+
         # 根据表的实际列结构过滤数据
         filtered_data = self.filter_data_by_columns(table_name, data)
-        
+
         if not filtered_data:
             logger.warning(f"没有可插入的数据到 {table_name} 表，可能是因为列不匹配")
             return []
-        
+
         db = self.get_db_session()
         try:
-            # 获取字段名
-            fields = list(filtered_data[0].keys())
-            
-            # 构建插入SQL，使用 INSERT IGNORE 避免重复键错误
-            insert_sql = text(f"""
-                INSERT IGNORE INTO {table_name} ({', '.join(fields)})
-                VALUES ({', '.join([':' + f for f in fields])})
-            """)
-            
-            # 执行批量插入
-            db.execute(insert_sql, filtered_data)
-            db.commit()
-            
-            # 获取插入后的数据（包含自增ID）
-            if 'id' in fields:
-                # 查询所有数据（为了获取自增ID）
-                select_sql = text(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT :limit")
-                result = db.execute(select_sql, {"limit": len(filtered_data)})
-                return [dict(row._mapping) for row in result]
-            
-            return filtered_data
-            
+            if table_name == "sys_permission":
+                # 对于权限表，先插入所有记录，然后再更新parent_id
+                fields = list(filtered_data[0].keys()) if filtered_data else []
+
+                if not fields:
+                    return []
+
+                # 第一步：插入所有权限记录（parent_id暂时为NULL）
+                insert_sql = text(f"""
+                    INSERT IGNORE INTO {table_name} ({', '.join(fields)})
+                    VALUES ({', '.join([':' + f for f in fields])})
+                """)
+
+                db.execute(insert_sql, filtered_data)
+                db.commit()
+
+                # 第二步：查询所有刚插入的权限，获取它们的ID
+                # 由于权限表现在与租户无关，我们只需查询所有权限
+                if filtered_data:
+                    perm_names = [p['permission_name'] for p in filtered_data if 'permission_name' in p]
+
+                    if perm_names:
+                        names_placeholders = ','.join([f"'{name}'" for name in perm_names])
+                        select_sql = text(f"""
+                            SELECT id, permission_name, path
+                            FROM {table_name}
+                            WHERE permission_name IN ({names_placeholders})
+                            ORDER BY id
+                        """)
+                        result = db.execute(select_sql)
+                        all_perms = [dict(row._mapping) for row in result]
+
+                        # 创建权限名称到ID的映射
+                        perm_name_to_id = {perm['permission_name']: perm['id'] for perm in all_perms}
+
+                        # 第三步：根据路径更新parent_id
+                        for perm in all_perms:
+                            path = perm['path']
+                            path_parts = path.split('/')
+
+                            # 如果路径有多于1个部分，尝试找到父权限
+                            if len(path_parts) > 2:
+                                # 构造父权限的路径
+                                parent_path_parts = path_parts[:-1]  # 移除最后一个部分
+                                parent_path = '/'.join(parent_path_parts)
+
+                                # 查找具有该路径的权限
+                                parent_perm = next((p for p in all_perms if p['path'] == parent_path), None)
+
+                                if parent_perm:
+                                    # 更新当前权限的parent_id
+                                    update_sql = text(f"""
+                                        UPDATE {table_name}
+                                        SET parent_id = :parent_id
+                                        WHERE id = :id
+                                    """)
+                                    db.execute(update_sql, {
+                                        "parent_id": parent_perm['id'],
+                                        "id": perm['id']
+                                    })
+
+                        db.commit()
+
+                        # 返回更新后的权限数据
+                        return all_perms
+            else:
+                # 对于其他表，使用常规插入方法
+                if not filtered_data:
+                    return []
+
+                fields = list(filtered_data[0].keys())
+
+                # 准备插入语句
+                insert_sql = text(f"""
+                    INSERT IGNORE INTO {table_name} ({', '.join(fields)})
+                    VALUES ({', '.join([':' + f for f in fields])})
+                """)
+
+                # 执行批量插入
+                db.execute(insert_sql, filtered_data)
+                db.commit()
+
+                # 获取插入后的数据（包含自增ID）
+                if 'id' in fields:
+                    # 查询所有数据（为了获取自增ID）
+                    select_sql = text(f"SELECT * FROM {table_name} ORDER BY id DESC LIMIT :limit")
+                    result = db.execute(select_sql, {"limit": len(filtered_data)})
+                    return [dict(row._mapping) for row in result]
+
+                return filtered_data
+
         except Exception as e:
             logger.error(f"插入数据到 {table_name} 表失败: {e}")
             db.rollback()

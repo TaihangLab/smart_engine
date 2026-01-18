@@ -18,10 +18,16 @@ from app.core.config import settings
 from app.api import api_router
 
 # 导入中间件
-from app.core.middleware import RequestLoggingMiddleware
+from app.core.middleware import RequestLoggingMiddleware, AuditMiddleware
 
 # 🚀 导入零配置企业级启动服务
 from app.services.system_startup import lifespan as startup_lifespan
+
+# 导入审计拦截器
+from app.db.audit_interceptor import register_audit_listeners
+
+# 注册审计拦截器
+register_audit_listeners()
 
 # 配置日志
 log_level = getattr(logging, settings.LOG_LEVEL.upper(), logging.INFO)
@@ -104,6 +110,7 @@ app = FastAPI(
 )
 
 # 配置中间件
+app.add_middleware(AuditMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
@@ -112,6 +119,42 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# 全局异常处理器
+from fastapi import Request, HTTPException
+from app.models.rbac import UnifiedResponse
+import traceback
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request: Request, exc: Exception):
+    """全局异常处理器 - 统一处理所有未捕获的异常"""
+    logger.error(f"🚨 全局异常捕获: {str(exc)}", exc_info=True)
+    
+    # 检查是否是HTTPException
+    if isinstance(exc, HTTPException):
+        return UnifiedResponse(
+            success=False,
+            code=exc.status_code,
+            message=exc.detail,
+            data=None
+        )
+    
+    # 检查是否是ValueError（通常是我们自定义的业务错误）
+    if isinstance(exc, ValueError):
+        return UnifiedResponse(
+            success=False,
+            code=403,  # 权限相关错误使用403
+            message=str(exc),
+            data=None
+        )
+    
+    # 其他未捕获的异常
+    return UnifiedResponse(
+        success=False,
+        code=500,
+        message=f"服务器内部错误: {str(exc)}",
+        data=None
+    )
 
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)

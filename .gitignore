@@ -328,3 +328,9 @@ experimental/
 
 # ai tools
 .wiki
+.cursor
+.claude
+.trae
+CLAUDE.md
+QWEN.md
+.vscode

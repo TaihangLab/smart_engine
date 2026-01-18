@@ -2,10 +2,56 @@ from typing import List, Optional, Dict, Any
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from app.models.rbac import SysDept
+from app.utils.id_generator import generate_id
 
 
 class DeptDao:
     """部门数据访问对象"""
+
+    @staticmethod
+    def check_circular_reference(db: Session, dept_id: int, new_parent_id: Optional[int]) -> bool:
+        """检查是否存在循环引用
+
+        Args:
+            db: 数据库会话
+            dept_id: 当前部门ID
+            new_parent_id: 新的父部门ID
+
+        Returns:
+            bool: 如果存在循环引用返回True，否则返回False
+        """
+        if new_parent_id is None:
+            # 根部门不会有循环引用
+            return False
+
+        if dept_id == new_parent_id:
+            # 部门不能成为自己的父部门
+            return True
+
+        # 检查新父部门是否是当前部门的子部门（即，新父部门是否在当前部门的子树中）
+        # 如果是，则会产生循环引用
+        parent_dept = db.query(SysDept).filter(
+            SysDept.id == new_parent_id,
+            SysDept.is_deleted == False
+        ).first()
+
+        if not parent_dept:
+            # 父部门不存在，这不是循环引用，而是其他错误
+            return False
+
+        # 检查当前部门是否在父部门的子树中
+        # 使用路径判断：如果当前部门的路径以父部门的路径开头，则当前部门是父部门的子部门
+        current_dept = db.query(SysDept).filter(
+            SysDept.id == dept_id,
+            SysDept.is_deleted == False
+        ).first()
+
+        if current_dept and parent_dept.path.startswith(current_dept.path) and current_dept.path != parent_dept.path:
+            # 父部门的路径以当前部门的路径开头，说明父部门是当前部门的子部门
+            # 这会导致循环引用
+            return True
+
+        return False
 
     @staticmethod
     def generate_dept_path(db: Session, parent_id: Optional[int]) -> str:
@@ -68,6 +114,33 @@ class DeptDao:
         # Calculate initial depth
         initial_depth = 0 if parent_id is None else DeptDao.calculate_dept_depth(initial_path)
 
+        # 如果没有提供ID，则生成新的ID
+        if 'id' not in dept_data:
+            # 从tenant_id中提取数字ID用于ID生成器
+            tenant_id = dept_data.get('tenant_id', 1000000000000001)  # 使用默认租户ID
+            # 确保tenant_id是整数
+            if not isinstance(tenant_id, int):
+                raise ValueError(f"tenant_id must be an integer, got {type(tenant_id)}")
+
+            # 生成新的部门ID
+            dept_id = generate_id(tenant_id, "dept")  # tenant_id不再直接编码到ID中，但可用于其他用途
+
+            # 验证生成的ID是否在合理范围内
+            # MySQL BIGINT范围是 -9223372036854775808 到 9223372036854775807
+            if dept_id > 9223372036854775807:
+                raise ValueError(f"Generated ID {dept_id} exceeds BIGINT range")
+
+            dept_data['id'] = dept_id
+
+        # Check for circular reference before creating the department
+        # Since we're creating a new department, we only need to check if the parent_id
+        # is in the subtree of departments that would be created
+        if parent_id is not None:
+            # For a new department, we just need to make sure the parent isn't a child of the new department
+            # But since the department doesn't exist yet, we only need to check if parent points to itself
+            if parent_id == dept_data['id']:
+                raise ValueError(f"Cannot set department as its own parent")
+
         # Create department object with initial values
         dept = SysDept(
             **dept_data,
@@ -112,11 +185,11 @@ class DeptDao:
         ).first()
 
     @staticmethod
-    def get_dept_by_code(db: Session, dept_code: str, tenant_code: str) -> Optional[SysDept]:
-        """根据部门编码和租户编码获取部门"""
+    def get_dept_by_name(db: Session, name: str, tenant_id: int) -> Optional[SysDept]:
+        """根据部门名称和租户ID获取部门"""
         return db.query(SysDept).filter(
-            SysDept.dept_code == dept_code,
-            SysDept.tenant_code == tenant_code,
+            SysDept.name == name,
+            SysDept.tenant_id == tenant_id,
             SysDept.is_deleted == False
         ).first()
 
@@ -137,12 +210,22 @@ class DeptDao:
 
     @staticmethod
     def get_dept_by_parent(db: Session, parent_id: Optional[int]) -> List[SysDept]:
-        """获取指定父部门下的所有直接子部门"""
-        return db.query(SysDept).filter(
+        """获取指定父部门下的所有直接子部门
+
+        Args:
+            db: 数据库会话
+            parent_id: 父部门ID
+
+        Returns:
+            List[SysDept]: 部门列表
+        """
+        query = db.query(SysDept).filter(
             SysDept.parent_id == parent_id,
             SysDept.is_deleted == False,
             SysDept.status == 0  # 只返回激活的部门
-        ).order_by(SysDept.sort_order).all()
+        )
+
+        return query.order_by(SysDept.sort_order).all()
 
     @staticmethod
     def get_dept_subtree(db: Session, dept_id: int) -> List[SysDept]:
@@ -164,13 +247,14 @@ class DeptDao:
         if not dept:
             return []
 
-        # 使用 like 查询所有路径以当前部门路径开头的部门
-        # 例如：当前部门路径是 /1/，则查询所有路径 like "/1/%" 的部门
-        return db.query(SysDept).filter(
+        # 构建查询
+        query = db.query(SysDept).filter(
             SysDept.path.like(f"{dept.path}%"),
-            SysDept.status == 0,
-            SysDept.is_deleted == False
-        ).order_by(SysDept.path, SysDept.sort_order).all()
+            SysDept.is_deleted == False,
+            SysDept.status == 0  # 只返回激活的部门
+        )
+
+        return query.order_by(SysDept.path, SysDept.sort_order).all()
 
     @staticmethod
     def update_dept(db: Session, dept_id: int, update_data: dict) -> Optional[SysDept]:
@@ -191,8 +275,12 @@ class DeptDao:
         old_parent_id = dept.parent_id
         new_parent_id = update_data.get('parent_id', old_parent_id)
 
-        # 如果父部门发生变化，需要更新路径
+        # 如果父部门发生变化，需要检查循环引用
         if new_parent_id != old_parent_id:
+            # 检查是否会产生循环引用
+            if DeptDao.check_circular_reference(db, dept_id, new_parent_id):
+                raise ValueError(f"Updating department would result in a circular reference")
+
             # 获取当前部门及其所有子部门
             dept_with_children = DeptDao.get_dept_subtree(db, dept_id)
 
@@ -253,35 +341,34 @@ class DeptDao:
         return True
 
     @staticmethod
-    def get_dept_tree(db: Session, tenant_code: Optional[str] = None, name: Optional[str] = None, dept_code: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_dept_tree(db: Session, tenant_id: Optional[int] = None, name: Optional[str] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
         """获取部门树结构
 
         Args:
             db: 数据库会话
-            tenant_code: 租户代码，为None时返回所有租户的部门树
+            tenant_id: 租户ID，为None时返回所有租户的部门树
             name: 部门名称（模糊查询）
-            dept_code: 部门编码（模糊查询）
+            status: 状态过滤，为None时不过滤状态，否则按指定状态过滤
 
         Returns:
             List[Dict[str, Any]]: 部门树，每个部门包含 children 字段
         """
         # 构建查询
         query = db.query(SysDept).filter(
-            SysDept.is_deleted == False,
-            SysDept.status == 0  # 只返回激活的部门
+            SysDept.is_deleted == False
         )
 
         # 添加租户过滤
-        if tenant_code:
-            query = query.filter(SysDept.tenant_code == tenant_code)
+        if tenant_id:
+            query = query.filter(SysDept.tenant_id == tenant_id)
 
         # 添加名称模糊查询
         if name:
             query = query.filter(SysDept.name.contains(name))
 
-        # 添加编码模糊查询
-        if dept_code:
-            query = query.filter(SysDept.dept_code.contains(dept_code))
+        # 添加状态过滤（可选）
+        if status is not None:
+            query = query.filter(SysDept.status == status)
 
         all_depts = query.all()
 
@@ -294,10 +381,9 @@ class DeptDao:
                 "parentId": dept.parent_id,
                 "path": dept.path,
                 "depth": dept.depth,
-                "sortOrder": dept.sort_order,
-                "leaderId": dept.leader_id,
+                "sortOrder": dept.sort_order ,
                 "status": dept.status,
-                "tenantCode": dept.tenant_code,
+                "tenantId": dept.tenant_id,
                 "createTime": dept.create_time,
                 "updateTime": dept.update_time,
                 "createBy": dept.create_by,
@@ -321,24 +407,28 @@ class DeptDao:
         return root_depts
 
     @staticmethod
-    def get_full_dept_tree(db: Session, tenant_code: Optional[str] = None) -> List[Dict[str, Any]]:
+    def get_full_dept_tree(db: Session, tenant_id: Optional[int] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
         """获取完整的部门树结构
 
         Args:
             db: 数据库会话
-            tenant_code: 租户代码，为None时返回所有租户的部门树
+            tenant_id: 租户ID，为None时返回所有租户的部门树
+            status: 状态过滤，为None时不过滤状态，否则按指定状态过滤
 
         Returns:
             List[Dict[str, Any]]: 完整的部门树，每个部门包含 children 字段
         """
         # 获取所有部门
         query = db.query(SysDept).filter(
-            SysDept.is_deleted == False,
-            SysDept.status == 0  # 只返回激活的部门
+            SysDept.is_deleted == False
         )
 
-        if tenant_code:
-            query = query.filter(SysDept.tenant_code == tenant_code)
+        if tenant_id:
+            query = query.filter(SysDept.tenant_id == tenant_id)
+
+        # 添加状态过滤（可选）
+        if status is not None:
+            query = query.filter(SysDept.status == status)
 
         all_depts = query.all()
 
@@ -352,9 +442,8 @@ class DeptDao:
                 "path": dept.path,
                 "depth": dept.depth,
                 "sortOrder": dept.sort_order,
-                "leaderId": dept.leader_id,
                 "status": dept.status,
-                "tenantCode": dept.tenant_code,
+                "tenantId": dept.tenant_id,
                 "createTime": dept.create_time,
                 "updateTime": dept.update_time,
                 "createBy": dept.create_by,
@@ -378,13 +467,13 @@ class DeptDao:
         return root_depts
 
     @staticmethod
-    def get_depts_by_tenant_and_parent(db: Session, tenant_code: str, parent_code: Optional[str], skip: int = 0, limit: int = 100) -> List[SysDept]:
-        """根据租户和父部门代码获取部门列表
+    def get_depts_by_tenant_and_parent(db: Session, tenant_id: int, parent_id: Optional[int], skip: int = 0, limit: int = 100) -> List[SysDept]:
+        """根据租户和父部门ID获取部门列表
 
         Args:
             db: 数据库会话
-            tenant_code: 租户代码
-            parent_code: 父部门代码，None表示根部门
+            tenant_id: 租户ID
+            parent_id: 父部门ID，None表示根部门
             skip: 跳过的记录数
             limit: 限制返回的记录数
 
@@ -392,49 +481,136 @@ class DeptDao:
             List[SysDept]: 部门列表
         """
         query = db.query(SysDept).filter(
-            SysDept.tenant_code == tenant_code,
+            SysDept.tenant_id == tenant_id,
             SysDept.is_deleted == False,
             SysDept.status == 0  # 只返回激活的部门
         )
 
-        # 根据 parent_code 过滤
-        if parent_code is None:
+        # 根据 parent_id 过滤
+        if parent_id is None:
             # 获取根部门（parent_id 为 None）
             query = query.filter(SysDept.parent_id.is_(None))
         else:
-            # 获取指定 parent_code 的部门
-            # Note: This assumes there's a way to map parent_code to parent_id
-            # For now, we'll assume parent_code refers to the dept_code of the parent
-            parent_dept = db.query(SysDept).filter(
-                SysDept.dept_code == parent_code,
-                SysDept.tenant_code == tenant_code,
-                SysDept.is_deleted == False,
-                SysDept.status == 0  # 只查找激活的父部门
-            ).first()
-
-            if parent_dept:
-                query = query.filter(SysDept.parent_id == parent_dept.id)
-            else:
-                # If parent_dept not found, return empty list
-                return []
+            # 获取指定 parent_id 的子部门
+            query = query.filter(SysDept.parent_id == parent_id)
 
         # 应用分页
         return query.order_by(SysDept.sort_order).offset(skip).limit(limit).all()
 
     @staticmethod
-    def get_dept_count_by_tenant(db: Session, tenant_code: str) -> int:
+    def get_depts_by_filters(db: Session, tenant_id: int, name: str = None, parent_id: int = None, skip: int = 0, limit: int = 100) -> List[SysDept]:
+        """根据多种条件获取部门列表
+
+        Args:
+            db: 数据库会话
+            tenant_id: 租户ID
+            name: 部门名称（模糊查询）
+            parent_id: 父部门ID
+            skip: 跳过的记录数
+            limit: 限制返回的记录数
+
+        Returns:
+            List[SysDept]: 部门列表
+        """
+        query = db.query(SysDept).filter(
+            SysDept.tenant_id == tenant_id,
+            SysDept.is_deleted == False,
+            SysDept.status == 0  # 只返回激活的部门
+        )
+
+        # 部门名称模糊查询
+        if name:
+            query = query.filter(SysDept.name.contains(name))
+
+        # 父部门过滤
+        if parent_id is None:
+            # 获取根部门（parent_id 为 None）
+            query = query.filter(SysDept.parent_id.is_(None))
+        else:
+            # 获取指定 parent_id 的子部门
+            query = query.filter(SysDept.parent_id == parent_id)
+
+        # 应用分页
+        return query.order_by(SysDept.sort_order).offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_depts_by_filters_with_sort(db: Session, tenant_id: int, name: str = None, parent_id: int = None,status:int=None, skip: int = 0, limit: int = 100) -> List[SysDept]:
+        """根据多种条件获取部门列表，支持排序
+
+        Args:
+            db: 数据库会话
+            tenant_id: 租户ID
+            name: 部门名称（模糊查询）
+            parent_id: 父部门ID
+            skip: 跳过的记录数
+            limit: 限制返回的记录数
+
+        Returns:
+            List[SysDept]: 部门列表
+        """
+        query = db.query(SysDept).filter(
+            SysDept.tenant_id == tenant_id,
+            SysDept.is_deleted == False,
+            SysDept.status == status  # 只返回激活的部门
+        )
+
+        # 部门名称模糊查询
+        if name:
+            query = query.filter(SysDept.name.contains(name))
+
+        # 父部门过滤
+        if parent_id is None:
+            # 获取根部门（parent_id 为 None）
+            query = query.filter(SysDept.parent_id.is_(None))
+        else:
+            # 获取指定 parent_id 的子部门
+            query = query.filter(SysDept.parent_id == parent_id)
+
+
+        query = query.order_by( SysDept.sort_order.asc())
+        return query.offset(skip).limit(limit).all()
+
+    @staticmethod
+    def get_dept_count_by_filters(db: Session, tenant_id: int, name: str = None,status:int=None) -> int:
+        """根据多种条件获取部门数量
+
+        Args:
+            db: 数据库会话
+            tenant_id: 租户ID
+            name: 部门名称（模糊查询）
+            status: 状态
+
+        Returns:
+            int: 部门数量
+        """
+        query = db.query(SysDept).filter(
+            and_(
+                SysDept.tenant_id == tenant_id,
+                SysDept.is_deleted == False,
+                SysDept.status == status
+            )
+        )
+
+        # 部门名称模糊查询
+        if name:
+            query = query.filter(SysDept.name.contains(name))
+
+        return query.count()
+
+    @staticmethod
+    def get_dept_count_by_tenant(db: Session, tenant_id: int) -> int:
         """获取租户下的部门数量
 
         Args:
             db: 数据库会话
-            tenant_code: 租户编码
+            tenant_id: 租户ID
 
         Returns:
             int: 部门数量
         """
         return db.query(SysDept).filter(
             and_(
-                SysDept.tenant_code == tenant_code,
+                SysDept.tenant_id == tenant_id,
                 SysDept.is_deleted == False,
                 SysDept.status == 0  # 只计算激活的部门
             )

@@ -1,6 +1,6 @@
-from typing import List
+from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import and_
+from sqlalchemy import and_, desc
 from app.models.rbac import SysUser, SysPosition, SysUserRole
 
 
@@ -8,16 +8,21 @@ class UserDao:
     """用户数据访问对象"""
 
     @staticmethod
-    def get_user_by_user_name(db: Session, user_name: str, tenant_code: str):
-        """根据用户名获取用户"""
+    def get_user_by_user_name(db: Session, user_name: str, tenant_id: int) -> Optional[SysUser]:
+        """根据用户名和租户ID获取用户"""
         return db.query(SysUser).filter(
             SysUser.user_name == user_name,
-            SysUser.tenant_code == tenant_code,
+            SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False
         ).first()
 
     @staticmethod
-    def get_user_by_id(db: Session, user_id: int):
+    def get_user_by_user_name_and_tenant_id(db: Session, user_name: str, tenant_id: int) -> Optional[SysUser]:
+        """根据用户名和租户ID获取用户（别名方法）"""
+        return UserDao.get_user_by_user_name(db, user_name, tenant_id)
+
+    @staticmethod
+    def get_user_by_id(db: Session, user_id: int) -> Optional[SysUser]:
         """根据主键ID获取用户"""
         return db.query(SysUser).filter(
             SysUser.id == user_id,
@@ -25,16 +30,32 @@ class UserDao:
         ).first()
 
     @staticmethod
-    def get_users_by_tenant(db: Session, tenant_code: str, skip: int = 0, limit: int = 100):
-        """获取租户下的所有用户"""
+    def get_users_by_tenant_id(db: Session, tenant_id: int, skip: int = 0, limit: int = 100) -> List[SysUser]:
+        """根据租户ID获取用户列表"""
         return db.query(SysUser).filter(
-            SysUser.tenant_code == tenant_code,
+            SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False
-        ).offset(skip).limit(limit).all()
+        ).order_by(desc(SysUser.update_time)).offset(skip).limit(limit).all()
 
     @staticmethod
-    def create_user(db: Session, user_data: dict):
+    def create_user(db: Session, user_data: dict) -> SysUser:
         """创建用户"""
+        # 如果没有提供ID，则生成新的ID
+        if 'id' not in user_data:
+            # 从tenant_id生成租户ID用于ID生成器
+            tenant_id = user_data.get('tenant_id', 1000000000000001)  # 使用默认租户ID
+
+            # 生成新的用户ID
+            from app.utils.id_generator import generate_id
+            user_id = generate_id(tenant_id, "user")  # tenant_id不再直接编码到ID中，但可用于其他用途
+
+            # 验证生成的ID是否在合理范围内
+            # MySQL BIGINT范围是 -9223372036854775808 到 9223372036854775807
+            if user_id > 9223372036854775807:
+                raise ValueError(f"Generated ID {user_id} exceeds BIGINT range")
+
+            user_data['id'] = user_id
+
         user = SysUser(**user_data)
         db.add(user)
         db.commit()
@@ -42,7 +63,7 @@ class UserDao:
         return user
 
     @staticmethod
-    def update_user(db: Session, user_id: int, update_data: dict):
+    def update_user(db: Session, user_id: int, update_data: dict) -> Optional[SysUser]:
         """更新用户信息"""
         user = db.query(SysUser).filter(SysUser.id == user_id).first()
         if user:
@@ -54,7 +75,7 @@ class UserDao:
         return user
 
     @staticmethod
-    def delete_user(db: Session, user_id: int):
+    def delete_user(db: Session, user_id: int) -> bool:
         """删除用户"""
         user = db.query(SysUser).filter(SysUser.id == user_id).first()
         if user:
@@ -65,23 +86,23 @@ class UserDao:
         return False
 
     @staticmethod
-    def get_user_count_by_tenant(db: Session, tenant_code: str):
-        """获取租户下的用户数量"""
+    def get_user_count_by_tenant_id(db: Session, tenant_id: int) -> int:
+        """根据租户ID获取用户数量"""
         return db.query(SysUser).filter(
-            SysUser.tenant_code == tenant_code,
+            SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False
         ).count()
 
     @staticmethod
-    def get_users_advanced_search(db: Session, tenant_code: str, user_name: str = None, nick_name: str = None,
+    def get_users_advanced_search(db: Session, tenant_id: int, user_name: str = None, nick_name: str = None,
                                   phone: str = None, status: int = None, dept_id: int = None,
                                   gender: int = None, position_code: str = None, role_code: str = None,
-                                  skip: int = 0, limit: int = 100):
-        """高级搜索用户
+                                  skip: int = 0, limit: int = 100) -> List[SysUser]:
+        """根据租户ID高级搜索用户
 
         Args:
             db: 数据库会话
-            tenant_code: 租户编码
+            tenant_id: 租户ID
             user_name: 用户名（模糊查询）
             nick_name: 昵称（模糊查询）
             phone: 手机号（模糊查询）
@@ -95,7 +116,7 @@ class UserDao:
         """
         # 基础查询
         query = db.query(SysUser).filter(
-            SysUser.tenant_code == tenant_code,
+            SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False
         )
 
@@ -117,7 +138,7 @@ class UserDao:
             # 通过子查询找到符合条件的岗位ID，然后与用户关联
             position_ids = db.query(SysPosition.id).filter(
                 SysPosition.position_code.contains(position_code),
-                SysPosition.tenant_code == tenant_code
+                SysPosition.tenant_id == tenant_id
             ).subquery()
 
             # 通过岗位ID关联用户
@@ -129,7 +150,7 @@ class UserDao:
             role_exists = db.query(SysUserRole).filter(
                 SysUserRole.user_name == SysUser.user_name,
                 SysUserRole.role_code == role_code,
-                SysUserRole.tenant_code == tenant_code
+                SysUserRole.tenant_id == tenant_id
             ).exists()
             query = query.filter(role_exists)
 
@@ -139,14 +160,14 @@ class UserDao:
         return query.offset(skip).limit(limit).all()
 
     @staticmethod
-    def get_user_count_advanced_search(db: Session, tenant_code: str, user_name: str = None, nick_name: str = None,
+    def get_user_count_advanced_search(db: Session, tenant_id: int, user_name: str = None, nick_name: str = None,
                                        phone: str = None, status: int = None, dept_id: int = None,
-                                       gender: int = None, position_code: str = None, role_code: str = None):
+                                       gender: int = None, position_code: str = None, role_code: str = None) -> int:
         """高级搜索用户数量统计
 
         Args:
             db: 数据库会话
-            tenant_code: 租户编码
+            tenant_id: 租户ID
             user_name: 用户名（模糊查询）
             nick_name: 昵称（模糊查询）
             phone: 手机号（模糊查询）
@@ -157,7 +178,7 @@ class UserDao:
             role_code: 角色编码（关联查询）
         """
         query = db.query(SysUser).filter(
-            SysUser.tenant_code == tenant_code,
+            SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False
         )
 
@@ -179,7 +200,7 @@ class UserDao:
             # 通过子查询找到符合条件的岗位ID，然后与用户关联
             position_ids = db.query(SysPosition.id).filter(
                 SysPosition.position_code.contains(position_code),
-                SysPosition.tenant_code == tenant_code
+                SysPosition.tenant_id == tenant_id
             ).subquery()
 
             # 通过岗位ID关联用户
@@ -191,8 +212,24 @@ class UserDao:
             role_exists = db.query(SysUserRole).filter(
                 SysUserRole.user_name == SysUser.user_name,
                 SysUserRole.role_code == role_code,
-                SysUserRole.tenant_code == tenant_code
+                SysUserRole.tenant_id == tenant_id
             ).exists()
             query = query.filter(role_exists)
 
         return query.count()
+
+    @staticmethod
+    def delete_user_by_username_and_tenant_id(db: Session, tenant_id: int, user_name: str) -> bool:
+        """根据用户名和租户ID删除用户"""
+        user = db.query(SysUser).filter(
+            SysUser.user_name == user_name,
+            SysUser.tenant_id == tenant_id
+        ).first()
+
+        if not user:
+            return False
+
+        user.is_deleted = True
+        db.commit()
+        db.refresh(user)
+        return True
