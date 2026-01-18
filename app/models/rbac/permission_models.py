@@ -28,12 +28,12 @@ class PermissionBase(BaseModel):
     # 菜单相关字段
     url: Optional[str] = Field(None, description="访问URL", max_length=255)
     component: Optional[str] = Field(None, description="Vue组件路径", max_length=500)
-    layout: bool = Field(True, description="是否使用Layout")
-    visible: bool = Field(True, description="菜单是否显示")
+    layout: Optional[bool] = Field(True, description="是否使用Layout")
+    visible: Optional[bool] = Field(True, description="菜单是否显示")
     icon: Optional[str] = Field(None, description="图标类名", max_length=50)
     sort_order: int = Field(0, description="显示顺序")
-    open_new_tab: bool = Field(False, description="新窗口打开")
-    keep_alive: bool = Field(True, description="页面缓存")
+    open_new_tab: Optional[bool] = Field(False, description="新窗口打开")
+    keep_alive: Optional[bool] = Field(True, description="页面缓存")
     route_params: Optional[dict] = Field(None, description="路由参数")
 
     # 按钮相关字段

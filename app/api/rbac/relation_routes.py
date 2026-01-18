@@ -6,7 +6,7 @@ RBAC关系管理API
 处理用户-角色、角色-权限之间的关联关系
 """
 
-from typing import Optional
+from typing import Optional, List
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from app.db.session import get_db
@@ -16,6 +16,7 @@ from app.models.rbac import (
     UnifiedResponse
 )
 from app.services.rbac_service import RbacService
+from pydantic import BaseModel, Field
 import logging
 
 logger = logging.getLogger(__name__)
@@ -117,12 +118,39 @@ async def assign_role_to_user(
 ):
     """为用户分配角色"""
     try:
-        success = RbacService.assign_role_to_user(
-            db,
-            assignment.user_name,
-            assignment.role_code,
-            assignment.tenant_id
-        )
+        # 从用户态获取并验证租户ID
+        from app.services.user_context_service import user_context_service
+        user_context_service.get_validated_tenant_id(assignment.tenant_id)
+
+        # 根据提供的参数类型选择不同的服务方法
+        if assignment.user_id is not None and assignment.role_ids is not None:
+            # 使用ID方式进行分配
+            success = True
+            for role_id in assignment.role_ids:
+                result = RbacService.assign_role_to_user_by_id(
+                    db,
+                    assignment.user_id,
+                    role_id,
+                    assignment.tenant_id
+                )
+                if not result:
+                    success = False
+        elif assignment.user_name is not None and assignment.role_code is not None:
+            # 使用名称方式进行分配
+            success = RbacService.assign_role_to_user(
+                db,
+                assignment.user_name,
+                assignment.role_code,
+                assignment.tenant_id
+            )
+        else:
+            return UnifiedResponse(
+                success=False,
+                code=400,
+                message="请提供 user_name 和 role_code 或者 user_id 和 role_ids",
+                data=None
+            )
+
         if success:
             return UnifiedResponse(
                 success=True,
@@ -274,12 +302,12 @@ async def get_role_permissions_list(
         )
 
 
-@relation_router.post("/role-permissions", response_model=UnifiedResponse, summary="为角色分配权限")
+@relation_router.post("/role-permissions", response_model=UnifiedResponse, summary="为角色分配权限（通过编码）")
 async def assign_permission_to_role(
     assignment: RolePermissionAssign,
     db: Session = Depends(get_db)
 ):
-    """为角色分配权限"""
+    """为角色分配权限（通过编码）"""
     try:
         success = RbacService.assign_permission_to_role(
             db,
@@ -311,19 +339,110 @@ async def assign_permission_to_role(
         )
 
 
-@relation_router.delete("/role-permissions", response_model=UnifiedResponse, summary="移除角色权限关系")
-async def remove_permission_from_role(
-    role_id: int = Query(..., description="角色ID"),
-    permission_id: int = Query(..., description="权限ID"),
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+class RolePermissionAssignById(BaseModel):
+    """角色权限分配请求模型（通过ID）"""
+    role_id: int = Field(..., description="角色ID")
+    permission_id: int = Field(..., description="权限ID")
+    tenant_id: Optional[int] = Field(None, description="租户ID", ge=1)
+
+
+@relation_router.post("/role-permissions-by-id", response_model=UnifiedResponse, summary="为角色分配权限（通过ID）")
+async def assign_permission_to_role_by_id(
+    assignment: RolePermissionAssignById,
     db: Session = Depends(get_db)
 ):
-    """移除角色的权限"""
+    """为角色分配权限（通过ID）"""
     try:
-        success = RbacService.remove_permission_from_role(
+        # 从用户态获取并验证租户ID
+        from app.services.user_context_service import user_context_service
+        validated_tenant_id = user_context_service.get_validated_tenant_id(assignment.tenant_id)
+
+        success = RbacService.assign_permission_to_role_by_id(
+            db,
+            assignment.role_id,
+            assignment.permission_id,
+            validated_tenant_id
+        )
+        if success:
+            return UnifiedResponse(
+                success=True,
+                code=200,
+                message="权限分配成功",
+                data=None
+            )
+        else:
+            return UnifiedResponse(
+                success=False,
+                code=400,
+                message="权限分配失败",
+                data=None
+            )
+    except Exception as e:
+        logger.error(f"为角色分配权限失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="为角色分配权限失败",
+            data=None
+        )
+
+
+@relation_router.delete("/role-permissions-by-id", response_model=UnifiedResponse, summary="移除角色权限（通过ID）")
+async def remove_permission_from_role_by_id(
+    role_id: int = Query(..., description="角色ID"),
+    permission_id: int = Query(..., description="权限ID"),
+    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    db: Session = Depends(get_db)
+):
+    """移除角色的权限（通过ID）"""
+    try:
+        # 从用户态获取并验证租户ID
+        from app.services.user_context_service import user_context_service
+        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+
+        success = RbacService.remove_permission_from_role_by_id(
             db,
             role_id,
             permission_id,
+            validated_tenant_id
+        )
+        if success:
+            return UnifiedResponse(
+                success=True,
+                code=200,
+                message="权限移除成功",
+                data=None
+            )
+        else:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="角色权限关联不存在",
+                data=None
+            )
+    except Exception as e:
+        logger.error(f"移除角色权限失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="移除角色权限失败",
+            data=None
+        )
+
+
+@relation_router.delete("/role-permissions", response_model=UnifiedResponse, summary="移除角色权限关系（通过编码）")
+async def remove_permission_from_role_by_codes(
+    role_code: str = Query(..., description="角色编码"),
+    permission_code: str = Query(..., description="权限编码"),
+    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    db: Session = Depends(get_db)
+):
+    """移除角色的权限（通过编码）"""
+    try:
+        success = RbacService.remove_permission_from_role(
+            db,
+            role_code,
+            permission_code,
             tenant_id
         )
         if success:
@@ -346,6 +465,46 @@ async def remove_permission_from_role(
             success=False,
             code=500,
             message="移除角色权限失败",
+            data=None
+        )
+
+
+@relation_router.post("/batch-role-permissions-by-id", response_model=UnifiedResponse, summary="批量为角色分配权限（通过ID）")
+async def batch_assign_permissions_to_role_by_id(
+    role_id: int = Query(..., description="角色ID"),
+    permission_ids: List[int] = Query(..., description="权限ID列表"),
+    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    db: Session = Depends(get_db)
+):
+    """批量为角色分配权限（通过ID）"""
+    try:
+        # 从用户态获取并验证租户ID
+        from app.services.user_context_service import user_context_service
+        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+
+        success_count = 0
+        for permission_id in permission_ids:
+            success = RbacService.assign_permission_to_role_by_id(
+                db,
+                role_id,
+                permission_id,
+                validated_tenant_id
+            )
+            if success:
+                success_count += 1
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message=f"批量权限分配完成，成功分配 {success_count}/{len(permission_ids)} 个权限",
+            data={"success_count": success_count, "total_count": len(permission_ids)}
+        )
+    except Exception as e:
+        logger.error(f"批量为角色分配权限失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="批量为角色分配权限失败",
             data=None
         )
 

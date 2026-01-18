@@ -342,13 +342,36 @@ async def assign_role_to_user(
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
         user_context_service.get_validated_tenant_id(assignment.tenant_id)
-        
-        success = RbacService.assign_role_to_user(
-            db,
-            assignment.user_name,
-            assignment.role_code,
-            assignment.tenant_id
-        )
+
+        # 根据提供的参数类型选择不同的服务方法
+        if assignment.user_id is not None and assignment.role_ids is not None:
+            # 使用ID方式进行分配
+            success = True
+            for role_id in assignment.role_ids:
+                result = RbacService.assign_role_to_user_by_id(
+                    db,
+                    assignment.user_id,
+                    role_id,
+                    assignment.tenant_id
+                )
+                if not result:
+                    success = False
+        elif assignment.user_name is not None and assignment.role_code is not None:
+            # 使用名称方式进行分配
+            success = RbacService.assign_role_to_user(
+                db,
+                assignment.user_name,
+                assignment.role_code,
+                assignment.tenant_id
+            )
+        else:
+            return UnifiedResponse(
+                success=False,
+                code=400,
+                message="请提供 user_name 和 role_code 或者 user_id 和 role_ids",
+                data=None
+            )
+
         if success:
             return UnifiedResponse(
                 success=True,
@@ -383,13 +406,36 @@ async def remove_role_from_user(
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
         user_context_service.get_validated_tenant_id(assignment.tenant_id)
-        
-        success = RbacService.remove_role_from_user(
-            db,
-            assignment.user_name,
-            assignment.role_code,
-            assignment.tenant_id
-        )
+
+        # 根据提供的参数类型选择不同的服务方法
+        if assignment.user_id is not None and assignment.role_ids is not None:
+            # 使用ID方式进行移除
+            success = True
+            for role_id in assignment.role_ids:
+                result = RbacService.remove_role_from_user_by_id(
+                    db,
+                    assignment.user_id,
+                    role_id,
+                    assignment.tenant_id
+                )
+                if not result:
+                    success = False
+        elif assignment.user_name is not None and assignment.role_code is not None:
+            # 使用名称方式进行移除
+            success = RbacService.remove_role_from_user(
+                db,
+                assignment.user_name,
+                assignment.role_code,
+                assignment.tenant_id
+            )
+        else:
+            return UnifiedResponse(
+                success=False,
+                code=400,
+                message="请提供 user_name 和 role_code 或者 user_id 和 role_ids",
+                data=None
+            )
+
         if success:
             return UnifiedResponse(
                 success=True,

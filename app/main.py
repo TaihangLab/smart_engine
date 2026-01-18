@@ -17,8 +17,16 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 from app.core.config import settings
 from app.api import api_router
 
+# Import rate limiting
+from slowapi import Limiter
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+
 # 导入中间件
 from app.core.middleware import RequestLoggingMiddleware, AuditMiddleware
+# 导入鉴权中间件
+from app.core.auth_center import auth_middleware
 
 # 🚀 导入零配置企业级启动服务
 from app.services.system_startup import lifespan as startup_lifespan
@@ -101,6 +109,9 @@ def signal_handler(signum, frame):
 signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
 signal.signal(signal.SIGTERM, signal_handler)  # 终止信号
 
+# 初始化限速器
+limiter = Limiter(key_func=get_remote_address)
+
 # 创建FastAPI应用 - 集成零配置补偿架构
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -110,8 +121,19 @@ app = FastAPI(
 )
 
 # 配置中间件
+app.state.limiter = limiter
+app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
+
+# 添加鉴权中间件
+from starlette.middleware.base import BaseHTTPMiddleware
+class AuthMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        return await auth_middleware(request, call_next)
+
+app.add_middleware(AuthMiddleware)
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 允许所有来源，生产环境应该限制
@@ -120,8 +142,12 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# 添加限速异常处理器
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
 # 全局异常处理器
 from fastapi import Request, HTTPException
+from fastapi.responses import JSONResponse
 from app.models.rbac import UnifiedResponse
 import traceback
 
@@ -129,31 +155,43 @@ import traceback
 async def global_exception_handler(request: Request, exc: Exception):
     """全局异常处理器 - 统一处理所有未捕获的异常"""
     logger.error(f"🚨 全局异常捕获: {str(exc)}", exc_info=True)
-    
+
     # 检查是否是HTTPException
     if isinstance(exc, HTTPException):
-        return UnifiedResponse(
+        response_data = UnifiedResponse(
             success=False,
             code=exc.status_code,
             message=exc.detail,
             data=None
         )
-    
+        return JSONResponse(
+            status_code=exc.status_code,
+            content=response_data.model_dump()
+        )
+
     # 检查是否是ValueError（通常是我们自定义的业务错误）
     if isinstance(exc, ValueError):
-        return UnifiedResponse(
+        response_data = UnifiedResponse(
             success=False,
             code=403,  # 权限相关错误使用403
             message=str(exc),
             data=None
         )
-    
+        return JSONResponse(
+            status_code=403,
+            content=response_data.model_dump()
+        )
+
     # 其他未捕获的异常
-    return UnifiedResponse(
+    response_data = UnifiedResponse(
         success=False,
         code=500,
         message=f"服务器内部错误: {str(exc)}",
         data=None
+    )
+    return JSONResponse(
+        status_code=500,
+        content=response_data.model_dump()
     )
 
 # 注册API路由

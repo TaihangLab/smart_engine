@@ -2,7 +2,10 @@
 API包，提供REST API接口
 """
 from fastapi import APIRouter
-from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, task_review, chat_assistant, wvp_proxy, alert_archives, review_records, local_videos, realtime_monitor, realtime_detection, rbac
+from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, task_review, chat_assistant, wvp_proxy, alert_archives, review_records, local_videos, realtime_monitor, realtime_detection, rbac, auth
+
+# 导入前端路由处理模块
+from . import frontend_routes
 
 api_router = APIRouter()
 api_router.include_router(cameras.router, prefix="/cameras", tags=["cameras"])
@@ -24,6 +27,12 @@ api_router.include_router(local_videos.router, prefix="/local-videos", tags=["lo
 api_router.include_router(realtime_monitor.router, prefix="/realtime-monitor", tags=["realtime_monitor"])
 api_router.include_router(realtime_detection.router, prefix="/realtime-detection", tags=["realtime_detection"])
 api_router.include_router(rbac.router, prefix="/rbac", tags=["rbac"])
+api_router.include_router(auth.auth_router, prefix="/auth", tags=["auth"])
+
+# 设置前端路由处理
+frontend_routes.setup_frontend_routing(api_router)
+frontend_routes.create_redirect_endpoint(api_router)
+frontend_routes.create_cross_port_storage_endpoint(api_router)
 
 __all__ = ["api_router"]
 

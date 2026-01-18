@@ -41,11 +41,22 @@ class RequestLoggingMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         start_time = time.time()
 
+        # 提取用户名
+        token = extract_token_from_request(request)
+        if token:
+            payload = decode_jwt_token_without_verify(token)
+            if payload:
+                username = payload.get('userName', payload.get('userId', 'unknown'))
+            else:
+                username = 'invalid_token'
+        else:
+            username = 'anonymous'
+
         # 处理请求
         response = await call_next(request)
 
         # 记录处理时间
         process_time = time.time() - start_time
-        logger.info(f"{request.method} {request.url.path} - {response.status_code} - {process_time:.4f}s")
+        logger.info(f"ACCESS_LOG - IP: {request.client.host}, Username: {username}, Method: {request.method}, Path: {request.url.path} - {response.status_code} - {process_time:.4f}s")
 
         return response

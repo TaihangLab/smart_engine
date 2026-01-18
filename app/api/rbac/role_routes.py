@@ -35,25 +35,45 @@ async def get_role(
     db: Session = Depends(get_db)
 ):
     """根据角色ID获取角色详情"""
-    # 从用户态获取并验证租户ID
-    from app.services.user_context_service import user_context_service
-    validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+    try:
+        # 从用户态获取并验证租户ID
+        from app.services.user_context_service import user_context_service
+        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
 
-    # 获取角色
-    role = RbacService.get_role_by_id(db, id)
-    if not role:
-        raise HTTPException(status_code=404, detail="角色不存在")
+        # 获取角色
+        role = RbacService.get_role_by_id(db, id)
+        if not role:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="角色不存在",
+                data=None
+            )
 
-    # 验证角色的租户ID是否与用户可访问的租户ID匹配
-    if role.tenant_id != validated_tenant_id:
-        raise ValueError("无权限访问此角色")
+        # 验证角色的租户ID是否与用户可访问的租户ID匹配
+        if role.tenant_id != validated_tenant_id:
+            return UnifiedResponse(
+                success=False,
+                code=403,
+                message="无权限访问此角色",
+                data=None
+            )
 
-    return UnifiedResponse(
-        success=True,
-        code=200,
-        message="获取角色详情成功",
-        data=RoleResponse.model_validate(role)
-    )
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取角色详情成功",
+            data=RoleResponse.model_validate(role)
+        )
+    except Exception as e:
+        from app.services.user_context_service import user_context_service
+        logger.error(f"获取角色详情失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取角色详情失败",
+            data=None
+        )
 
 
 @role_router.get("/roles", response_model=UnifiedResponse, summary="获取角色列表")
@@ -138,34 +158,63 @@ async def update_role(
     db: Session = Depends(get_db)
 ):
     """更新角色信息"""
-    # 从用户态获取并验证租户ID
-    from app.services.user_context_service import user_context_service
-    validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+    try:
+        # 从用户态获取并验证租户ID
+        from app.services.user_context_service import user_context_service
+        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
 
-    # 获取原始角色信息以验证租户ID
-    original_role = RbacService.get_role_by_id(db, id)
-    if not original_role:
-        raise HTTPException(status_code=404, detail="角色不存在")
+        # 获取原始角色信息以验证租户ID
+        original_role = RbacService.get_role_by_id(db, id)
+        if not original_role:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="角色不存在",
+                data=None
+            )
 
-    # 验证角色的租户ID是否与用户可访问的租户ID匹配
-    if original_role.tenant_id != validated_tenant_id:
-        raise ValueError("无权限更新此角色")
+        # 验证角色的租户ID是否与用户可访问的租户ID匹配
+        if original_role.tenant_id != validated_tenant_id:
+            return UnifiedResponse(
+                success=False,
+                code=403,
+                message="无权限更新此角色",
+                data=None
+            )
 
-    # 不允许修改租户ID
-    if hasattr(role_update, 'tenant_id') and role_update.tenant_id is not None:
-        raise HTTPException(status_code=400, detail="不允许修改角色的租户ID")
+        # 不允许修改租户ID
+        if hasattr(role_update, 'tenant_id') and role_update.tenant_id is not None:
+            return UnifiedResponse(
+                success=False,
+                code=400,
+                message="不允许修改角色的租户ID",
+                data=None
+            )
 
-    # 更新角色
-    updated_role = RbacService.update_role_by_id(db, id, role_update.model_dump(exclude_unset=True))
-    if not updated_role:
-        raise HTTPException(status_code=404, detail="角色不存在")
-        
-    return UnifiedResponse(
-        success=True,
-        code=200,
-        message="更新角色成功",
-        data=RoleResponse.model_validate(updated_role)
-    )
+        # 更新角色
+        updated_role = RbacService.update_role_by_id(db, id, role_update.model_dump(exclude_unset=True))
+        if not updated_role:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="角色不存在",
+                data=None
+            )
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="更新角色成功",
+            data=RoleResponse.model_validate(updated_role)
+        )
+    except Exception as e:
+        logger.error(f"更新角色失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="更新角色失败",
+            data=None
+        )
 
 
 @role_router.delete("/roles/{id}", response_model=UnifiedResponse, summary="删除角色")
@@ -175,30 +224,54 @@ async def delete_role(
     db: Session = Depends(get_db)
 ):
     """删除角色"""
-    # 从用户态获取并验证租户ID
-    from app.services.user_context_service import user_context_service
-    validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+    try:
+        # 从用户态获取并验证租户ID
+        from app.services.user_context_service import user_context_service
+        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
 
-    # 获取原始角色信息以验证租户ID
-    original_role = RbacService.get_role_by_id(db, id)
-    if not original_role:
-        raise HTTPException(status_code=404, detail="角色不存在")
+        # 获取原始角色信息以验证租户ID
+        original_role = RbacService.get_role_by_id(db, id)
+        if not original_role:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="角色不存在",
+                data=None
+            )
 
-    # 验证角色的租户ID是否与用户可访问的租户ID匹配
-    if original_role.tenant_id != validated_tenant_id:
-        raise ValueError("无权限删除此角色")
+        # 验证角色的租户ID是否与用户可访问的租户ID匹配
+        if original_role.tenant_id != validated_tenant_id:
+            return UnifiedResponse(
+                success=False,
+                code=403,
+                message="无权限删除此角色",
+                data=None
+            )
 
-    # 删除角色
-    success = RbacService.delete_role_by_id(db, id)
-    if not success:
-        raise HTTPException(status_code=404, detail="角色不存在")
-        
-    return UnifiedResponse(
-        success=True,
-        code=200,
-        message="角色删除成功",
-        data=None
-    )
+        # 删除角色
+        success = RbacService.delete_role_by_id(db, id)
+        if not success:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="角色不存在",
+                data=None
+            )
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="角色删除成功",
+            data=None
+        )
+    except Exception as e:
+        logger.error(f"删除角色失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="删除角色失败",
+            data=None
+        )
 
 
 # ===========================================

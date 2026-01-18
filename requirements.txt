@@ -47,3 +47,8 @@ python-multipart==0.0.19
 
 # Excel处理库
 openpyxl==3.1.2
+
+# Authentication dependencies
+passlib[bcrypt]>=1.7.4
+slowapi>=0.1.9
+email-validator>=2.0.0
