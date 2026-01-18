@@ -21,20 +21,29 @@ class DeptService:
     @staticmethod
     def create_dept(db: Session, dept_data: Dict[str, Any]) -> SysDept:
         """创建部门"""
-        # 从tenant_id生成租户ID用于ID生成器
-        tenant_id = dept_data.get('tenant_id', 1000000000000001)  # 默认租户ID
-        # 确保tenant_id是整数
-        if isinstance(tenant_id, str):
-            # 如果是字符串，尝试转换为整数
-            try:
-                tenant_id = int(tenant_id)
-            except ValueError:
-                # 如果转换失败，使用默认值
-                tenant_id = 1000000000000001
+        # 如果 dept_data 中没有 id，则生成新的 ID
+        if 'id' not in dept_data:
+            # 从tenant_id生成租户ID用于ID生成器
+            tenant_id = dept_data.get('tenant_id', 1000000000000001)  # 默认租户ID
+            # 确保tenant_id是整数
+            if isinstance(tenant_id, str):
+                # 如果是字符串，尝试转换为整数
+                try:
+                    tenant_id = int(tenant_id)
+                except ValueError:
+                    # 如果转换失败，使用默认值
+                    tenant_id = 1000000000000001
 
-        # 生成新的部门ID
-        dept_id = generate_id(tenant_id, "dept")  # tenant_id不再直接编码到ID中，但可用于其他用途
-        dept_data['id'] = dept_id
+            # 生成新的部门ID
+            dept_id = generate_id(tenant_id, "dept")
+            dept_data['id'] = dept_id
+        else:
+            # 使用传入的 ID，确保是整数
+            if isinstance(dept_data['id'], str):
+                try:
+                    dept_data['id'] = int(dept_data['id'])
+                except ValueError:
+                    raise ValueError(f"无效的部门 ID: {dept_data['id']}")
 
         try:
             dept = RbacDao.dept.create_dept(db, dept_data)

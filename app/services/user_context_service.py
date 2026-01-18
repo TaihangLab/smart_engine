@@ -2,126 +2,288 @@
 # -*- coding: utf-8 -*-
 
 """
-模拟用户态服务
-用于获取当前用户的租户ID等信息
+用户上下文服务
+从 request.state 中获取真实的用户信息，替换之前的 Mock 实现
 """
 
 from typing import Optional, List
-from sqlalchemy.orm import Session
+from fastapi import Request, HTTPException, status
+from app.models.user import UserInfo
 from app.db.session import get_db
 from app.services.rbac_service import RbacService
-import threading
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-class MockUserContextService:
-    """模拟用户态服务"""
+# ========== 上下文变量存储 ==========
+# 使用 contextvars 来保存当前请求（async-safe）
+import contextvars
 
-    def __init__(self):
-        # 初始化时暂不加载租户ID，延迟到首次访问时加载
-        self.all_tenant_ids = None
-        self._loaded = False
-        self._lock = threading.Lock()
+_request_context: contextvars.ContextVar[Request] = contextvars.ContextVar('request_context')
 
-    def _load_all_tenant_ids(self) -> List[int]:
-        """
-        从数据库加载所有租户ID
-        """
-        try:
-            # 创建数据库会话
-            db_gen = get_db()
-            db: Session = next(db_gen)
 
-            try:
-                # 获取所有租户
-                all_tenants = RbacService.get_all_tenants(db, skip=0, limit=1000)
-                tenant_ids = [tenant.id for tenant in all_tenants]
+def set_request_context(request: Request):
+    """设置当前请求上下文（在中间件中调用）"""
+    _request_context.set(request)
 
-                # 如果没有租户，至少包含默认租户
-                if not tenant_ids:
-                    tenant_ids = [1000000000000001]
 
-                return tenant_ids
-            finally:
-                db.close()
-        except Exception as e:
-            # 如果数据库访问失败，返回默认租户
-            print(f"加载租户ID失败: {e}")
-            return [1000000000000001]
+def get_request_context() -> Optional[Request]:
+    """获取当前请求上下文"""
+    try:
+        return _request_context.get()
+    except LookupError:
+        return None
 
-    def _ensure_loaded(self):
-        """
-        确保租户ID列表已加载
-        """
-        if not self._loaded or self.all_tenant_ids is None:
-            with self._lock:
-                if not self._loaded or self.all_tenant_ids is None:
-                    self.all_tenant_ids = self._load_all_tenant_ids()
-                    self._loaded = True
 
-    def refresh_tenant_ids(self):
-        """
-        刷新租户ID列表
-        """
-        self.all_tenant_ids = self._load_all_tenant_ids()
-        self._loaded = True
+def clear_request_context():
+    """清除当前请求上下文（使用 contextvars 的 token 机制）"""
+    try:
+        _request_context.set(None)
+    except Exception:
+        pass
+
+
+class RealUserContextService:
+    """真实的用户上下文服务（从 request.state 获取用户信息）"""
 
     @staticmethod
-    def get_current_user_id() -> Optional[int]:
+    def get_current_user(request: Request) -> Optional[UserInfo]:
+        """
+        从 request.state 获取当前用户信息
+
+        Args:
+            request: FastAPI 请求对象
+
+        Returns:
+            UserInfo 对象，未认证返回 None
+        """
+        return getattr(request.state, 'current_user', None)
+
+    @staticmethod
+    def get_current_user_id(request: Request) -> Optional[int]:
         """
         获取当前登录用户的ID
-        目前返回一个 mock 的用户ID
-        TODO: 从 JWT token 或 session 中获取真实的用户ID
+
+        Args:
+            request: FastAPI 请求对象
+
+        Returns:
+            用户ID，未认证返回 None
         """
-        # Mock 用户ID - 后续需要从认证上下文中获取真实用户ID
-        return 1000000000000001
+        user = RealUserContextService.get_current_user(request)
+        if user:
+            try:
+                return int(user.userId)
+            except (ValueError, TypeError):
+                logger.warning(f"无法转换用户ID为整数: {user.userId}")
+                return None
+        return None
 
     @staticmethod
-    def get_current_user_tenant_id(user_id: Optional[int] = None) -> int:
+    def get_current_user_tenant_id(request: Request) -> Optional[int]:
         """
         获取当前用户的租户ID
-        如果没有传入用户ID或无法确定用户，则返回默认租户ID
-        """
-        # 这里返回默认租户ID 1000000000000001
-        return 1000000000000001
 
-    def get_current_user_accessible_tenants(self, user_id: Optional[int] = None) -> List[int]:
+        Args:
+            request: FastAPI 请求对象
+
+        Returns:
+            租户ID，未认证返回 None
+        """
+        user = RealUserContextService.get_current_user(request)
+        return user.tenantId if user else None
+
+    @staticmethod
+    def get_current_user_accessible_tenants(request: Request) -> List[int]:
         """
         获取当前用户可访问的租户ID列表
-        当前实现返回所有租户ID，后续可以根据用户权限进行过滤
-        """
-        # 确保租户ID列表已加载
-        self._ensure_loaded()
-        # 返回所有租户ID
-        return self.all_tenant_ids
 
-    def get_validated_tenant_id(self, tenant_id: Optional[int] = None, user_id: Optional[int] = None) -> int:
+        Args:
+            request: FastAPI 请求对象
+
+        Returns:
+            租户ID列表，超管返回所有租户，普通用户返回自己的租户ID
+        """
+        user = RealUserContextService.get_current_user(request)
+        if not user:
+            return []
+
+        # 超管可以访问所有租户
+        if user.isSuperAdmin:
+            db_gen = get_db()
+            db = next(db_gen)
+            try:
+                all_tenants = RbacService.get_all_tenants(db, skip=0, limit=10000)
+                return [tenant.id for tenant in all_tenants]
+            finally:
+                db.close()
+
+        # 普通用户只能访问自己的租户
+        return [user.tenantId] if user.tenantId is not None else []
+
+    @staticmethod
+    def get_validated_tenant_id(
+        request: Request,
+        tenant_id: Optional[int] = None
+    ) -> int:
         """
         获取并验证租户ID
-        如果租户ID为空，则返回用户可访问租户列表中的第一个
-        如果租户ID不为空，则验证它是否在用户可访问的租户列表中
-        如果验证通过，返回该租户ID
-        如果验证失败，抛出错误
+
+        Args:
+            request: FastAPI 请求对象
+            tenant_id: 要验证的租户ID
+
+        Returns:
+            验证通过的租户ID
+
+        Raises:
+            HTTPException: 租户ID验证失败
         """
-        # 确保租户ID列表已加载
-        self._ensure_loaded()
+        user = RealUserContextService.get_current_user(request)
+        if not user:
+            logger.error(f"[租户验证] 用户未认证，request.state.current_user={getattr(request.state, 'current_user', None)}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="用户未认证"
+            )
 
-        # 获取用户可访问的租户列表
-        accessible_tenants = self.all_tenant_ids
+        logger.debug(f"[租户验证] 用户={user.userName}, isSuperAdmin={user.isSuperAdmin}, userTenantId={user.tenantId}, 请求tenantId={tenant_id}")
 
-        # 如果没有提供租户ID，则使用可访问列表中的第一个
-        if tenant_id is None:
-            if not accessible_tenants:
-                raise ValueError("用户没有可访问的租户")
-            return accessible_tenants[0]
+        # 超管可以访问任何租户
+        if user.isSuperAdmin:
+            logger.info(f"[超管租户验证] 超管 {user.userName} 访问租户 {tenant_id}")
+            if tenant_id is not None:
+                return tenant_id
+            # 如果没有提供租户ID，返回用户的默认租户
+            return user.tenantId if user.tenantId is not None else 0
 
-        # 验证租户ID是否在可访问列表中
-        if tenant_id not in accessible_tenants:
-            # 为了调试目的，打印所有可用的租户ID
-            print(f"请求的租户ID {tenant_id} 不在可访问列表中。可用租户ID: {accessible_tenants}")
-            raise ValueError(f"无权限访问租户ID: {tenant_id}")
+        # 普通用户验证租户ID
+        if tenant_id is not None and tenant_id != user.tenantId:
+            logger.warning(f"[普通用户租户验证] 用户 {user.userName} (租户: {user.tenantId}) 尝试访问租户 {tenant_id}")
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"无权限访问租户 {tenant_id} 的资源"
+            )
 
-        return tenant_id
+        # 如果没有提供租户ID，使用用户的租户ID
+        if user.tenantId is None:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="用户没有关联的租户"
+            )
+
+        return user.tenantId
+
+    @staticmethod
+    def is_super_admin(request: Request) -> bool:
+        """
+        判断当前用户是否为超管
+
+        Args:
+            request: FastAPI 请求对象
+
+        Returns:
+            是否为超管
+        """
+        user = RealUserContextService.get_current_user(request)
+        return user.isSuperAdmin if user else False
 
 
-# 全局实例
-user_context_service = MockUserContextService()
+# ========== 向后兼容的包装类 ==========
+class UserContextServiceWrapper:
+    """
+    向后兼容的包装类
+    支持旧的调用方式：get_validated_tenant_id(tenant_id)
+    新的调用方式：get_validated_tenant_id(request, tenant_id)
+    """
+
+    def __init__(self):
+        self._real_service = RealUserContextService()
+
+    def _get_request_from_context(self) -> Optional[Request]:
+        """从线程本地存储获取请求对象"""
+        request = get_request_context()
+        if request is None:
+            logger.warning("无法从上下文获取 request 对象，请确保在鉴权中间件之后调用")
+        return request
+
+    def get_current_user_id(self) -> Optional[int]:
+        """向后兼容方法（不推荐使用）"""
+        request = self._get_request_from_context()
+        if request:
+            return self._real_service.get_current_user_id(request)
+        logger.warning("get_current_user_id: 无法获取用户信息")
+        return None
+
+    def get_current_user_tenant_id(self, user_id: Optional[int] = None) -> int:
+        """向后兼容方法（使用当前用户）"""
+        request = self._get_request_from_context()
+        if request:
+            tenant_id = self._real_service.get_current_user_tenant_id(request)
+            if tenant_id is not None:
+                return tenant_id
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无法获取用户租户信息"
+        )
+
+    def get_current_user_accessible_tenants(self, user_id: Optional[int] = None) -> List[int]:
+        """向后兼容方法（使用当前用户）"""
+        request = self._get_request_from_context()
+        if request:
+            return self._real_service.get_current_user_accessible_tenants(request)
+        logger.warning("get_current_user_accessible_tenants: 无法获取用户信息")
+        return []
+
+    def get_validated_tenant_id(self, *args) -> int:
+        """
+        向后兼容方法，支持两种调用方式：
+        - 旧方式：get_validated_tenant_id(tenant_id) - 从上下文获取request
+        - 新方式：get_validated_tenant_id(request, tenant_id)
+        """
+        # 判断第一个参数是 Request 还是 tenant_id
+        if len(args) == 0:
+            # 无参数，从上下文获取
+            request = self._get_request_from_context()
+            if request:
+                return self._real_service.get_validated_tenant_id(request)
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="无法获取请求上下文"
+            )
+
+        first_arg = args[0]
+
+        # 如果第一个参数是 Request 对象
+        if isinstance(first_arg, Request):
+            request = first_arg
+            tenant_id = args[1] if len(args) > 1 else None
+            return self._real_service.get_validated_tenant_id(request, tenant_id)
+
+        # 否则，第一个参数是 tenant_id，从上下文获取 request
+        tenant_id = first_arg
+        request = self._get_request_from_context()
+        if request:
+            return self._real_service.get_validated_tenant_id(request, tenant_id)
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无法获取请求上下文"
+        )
+
+    def refresh_tenant_ids(self):
+        """向后兼容方法（新实现不需要缓存刷新）"""
+        pass
+
+    # 新方法代理
+    def get_current_user(self, request: Request) -> Optional[UserInfo]:
+        return self._real_service.get_current_user(request)
+
+    def is_super_admin(self, request: Request) -> bool:
+        return self._real_service.is_super_admin(request)
+
+
+# 全局实例（使用包装类以保持向后兼容）
+user_context_service = UserContextServiceWrapper()
+

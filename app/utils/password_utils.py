@@ -10,8 +10,20 @@ from passlib.context import CryptContext
 import re
 
 
-# 创建密码上下文，使用bcrypt作为默认哈希算法
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 创建密码上下文，优先使用bcrypt，如果不可用则使用argon2或pbkdf2
+try:
+    # 尝试使用bcrypt
+    pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+    # 测试bcrypt是否可用
+    pwd_context.hash("test")
+except Exception:
+    try:
+        # 如果bcrypt不可用，尝试使用argon2
+        pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+        pwd_context.hash("test")
+    except Exception:
+        # 如果argon2也不可用，使用pbkdf2_sha256（纯Python实现）
+        pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 def hash_password(password: str) -> str:

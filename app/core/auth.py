@@ -57,7 +57,7 @@ def decode_jwt_token_without_verify(token: str) -> Optional[dict]:
         return payload
         
     except jwt.JWTError as e:
-        logger.warning(f"JWT Token解析失败: {str(e)}")
+        logger.debug(f"JWT Token解析失败: {str(e)}")
         return None
     except Exception as e:
         logger.error(f"JWT Token解析异常: {str(e)}", exc_info=True)
@@ -174,18 +174,30 @@ async def get_current_user(request: Request):
             headers={"WWW-Authenticate": "Bearer"},
         )
     
-    try:
-        # 构造UserInfo对象
-        user_info = UserInfo(**payload)
-        logger.debug(f"用户认证成功: {user_info}")
-        return user_info
-    except Exception as e:
-        logger.error(f"构造UserInfo对象失败: {str(e)}", exc_info=True)
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token数据格式错误",
-            headers={"WWW-Authenticate": "Bearer"},
-        )
+        try:
+            # 构造UserInfo对象
+            user_info = UserInfo(**payload)
+            logger.debug(f"用户认证成功: {user_info}")
+            return user_info
+        except Exception as e:
+            logger.error(f"构造UserInfo对象失败: {str(e)}", exc_info=True)
+            # 如果缺少必需字段，提供默认值
+            if "deptId" not in payload:
+                logger.warning("Token中缺少deptId字段，使用默认值None")
+                payload["deptId"] = None
+            if "deptName" not in payload:
+                payload["deptName"] = None
+            try:
+                user_info = UserInfo(**payload)
+                logger.debug(f"用户认证成功（使用默认值）: {user_info}")
+                return user_info
+            except Exception as e2:
+                logger.error(f"使用默认值后仍构造UserInfo对象失败: {str(e2)}", exc_info=True)
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Token数据格式错误",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
 
 
 async def require_current_user(request: Request):

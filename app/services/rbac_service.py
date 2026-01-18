@@ -50,6 +50,7 @@ class RbacService:
     get_user_by_user_name = UserService.get_user_by_user_name
     get_user_by_user_name_and_tenant_id = UserService.get_user_by_user_name_and_tenant_id
     get_user_by_id = UserService.get_user_by_id
+    get_user_by_user_id_and_tenant_id = UserService.get_user_by_user_id_and_tenant_id
     create_user = UserService.create_user
     update_user = UserService.update_user
     update_user_by_id = UserService.update_user_by_id

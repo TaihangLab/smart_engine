@@ -2,6 +2,7 @@ from typing import List
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, func
 from app.models.rbac import SysPermission
+import json
 
 
 class PermissionDao:
@@ -36,6 +37,10 @@ class PermissionDao:
     @staticmethod
     def get_all_permissions(db: Session, skip: int = 0, limit: int = 100):
         """获取所有权限"""
+        if skip < 0:
+            raise ValueError("skip 必须是非负整数")
+        if limit <= 0:
+            raise ValueError("limit 必须是正整数")
         return db.query(SysPermission).filter(
             SysPermission.is_deleted == False
         ).order_by(SysPermission.sort_order).offset(skip).limit(limit).all()

@@ -27,7 +27,7 @@ api_router.include_router(local_videos.router, prefix="/local-videos", tags=["lo
 api_router.include_router(realtime_monitor.router, prefix="/realtime-monitor", tags=["realtime_monitor"])
 api_router.include_router(realtime_detection.router, prefix="/realtime-detection", tags=["realtime_detection"])
 api_router.include_router(rbac.router, prefix="/rbac", tags=["rbac"])
-api_router.include_router(auth.auth_router, prefix="/auth", tags=["auth"])
+api_router.include_router(auth.auth_router, tags=["auth"])
 
 # 设置前端路由处理
 frontend_routes.setup_frontend_routing(api_router)

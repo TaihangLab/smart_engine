@@ -17,12 +17,6 @@ sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 from app.core.config import settings
 from app.api import api_router
 
-# Import rate limiting
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-from slowapi.errors import RateLimitExceeded
-from slowapi.middleware import SlowAPIMiddleware
-
 # 导入中间件
 from app.core.middleware import RequestLoggingMiddleware, AuditMiddleware
 # 导入鉴权中间件
@@ -109,20 +103,17 @@ def signal_handler(signum, frame):
 signal.signal(signal.SIGINT, signal_handler)   # Ctrl+C
 signal.signal(signal.SIGTERM, signal_handler)  # 终止信号
 
-# 初始化限速器
-limiter = Limiter(key_func=get_remote_address)
-
 # 创建FastAPI应用 - 集成零配置补偿架构
 app = FastAPI(
     title=settings.PROJECT_NAME,
     description=settings.PROJECT_DESCRIPTION,
     version=settings.PROJECT_VERSION,
-    lifespan=startup_lifespan  # 使用零配置启动服务
+    lifespan=startup_lifespan,
+    debug=False,  # 禁用调试模式，减少异常堆栈打印
+    server_header=False  # 隐藏服务器信息
 )
 
 # 配置中间件
-app.state.limiter = limiter
-app.add_middleware(SlowAPIMiddleware)
 app.add_middleware(AuditMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
@@ -142,28 +133,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 添加限速异常处理器
-app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # 全局异常处理器
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from app.models.rbac import UnifiedResponse
-import traceback
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """全局异常处理器 - 统一处理所有未捕获的异常"""
-    logger.error(f"🚨 全局异常捕获: {str(exc)}", exc_info=True)
 
-    # 检查是否是HTTPException
+    # 检查是否是HTTPException（预期的业务异常，不打印堆栈）
     if isinstance(exc, HTTPException):
-        response_data = UnifiedResponse(
-            success=False,
-            code=exc.status_code,
-            message=exc.detail,
-            data=None
-        )
+        # 对于401/403等业务异常，只打印信息不打印堆栈
+        if exc.status_code in (401, 403, 404):
+            logger.debug(f"[业务异常] {exc.status_code}: {exc.detail}")
+        else:
+            # 其他HTTP异常（如500）正常记录
+            logger.error(f"🚨 HTTP异常: {exc.status_code} - {str(exc)}")
+
+        # 返回统一响应
+        if exc.status_code == 403:
+            message = exc.detail
+            if "权限" not in message and "permission" not in message.lower():
+                message = f"权限不足: {exc.detail}"
+            response_data = UnifiedResponse(
+                success=False,
+                code=403,
+                message=message,
+                data=None
+            )
+        else:
+            response_data = UnifiedResponse(
+                success=False,
+                code=exc.status_code,
+                message=exc.detail,
+                data=None
+            )
         return JSONResponse(
             status_code=exc.status_code,
             content=response_data.model_dump()

@@ -230,7 +230,20 @@ class SystemStartupService:
                     logger.error(f"❌ 启动LLM任务执行器失败: {str(e)}")
             else:
                 logger.info("⏭️ 跳过LLM任务执行器启动（已禁用）")
-            
+
+            # 9. 初始化租户0（模板租户）和ROLE_ACCESS角色
+            logger.info("🏢 初始化租户0（模板租户）...")
+            try:
+                from app.services.rbac.permission_copy_service import PermissionCopyService
+                db = SessionLocal()
+                try:
+                    template_role = PermissionCopyService.get_template_role(db)
+                    logger.info(f"✅ 租户0的ROLE_ACCESS角色已确保存在: ID={template_role.id}")
+                finally:
+                    db.close()
+            except Exception as e:
+                logger.error(f"❌ 初始化租户0失败: {str(e)}", exc_info=True)
+
             self.database_initialized = True
             logger.info("🎉 系统核心初始化完成！")
             

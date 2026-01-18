@@ -30,8 +30,40 @@ class UserDao:
         ).first()
 
     @staticmethod
+    def get_user_by_user_id_and_tenant_id(db: Session, user_id: str, tenant_id: int) -> Optional[SysUser]:
+        """
+        根据userId和tenantId获取用户
+        文档要求：根据 tenantId + userId 检查用户
+        
+        Args:
+            db: 数据库会话
+            user_id: 用户ID（可能是字符串形式的数字ID）
+            tenant_id: 租户ID
+            
+        Returns:
+            用户对象或None
+        """
+        try:
+            # 尝试将user_id转换为整数（如果是数字ID）
+            user_id_int = int(user_id)
+            return db.query(SysUser).filter(
+                SysUser.id == user_id_int,
+                SysUser.tenant_id == tenant_id,
+                SysUser.is_deleted == False
+            ).first()
+        except (ValueError, TypeError):
+            # 如果user_id不是数字，可能是用户名，尝试按user_name查询（向后兼容）
+            return db.query(SysUser).filter(
+                SysUser.user_name == user_id,
+                SysUser.tenant_id == tenant_id,
+                SysUser.is_deleted == False
+            ).first()
+
+    @staticmethod
     def get_users_by_tenant_id(db: Session, tenant_id: int, skip: int = 0, limit: int = 100) -> List[SysUser]:
         """根据租户ID获取用户列表"""
+        if tenant_id is None or tenant_id < 0:
+            raise ValueError("tenant_id 必须是有效的正整数")
         return db.query(SysUser).filter(
             SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False
@@ -88,6 +120,8 @@ class UserDao:
     @staticmethod
     def get_user_count_by_tenant_id(db: Session, tenant_id: int) -> int:
         """根据租户ID获取用户数量"""
+        if tenant_id is None or tenant_id < 0:
+            raise ValueError("tenant_id 必须是有效的正整数")
         return db.query(SysUser).filter(
             SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False

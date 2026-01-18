@@ -31,11 +31,14 @@ class UserService:
             创建或获取到的用户对象
         """
         user_name = user_info.get("userId")
-        tenant_id = user_info.get("tenantId")
-        display_name = user_info.get("userName", user_name)
+        if not user_name:
+            raise ValueError("用户信息中缺少必需的 userId 字段")
 
-        if not user_name or not tenant_id:
-            raise ValueError("userId and tenantId are required")
+        tenant_id = user_info.get("tenantId")
+        if not tenant_id:
+            raise ValueError("用户信息中缺少必需的 tenantId 字段")
+
+        display_name = user_info.get("userName", user_name)
 
         # 获取或创建租户
         UserService.get_or_create_tenant(db, tenant_id, user_info.get("tenantName", tenant_id))
@@ -109,6 +112,22 @@ class UserService:
         return RbacDao.user.get_user_by_id(db, id)
 
     @staticmethod
+    def get_user_by_user_id_and_tenant_id(db: Session, user_id: str, tenant_id: int) -> Optional[SysUser]:
+        """
+        根据userId和tenantId获取用户
+        文档要求：根据 tenantId + userId 检查用户
+        
+        Args:
+            db: 数据库会话
+            user_id: 用户ID（可能是字符串形式的数字ID）
+            tenant_id: 租户ID
+            
+        Returns:
+            用户对象或None
+        """
+        return RbacDao.user.get_user_by_user_id_and_tenant_id(db, user_id, tenant_id)
+
+    @staticmethod
     def create_user(db: Session, user_data: Dict[str, Any]) -> SysUser:
         """创建用户"""
         # 检查用户是否已存在
@@ -116,12 +135,14 @@ class UserService:
         if existing_user:
             raise ValueError(f"用户 {user_data.get('user_name')} 在租户 {user_data.get('tenant_id')} 中已存在")
 
-        # 获取tenant_id，确保它是整数类型
-        tenant_id = user_data.get('tenant_id', 1)  # 默认使用租户ID 1
+        # 获取tenant_id，确保它是整数类型且必需
+        tenant_id = user_data.get('tenant_id')
+        if not tenant_id:
+            raise ValueError("用户信息中缺少必需的 tenant_id 字段")
 
         # 确保tenant_id是整数且在有效范围内
         if not isinstance(tenant_id, int):
-            # 如果tenant_id是字符串（如"default"），需要转换为整数
+            # 如果tenant_id是字符串，需要转换为整数
             if isinstance(tenant_id, str):
                 # 对于"default"这样的字符串，使用默认值1
                 if tenant_id == "default":
@@ -131,18 +152,17 @@ class UserService:
                     try:
                         tenant_id = int(tenant_id)
                     except ValueError:
-                        # 如果转换失败，使用默认值
-                        tenant_id = 1
+                        raise ValueError(f"tenant_id 字段值 '{tenant_id}' 无法转换为整数")
             else:
                 # 如果是其他类型，尝试转换为整数
                 try:
                     tenant_id = int(tenant_id)
                 except (ValueError, TypeError):
-                    tenant_id = 1  # 如果转换失败，使用默认值
+                    raise ValueError(f"tenant_id 字段值 '{tenant_id}' 无法转换为整数")
 
         # 验证tenant_id是否在有效范围内
         if tenant_id < 0 or tenant_id > 16383:
-            tenant_id = 1  # 如果超出范围，使用默认值
+            raise ValueError(f"tenant_id 值 {tenant_id} 超出有效范围 (0-16383)")
 
         # 生成新的用户ID
         user_id = generate_id(tenant_id, "user")  # tenant_id不再直接编码到ID中，但可用于其他用途
@@ -209,11 +229,15 @@ class UserService:
     @staticmethod
     def get_users_by_tenant(db: Session, tenant_id: int, skip: int = 0, limit: int = 100) -> list:
         """获取租户下的用户列表"""
+        if tenant_id is None or tenant_id < 0:
+            raise ValueError("tenant_id 必须是有效的正整数")
         return RbacDao.user.get_users_by_tenant_id(db, tenant_id, skip, limit)
 
     @staticmethod
     def get_user_count_by_tenant(db: Session, tenant_id: int) -> int:
         """获取租户下的用户数量"""
+        if tenant_id is None or tenant_id < 0:
+            raise ValueError("tenant_id 必须是有效的正整数")
         return RbacDao.user.get_user_count_by_tenant_id(db, tenant_id)
 
     @staticmethod
@@ -221,6 +245,9 @@ class UserService:
                                  phone: str = None, status: int = None, dept_id: int = None,
                                  gender: int = None, position_code: str = None, role_code: str = None,
                                  skip: int = 0, limit: int = 100):
+        """高级搜索用户"""
+        if tenant_id is None or tenant_id < 0:
+            raise ValueError("tenant_id 必须是有效的正整数")
         """高级搜索用户"""
         return RbacDao.user.get_users_advanced_search(
             db, tenant_id, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code, skip, limit
@@ -230,6 +257,9 @@ class UserService:
     def get_user_count_advanced_search(db: Session, tenant_id: int, user_name: str = None, nick_name: str = None,
                                       phone: str = None, status: int = None, dept_id: int = None,
                                       gender: int = None, position_code: str = None, role_code: str = None):
+        """高级搜索用户数量统计"""
+        if tenant_id is None or tenant_id < 0:
+            raise ValueError("tenant_id 必须是有效的正整数")
         """高级搜索用户数量统计"""
         return RbacDao.user.get_user_count_advanced_search(
             db, tenant_id, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code
@@ -246,16 +276,24 @@ class UserService:
         return deleted_count
 
     @staticmethod
-    def batch_delete_users_by_ids(db: Session, tenant_id: int, user_ids: List[int]):
+    def batch_delete_users_by_ids(db: Session, accessible_tenant_ids: List[int], user_ids: List[int]):
         """根据用户ID列表批量删除用户"""
         deleted_count = 0
         for user_id in user_ids:
-            # 验证用户是否属于指定租户
+            # 验证用户是否存在且未被删除
             user = RbacDao.user.get_user_by_id(db, user_id)
-            if user and user.tenant_id == tenant_id:
-                success = RbacDao.user.delete_user(db, user_id)
-                if success:
-                    deleted_count += 1
+            if user:
+                # 验证当前用户是否有权限删除这个用户（即用户的租户ID是否在可访问租户列表中）
+                if user.tenant_id in accessible_tenant_ids:
+                    success = RbacDao.user.delete_user(db, user_id)
+                    if success:
+                        deleted_count += 1
+                else:
+                    # 用户存在但租户ID不在可访问列表中
+                    print(f"用户 {user_id} (租户: {user.tenant_id}) 不在可访问租户列表中: {accessible_tenant_ids}")
+            else:
+                # 用户不存在或已被删除
+                print(f"用户 {user_id} 不存在或已被删除")
         return deleted_count
 
     @staticmethod

@@ -41,14 +41,24 @@ class TenantService:
         if package not in [pkg.value for pkg in PackageType]:
             raise ValueError(f"无效的套餐类型: {package}，允许的值: {[pkg.value for pkg in PackageType]}")
 
-        # 使用默认值生成租户ID用于ID生成器
-        tenant_code_val = tenant_data.get('tenant_name', 'default')
-        # 简单的哈希算法生成租户ID，确保在允许范围内
-        tenant_id = sum(ord(c) for c in tenant_code_val) % 16384  # 限制在0-16383范围内
+        # 如果 tenant_data 中没有 id，则生成新的 ID
+        if 'id' not in tenant_data:
+            # 使用默认值生成租户ID用于ID生成器
+            tenant_code_val = tenant_data.get('tenant_name', 'default')
+            # 简单的哈希算法生成租户ID，确保在允许范围内
+            tenant_id = sum(ord(c) for c in tenant_code_val) % 16384  # 限制在0-16383范围内
 
-        # 生成新的租户ID
-        from app.utils.id_generator import generate_id
-        tenant_id_value = generate_id(tenant_id, "tenant")  # tenant_id不再直接编码到ID中，但可用于其他用途
+            # 生成新的租户ID
+            from app.utils.id_generator import generate_id
+            tenant_id_value = generate_id(tenant_id, "tenant")
+        else:
+            # 使用传入的 ID，确保是整数
+            tenant_id_value = tenant_data['id']
+            if isinstance(tenant_id_value, str):
+                try:
+                    tenant_id_value = int(tenant_id_value)
+                except ValueError:
+                    raise ValueError(f"无效的租户 ID: {tenant_id_value}")
 
         # 只用SysTenant模型中实际存在的字段
         valid_fields = {

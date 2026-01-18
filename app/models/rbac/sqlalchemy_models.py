@@ -9,6 +9,8 @@ RBAC SQLAlchemy数据库模型
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, func, UniqueConstraint, BigInteger
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.ext.hybrid import hybrid_property
+import json
 from app.db.base import Base
 
 
@@ -129,8 +131,23 @@ class SysPermission(Base):
 
     # 按钮相关字段
     api_path = Column(String(500), comment="API路径")
-    methods = Column(Text, comment="HTTP方法(JSON数组)")
+    methods = Column(Text, comment="HTTP方法")
     category = Column(String(20), comment="操作分类: READ/WRITE/DELETE/SPECIAL")
+
+    @hybrid_property
+    def methods_list(self):
+        """获取methods作为列表（向后兼容）"""
+        if self.methods:
+            return [str(self.methods)]
+        return []
+
+    @methods_list.setter
+    def methods_list(self, value):
+        """设置methods列表"""
+        if isinstance(value, str):
+            self.methods = value
+        else:
+            self.methods = str(value) if value else None
     resource = Column(String(50), comment="资源标识")
     path_params = Column(Text, comment="路径参数定义")
     body_schema = Column(Text, comment="请求体验证")
@@ -167,12 +184,6 @@ class SysRolePermission(Base):
     id = Column(BigInteger, primary_key=True, comment="关联ID，52位合成ID")
     role_id = Column(BigInteger, nullable=False, comment="角色ID")
     permission_id = Column(BigInteger, nullable=False, comment="权限ID")
-
-    # 时间戳字段
-    create_time = Column(DateTime, default=func.now(), comment="创建时间")
-    update_time = Column(DateTime, default=func.now(), onupdate=func.now(), comment="更新时间")
-    create_by = Column(String(64), comment="创建者")
-    update_by = Column(String(64), comment="更新者")
 
 
 class SysDept(Base):

@@ -38,7 +38,7 @@ class PermissionBase(BaseModel):
 
     # 按钮相关字段
     api_path: Optional[str] = Field(None, description="API路径", max_length=500)
-    methods: Optional[List[str]] = Field(None, description="HTTP方法")
+    methods: Optional[str] = Field(None, description="HTTP方法")
     category: Optional[str] = Field(None, description="操作分类: READ/WRITE/DELETE/SPECIAL", max_length=20)
     resource: Optional[str] = Field(None, description="资源标识", max_length=50)
     path_params: Optional[dict] = Field(None, description="路径参数定义")
@@ -85,7 +85,7 @@ class PermissionUpdate(BaseModel):
 
     # 按钮相关字段
     api_path: Optional[str] = Field(None, description="API路径", max_length=500)
-    methods: Optional[List[str]] = Field(None, description="HTTP方法")
+    methods: Optional[str] = Field(None, description="HTTP方法")
     category: Optional[str] = Field(None, description="操作分类: READ/WRITE/DELETE/SPECIAL", max_length=20)
     resource: Optional[str] = Field(None, description="资源标识", max_length=50)
     path_params: Optional[dict] = Field(None, description="路径参数定义")
@@ -131,7 +131,7 @@ class PermissionNodeResponse(BaseModel):
 
     # 按钮相关字段
     api_path: Optional[str] = None
-    methods: Optional[List[str]] = None
+    methods: Optional[str] = None
     category: Optional[str] = None
     resource: Optional[str] = None
     path_params: Optional[dict] = None
@@ -194,7 +194,7 @@ class PermissionTreeResponse(BaseModel):
     # 按钮相关字段
     parent_code: Optional[str] = None
     api_path: Optional[str] = None
-    methods: Optional[List[str]] = None
+    methods: Optional[str] = None
     category: Optional[str] = None
     resource: Optional[str] = None
     path_params: Optional[dict] = None

@@ -69,6 +69,13 @@ class PasswordChangeRequest(BaseModel):
     old_password: str = Field(..., description="旧密码")
     new_password: str = Field(..., description="新密码")
 
+    @validator('old_password')
+    def validate_old_password(cls, v):
+        """验证旧密码不能为空"""
+        if not v or len(v.strip()) == 0:
+            raise ValueError('旧密码不能为空')
+        return v.strip()
+
     @validator('new_password')
     def validate_new_password(cls, v):
         """验证新密码强度"""

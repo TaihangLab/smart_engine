@@ -7,7 +7,7 @@ RBAC角色管理API
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.rbac import (
@@ -31,6 +31,7 @@ role_router = APIRouter(tags=["角色管理"])
 @role_router.get("/roles/{id}", response_model=UnifiedResponse, summary="获取角色详情")
 async def get_role(
     id: int,
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     db: Session = Depends(get_db)
 ):
@@ -38,7 +39,7 @@ async def get_role(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 获取角色
         role = RbacService.get_role_by_id(db, id)
@@ -78,6 +79,7 @@ async def get_role(
 
 @role_router.get("/roles", response_model=UnifiedResponse, summary="获取角色列表")
 async def get_roles(
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
@@ -90,7 +92,7 @@ async def get_roles(
     """获取指定租户的角色列表，支持高级搜索"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+    tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
     # 如果提供了任何高级搜索参数，则使用高级搜索
     if role_name or role_code or status is not None or data_scope is not None:
@@ -129,12 +131,13 @@ async def get_roles(
 @role_router.post("/roles", response_model=UnifiedResponse, summary="创建角色")
 async def create_role(
     role: RoleCreate,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """创建新角色"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    role.tenant_id = user_context_service.get_validated_tenant_id(role.tenant_id)
+    role.tenant_id = user_context_service.get_validated_tenant_id(request, role.tenant_id)
 
     # 检查角色编码在租户内是否已存在
     existing_role = RbacService.get_role_by_code(db, role.role_code, role.tenant_id)
@@ -161,7 +164,7 @@ async def update_role(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 获取原始角色信息以验证租户ID
         original_role = RbacService.get_role_by_id(db, id)
@@ -227,7 +230,7 @@ async def delete_role(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 获取原始角色信息以验证租户ID
         original_role = RbacService.get_role_by_id(db, id)
@@ -281,12 +284,13 @@ async def delete_role(
 @role_router.post("/role-permissions", response_model=UnifiedResponse, summary="为角色分配权限")
 async def assign_permission_to_role(
     assignment: RolePermissionAssign,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """为角色分配权限"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    assignment.tenant_id = user_context_service.get_validated_tenant_id(assignment.tenant_id)
+    assignment.tenant_id = user_context_service.get_validated_tenant_id(request, assignment.tenant_id)
 
     success = RbacService.assign_permission_to_role_by_ids(
         db,
@@ -308,13 +312,14 @@ async def assign_permission_to_role(
 @role_router.get("/role-permissions/roles/{id}", response_model=UnifiedResponse, summary="获取拥有指定权限的角色")
 async def get_roles_by_permission(
     id: int,
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     db: Session = Depends(get_db)
 ):
     """获取拥有指定权限的角色列表"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+    tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
     roles = RbacService.get_roles_by_permission_by_ids(db, id, tenant_id)
     return UnifiedResponse(

@@ -7,7 +7,7 @@ RBAC关系管理API
 """
 
 from typing import Optional, List
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.rbac import (
@@ -30,6 +30,7 @@ relation_router = APIRouter(tags=["关系管理"])
 
 @relation_router.get("/user-roles", response_model=UnifiedResponse, summary="获取用户角色关系列表")
 async def get_user_roles_list(
+    request: Request,
     user_id: int = Query(None, description="用户ID"),
     role_id: int = Query(None, description="角色ID"),
     tenant_id: Optional[int] = Query(None, description="租户编码"),
@@ -114,13 +115,14 @@ async def get_user_roles_list(
 @relation_router.post("/user-roles", response_model=UnifiedResponse, summary="为用户分配角色")
 async def assign_role_to_user(
     assignment: UserRoleAssign,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """为用户分配角色"""
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        user_context_service.get_validated_tenant_id(assignment.tenant_id)
+        user_context_service.get_validated_tenant_id(request, assignment.tenant_id)
 
         # 根据提供的参数类型选择不同的服务方法
         if assignment.user_id is not None and assignment.role_ids is not None:
@@ -177,6 +179,7 @@ async def assign_role_to_user(
 
 @relation_router.delete("/user-roles", response_model=UnifiedResponse, summary="移除用户角色关系")
 async def remove_role_from_user(
+    request: Request,
     user_id: int = Query(..., description="用户ID"),
     role_id: int = Query(..., description="角色ID"),
     tenant_id: Optional[int] = Query(None, description="租户编码"),
@@ -220,6 +223,7 @@ async def remove_role_from_user(
 
 @relation_router.get("/role-permissions", response_model=UnifiedResponse, summary="获取角色权限关系列表")
 async def get_role_permissions_list(
+    request: Request,
     role_id: int = Query(None, description="角色ID"),
     permission_id: int = Query(None, description="权限ID"),
     tenant_id: Optional[int] = Query(None, description="租户编码"),
@@ -305,6 +309,7 @@ async def get_role_permissions_list(
 @relation_router.post("/role-permissions", response_model=UnifiedResponse, summary="为角色分配权限（通过编码）")
 async def assign_permission_to_role(
     assignment: RolePermissionAssign,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """为角色分配权限（通过编码）"""
@@ -349,13 +354,14 @@ class RolePermissionAssignById(BaseModel):
 @relation_router.post("/role-permissions-by-id", response_model=UnifiedResponse, summary="为角色分配权限（通过ID）")
 async def assign_permission_to_role_by_id(
     assignment: RolePermissionAssignById,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """为角色分配权限（通过ID）"""
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(assignment.tenant_id)
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, assignment.tenant_id)
 
         success = RbacService.assign_permission_to_role_by_id(
             db,
@@ -389,6 +395,7 @@ async def assign_permission_to_role_by_id(
 
 @relation_router.delete("/role-permissions-by-id", response_model=UnifiedResponse, summary="移除角色权限（通过ID）")
 async def remove_permission_from_role_by_id(
+    request: Request,
     role_id: int = Query(..., description="角色ID"),
     permission_id: int = Query(..., description="权限ID"),
     tenant_id: Optional[int] = Query(None, description="租户ID"),
@@ -398,7 +405,7 @@ async def remove_permission_from_role_by_id(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         success = RbacService.remove_permission_from_role_by_id(
             db,
@@ -432,6 +439,7 @@ async def remove_permission_from_role_by_id(
 
 @relation_router.delete("/role-permissions", response_model=UnifiedResponse, summary="移除角色权限关系（通过编码）")
 async def remove_permission_from_role_by_codes(
+    request: Request,
     role_code: str = Query(..., description="角色编码"),
     permission_code: str = Query(..., description="权限编码"),
     tenant_id: Optional[int] = Query(None, description="租户编码"),
@@ -471,6 +479,7 @@ async def remove_permission_from_role_by_codes(
 
 @relation_router.post("/batch-role-permissions-by-id", response_model=UnifiedResponse, summary="批量为角色分配权限（通过ID）")
 async def batch_assign_permissions_to_role_by_id(
+    request: Request,
     role_id: int = Query(..., description="角色ID"),
     permission_ids: List[int] = Query(..., description="权限ID列表"),
     tenant_id: Optional[int] = Query(None, description="租户ID"),
@@ -480,7 +489,7 @@ async def batch_assign_permissions_to_role_by_id(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         success_count = 0
         for permission_id in permission_ids:

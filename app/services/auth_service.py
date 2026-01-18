@@ -220,6 +220,7 @@ class AuthenticationService:
             "userId": user.id,
             "username": user.user_name,
             "tenantId": user.tenant_id,
+            "deptId": user.dept_id,  # 添加部门ID
             "roles": roles,
             "permissions": permissions,
             "createTime": datetime.utcnow().isoformat()
@@ -241,7 +242,7 @@ class AuthenticationService:
         Args:
             db: 数据库会话
             user_id: 用户ID
-            old_password: 旧密码
+            old_password: 旧密码（必填）
             new_password: 新密码
             
         Returns:
@@ -256,6 +257,14 @@ class AuthenticationService:
             
             if not user:
                 return False, "用户不存在"
+            
+            # 验证旧密码（必填）
+            if not old_password:
+                return False, "请输入旧密码"
+            
+            # 如果用户没有密码，提示使用重置密码功能
+            if not user.password or not user.password.strip():
+                return False, "用户尚未设置密码，请使用重置密码功能"
             
             # 验证旧密码
             if not verify_password(old_password, user.password):
@@ -317,6 +326,66 @@ class AuthenticationService:
             db.rollback()
             return False, "密码重置失败"
     
+    @staticmethod
+    def reset_password_by_id(db: Session, user_id: int, new_password: str) -> Tuple[bool, str]:
+        """
+        重置用户密码（通过用户ID，通常由管理员操作）
+        
+        Args:
+            db: 数据库会话
+            user_id: 用户ID
+            new_password: 新密码
+            
+        Returns:
+            (是否成功, 消息)
+        """
+        try:
+            # 获取用户
+            user = db.query(SysUser).filter(
+                SysUser.id == user_id,
+                SysUser.is_deleted == False
+            ).first()
+            
+            if not user:
+                return False, "用户不存在"
+            
+            # 更新密码
+            user.password = hash_password(new_password)
+            user.update_time = datetime.utcnow()
+            
+            db.commit()
+            db.refresh(user)
+            
+            logger.info(f"用户 {user.user_name} (ID: {user_id}) 密码重置成功")
+            return True, "密码重置成功"
+            
+        except Exception as e:
+            logger.error(f"重置密码时发生异常: {str(e)}", exc_info=True)
+            db.rollback()
+            return False, "密码重置失败"
+    
+    @staticmethod
+    def get_user_by_id(db: Session, user_id: int) -> Optional[SysUser]:
+        """
+        根据用户ID获取用户对象
+
+        Args:
+            db: 数据库会话
+            user_id: 用户ID
+
+        Returns:
+            用户对象或None
+        """
+        try:
+            user = db.query(SysUser).filter(
+                SysUser.id == user_id,
+                SysUser.is_deleted == False
+            ).first()
+            return user
+        except Exception as e:
+            logger.error(f"获取用户失败: {str(e)}", exc_info=True)
+            return None
+
     @staticmethod
     def validate_and_get_user_by_token(db: Session, token: str) -> Optional[SysUser]:
         """

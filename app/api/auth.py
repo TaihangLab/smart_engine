@@ -192,10 +192,26 @@ async def change_password(
                     data=None
                 )
                 
+            # 获取用户ID（userId可能是字符串，需要转换为整数）
+            try:
+                user_id = int(current_user.userId) if current_user.userId else None
+            except (ValueError, TypeError):
+                # 如果userId不是数字，尝试通过用户名查找
+                from app.services.rbac_service import RbacService
+                user = RbacService.get_user_by_user_name(db, current_user.userName, current_user.tenantId)
+                if not user:
+                    return UnifiedResponse(
+                        success=False,
+                        code=404,
+                        message="用户不存在",
+                        data=None
+                    )
+                user_id = user.id
+            
             # 执行密码更改
             success, message = AuthenticationService.change_password(
                 db,
-                current_user.userId,  # 注意：这里使用的是userId，需要与实际模型匹配
+                user_id,
                 password_change.old_password,
                 password_change.new_password
             )
@@ -280,6 +296,80 @@ async def reset_password(
             success=False,
             code=500,
             message="重置密码服务异常",
+            data=None
+        )
+
+
+@auth_router.get("/user-info", response_model=UnifiedResponse, summary="获取当前用户信息")
+async def get_current_user_info(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    获取当前登录用户的完整信息
+    包含用户基本信息、权限码列表、菜单结构树等
+    """
+    try:
+        # 获取当前用户信息
+        from app.core.auth import get_current_user
+        current_user = await get_current_user(request)
+
+        # 获取用户详细信息
+        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        if not user:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="用户不存在",
+                data=None
+            )
+
+        # 获取用户角色
+        roles = AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
+
+        # 获取用户权限列表
+        permissions = AuthenticationService.get_user_permissions(db, user.id, user.user_name, user.tenant_id)
+        permission_codes = [p.code for p in permissions] if permissions else []
+
+        # 获取权限树（菜单结构）
+        from app.services.rbac_service import RbacService
+        permission_tree = RbacService.get_permission_tree(db)
+
+        # 构建用户信息响应
+        user_info = {
+            "userId": user.id,
+            "userName": user.user_name,
+            "nickName": user.nick_name,
+            "tenantId": user.tenant_id,
+            "deptId": user.dept_id,
+            "phone": user.phone,
+            "email": user.email,
+            "gender": user.gender,
+            "status": user.status,
+            "avatar": user.avatar,
+            "signature": user.signature,
+            "roles": roles,
+            "permissions": permission_codes,
+            "permissionTree": permission_tree,
+            "createTime": user.create_time.isoformat() if user.create_time else None,
+            "updateTime": user.update_time.isoformat() if user.update_time else None
+        }
+
+        logger.info(f"获取用户信息成功: {user.user_name} (ID: {user.id})")
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取用户信息成功",
+            data=user_info
+        )
+
+    except Exception as e:
+        logger.error(f"获取用户信息失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取用户信息失败",
             data=None
         )
 

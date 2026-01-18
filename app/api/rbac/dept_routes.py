@@ -7,7 +7,7 @@ RBAC部门管理API
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.rbac.dept_models import (
@@ -33,6 +33,7 @@ dept_router = APIRouter(tags=["部门管理"])
 
 @dept_router.get("/depts/tree", response_model=UnifiedResponse, summary="获取部门树结构")
 async def get_dept_tree(
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     name: str = Query(None, description="部门名称过滤条件（模糊查询）"),
     status: int = Query(None, description="状态过滤条件，为空时返回所有状态的部门"),
@@ -41,7 +42,7 @@ async def get_dept_tree(
     """获取部门树结构，支持按名称和状态过滤"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+    validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
     dept_tree = RbacService.get_dept_tree(db, validated_tenant_id, name, status)
     if not dept_tree:
@@ -63,13 +64,14 @@ async def get_dept_tree(
 @dept_router.get("/depts/{dept_id}", response_model=UnifiedResponse, summary="获取部门详情")
 async def get_dept(
     dept_id: int,
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     db: Session = Depends(get_db)
 ):
     """根据部门ID获取部门详情"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+    validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
     # 获取部门信息
     dept = RbacService.get_dept_by_id(db, dept_id)
@@ -85,6 +87,7 @@ async def get_dept(
 
 @dept_router.get("/depts", response_model=UnifiedResponse, summary="获取部门列表")
 async def get_depts(
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     parent_id: Optional[int] = Query(None, description="父部门ID，为空表示获取根部门"),
     name: str = Query(None, description="部门名称模糊查询条件"),
@@ -96,7 +99,7 @@ async def get_depts(
     """获取部门列表"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+    validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
     # 使用新的过滤方法
     depts = RbacService.get_depts_by_filters_with_sort(db, validated_tenant_id, name, parent_id, status, skip, limit)
@@ -126,12 +129,13 @@ async def get_depts(
 @dept_router.post("/depts", response_model=UnifiedResponse, summary="创建部门")
 async def create_dept(
     dept: DeptCreate,
+    request: Request,
     db: Session = Depends(get_db)
 ):
     """创建部门"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    validated_tenant_id = user_context_service.get_validated_tenant_id(dept.tenant_id)
+    validated_tenant_id = user_context_service.get_validated_tenant_id(request, dept.tenant_id)
 
     # 将验证后的租户ID设置到部门对象
     dept.tenant_id = validated_tenant_id
@@ -149,6 +153,7 @@ async def create_dept(
 async def update_dept(
     dept_id: int,
     dept_update: DeptUpdate,
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     db: Session = Depends(get_db)
 ):
@@ -156,7 +161,7 @@ async def update_dept(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 直接使用部门ID调用更新方法
         update_data = dept_update.model_dump(exclude_unset=True)
@@ -195,6 +200,7 @@ async def update_dept(
 @dept_router.delete("/depts/{dept_id}", response_model=UnifiedResponse, summary="删除部门")
 async def delete_dept(
     dept_id: int,
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     db: Session = Depends(get_db)
 ):
@@ -202,7 +208,7 @@ async def delete_dept(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(tenant_id)
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 直接使用部门ID调用删除方法
         success = RbacService.delete_dept(db, dept_id)
