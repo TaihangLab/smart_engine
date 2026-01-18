@@ -378,16 +378,16 @@ class DeptDao:
             dept_dict = {
                 "id": dept.id,
                 "name": dept.name,
-                "parentId": dept.parent_id,
+                "parent_id": dept.parent_id,
                 "path": dept.path,
                 "depth": dept.depth,
-                "sortOrder": dept.sort_order ,
+                "sort_order": dept.sort_order ,
                 "status": dept.status,
-                "tenantId": dept.tenant_id,
-                "createTime": dept.create_time,
-                "updateTime": dept.update_time,
-                "createBy": dept.create_by,
-                "updateBy": dept.update_by,
+                "tenant_id": dept.tenant_id,
+                "create_time": dept.create_time,
+                "update_time": dept.update_time,
+                "create_by": dept.create_by,
+                "update_by": dept.update_by,
                 "children": []
             }
             dept_map[dept.id] = dept_dict
@@ -395,7 +395,7 @@ class DeptDao:
         # 构建树结构
         root_depts = []
         for dept_id, dept_dict in dept_map.items():
-            parent_id = dept_dict["parentId"]
+            parent_id = dept_dict["parent_id"]
             if parent_id is None:
                 # 根部门
                 root_depts.append(dept_dict)
@@ -438,16 +438,16 @@ class DeptDao:
             dept_dict = {
                 "id": dept.id,
                 "name": dept.name,
-                "parentId": dept.parent_id,
+                "parent_id": dept.parent_id,
                 "path": dept.path,
                 "depth": dept.depth,
-                "sortOrder": dept.sort_order,
+                "sort_order": dept.sort_order,
                 "status": dept.status,
-                "tenantId": dept.tenant_id,
-                "createTime": dept.create_time,
-                "updateTime": dept.update_time,
-                "createBy": dept.create_by,
-                "updateBy": dept.update_by,
+                "tenant_id": dept.tenant_id,
+                "create_time": dept.create_time,
+                "update_time": dept.update_time,
+                "create_by": dept.create_by,
+                "update_by": dept.update_by,
                 "children": []
             }
             dept_map[dept.id] = dept_dict
@@ -455,7 +455,7 @@ class DeptDao:
         # 构建树结构
         root_depts = []
         for dept_id, dept_dict in dept_map.items():
-            parent_id = dept_dict["parentId"]
+            parent_id = dept_dict["parent_id"]
             if parent_id is None:
                 # 根部门
                 root_depts.append(dept_dict)

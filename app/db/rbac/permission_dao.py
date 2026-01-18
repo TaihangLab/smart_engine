@@ -106,7 +106,7 @@ class PermissionDao:
 
         Args:
             db: 数据库会话
-            tenant_id: 租户编码
+            tenant_id: 租户编码（注：权限表无租户字段，此参数被忽略）
             permission_name: 权限名称（模糊查询）
             permission_code: 权限编码（模糊查询）
             permission_type: 权限类型
@@ -116,7 +116,6 @@ class PermissionDao:
             limit: 限制返回的记录数
         """
         query = db.query(SysPermission).filter(
-            SysPermission.tenant_id == tenant_id,
             SysPermission.is_deleted == False
         )
 
@@ -142,7 +141,7 @@ class PermissionDao:
 
         Args:
             db: 数据库会话
-            tenant_id: 租户编码
+            tenant_id: 租户编码（注：权限表无租户字段，此参数被忽略）
             permission_name: 权限名称（模糊查询）
             permission_code: 权限编码（模糊查询）
             permission_type: 权限类型
@@ -150,7 +149,6 @@ class PermissionDao:
             creator: 创建者
         """
         query = db.query(SysPermission).filter(
-            SysPermission.tenant_id == tenant_id,
             SysPermission.is_deleted == False
         )
 

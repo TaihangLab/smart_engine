@@ -143,8 +143,6 @@ class RbacService:
     get_position_count_by_tenant = PositionService.get_position_count_by_tenant
     get_positions_by_name = PositionService.get_positions_by_name
     get_position_count_by_name = PositionService.get_position_count_by_name
-    get_positions_by_department = PositionService.get_positions_by_department
-    get_position_count_by_department = PositionService.get_position_count_by_department
 
     # 关系相关方法
     get_user_roles = RelationService.get_user_roles

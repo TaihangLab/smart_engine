@@ -87,7 +87,46 @@ class CameraService:
                     "location": channel.get("gbAddress", ""),
                     "status": channel.get("gbStatus", "") == "ON",
                     "camera_type": channel.get("dataType"),
-                    "skill_names": skill_names
+                    "skill_names": skill_names,
+                    # 添加WVP通道字段，使用蛇形命名
+                    "gb_device_id": channel.get("gbDeviceId"),
+                    "gb_civil_code": channel.get("gbCivilCode"),
+                    "gb_manufacturer": channel.get("gbManufacturer"),
+                    "gb_model": channel.get("gbModel"),
+                    "gb_ip_address": channel.get("gbIpAddress"),
+                    "gb_longitude": channel.get("gbLongitude"),
+                    "gb_latitude": channel.get("gbLatitude"),
+                    "create_time": channel.get("createTime"),
+                    "update_time": channel.get("updateTime"),
+                    "gb_owner": channel.get("gbOwner"),
+                    "gb_block": channel.get("gbBlock"),
+                    "gb_parental": channel.get("gbParental"),
+                    "gb_parent_id": channel.get("gbParentId"),
+                    "gb_safety_way": channel.get("gbSafetyWay"),
+                    "gb_register_way": channel.get("gbRegisterWay"),
+                    "gb_cert_num": channel.get("gbCertNum"),
+                    "gb_certifiable": channel.get("gbCertifiable"),
+                    "gb_err_code": channel.get("gbErrCode"),
+                    "gb_end_time": channel.get("gbEndTime"),
+                    "gb_secrecy": channel.get("gbSecrecy"),
+                    "gb_password": channel.get("gbPassword"),
+                    "gps_altitude": channel.get("gpsAltitude"),
+                    "gps_speed": channel.get("gpsSpeed"),
+                    "gps_direction": channel.get("gpsDirection"),
+                    "gps_time": channel.get("gpsTime"),
+                    "gb_business_group_id": channel.get("gbBusinessGroupId"),
+                    "gb_ptz_type": channel.get("gbPtzType"),
+                    "gb_position_type": channel.get("gbPositionType"),
+                    "gb_room_type": channel.get("gbRoomType"),
+                    "gb_use_type": channel.get("gbUseType"),
+                    "gb_supply_light_type": channel.get("gbSupplyLightType"),
+                    "gb_direction_type": channel.get("gbDirectionType"),
+                    "gb_resolution": channel.get("gbResolution"),
+                    "gb_download_speed": channel.get("gbDownloadSpeed"),
+                    "gb_svc_space_support_mod": channel.get("gbSvcSpaceSupportMod"),
+                    "gb_svc_time_support_mode": channel.get("gbSvcTimeSupportMode"),
+                    "record_plan": channel.get("recordPLan"),
+                    "data_device_id": channel.get("dataDeviceId")
                 }
                 
                 # # 添加所有WVP通道字段，但跳过已处理过的字段
@@ -207,14 +246,14 @@ class CameraService:
                 # 创建摄像头信息对象
                 camera = {
                     "id": stream.get("id", ""),
-                    "gbId": stream.get("gbId", ""),
-                    "gbDeviceId": stream.get("gbDeviceId", ""),
-                    "gbName": stream.get("gbName", ""),
-                    "dataDeviceId": stream.get("dataDeviceId", ""),
+                    "gb_id": stream.get("gbId", ""),
+                    "gb_device_id": stream.get("gbDeviceId", ""),
+                    "gb_name": stream.get("gbName", ""),
+                    "data_device_id": stream.get("dataDeviceId", ""),
                     "app": stream.get("app", ""),
                     "stream": stream.get("stream", ""),
                     "pushing": stream.get("pushing", False),
-                    "startOfflinePush": stream.get("startOfflinePush", False),
+                    "start_offline_push": stream.get("startOfflinePush", False),
                     "source_type": "push",
                     "original_data": stream  # 保存原始数据供前端参考
                 }
@@ -268,16 +307,16 @@ class CameraService:
                 
                 # 创建摄像头信息对象
                 camera = {
-                    "gbName": device.get("name", "Unknown Camera"),
+                    "gb_name": device.get("name", "Unknown Camera"),
                     "app": device.get("app", ""),
                     "stream": device.get("stream", ""),
-                    "srcUrl": device.get("srcUrl", ""),
+                    "src_url": device.get("srcUrl", ""),
                     "ip": device.get("ip", ""),
                     "pulling": device.get("pulling", False),
                     "id": device.get("id", ""),
-                    "gbId": device.get("gbId", ""),
-                    "gbDeviceId": device.get("gbDeviceId", ""),
-                    "dataDeviceId": device.get("dataDeviceId", ""),
+                    "gb_id": device.get("gbId", ""),
+                    "gb_device_id": device.get("gbDeviceId", ""),
+                    "data_device_id": device.get("dataDeviceId", ""),
                     "source_type": "proxy_stream",
                     "original_data": device  # 保存原始数据供前端参考
                 }
@@ -332,16 +371,47 @@ class CameraService:
                 "location": channel_info.get("gbAddress", ""),
                 "status": channel_info.get("gbStatus", "") == "ON",
                 "camera_type": channel_info.get("dataType", 1),
-                "skill_names": skill_names
-                
+                "skill_names": skill_names,
+                # 添加WVP通道字段，使用蛇形命名
+                "gb_device_id": channel_info.get("gbDeviceId"),
+                "gb_civil_code": channel_info.get("gbCivilCode"),
+                "gb_manufacturer": channel_info.get("gbManufacturer"),
+                "gb_model": channel_info.get("gbModel"),
+                "gb_ip_address": channel_info.get("gbIpAddress"),
+                "gb_longitude": channel_info.get("gbLongitude"),
+                "gb_latitude": channel_info.get("gbLatitude"),
+                "create_time": channel_info.get("createTime"),
+                "update_time": channel_info.get("updateTime"),
+                "gb_owner": channel_info.get("gbOwner"),
+                "gb_block": channel_info.get("gbBlock"),
+                "gb_parental": channel_info.get("gbParental"),
+                "gb_parent_id": channel_info.get("gbParentId"),
+                "gb_safety_way": channel_info.get("gbSafetyWay"),
+                "gb_register_way": channel_info.get("gbRegisterWay"),
+                "gb_cert_num": channel_info.get("gbCertNum"),
+                "gb_certifiable": channel_info.get("gbCertifiable"),
+                "gb_err_code": channel_info.get("gbErrCode"),
+                "gb_end_time": channel_info.get("gbEndTime"),
+                "gb_secrecy": channel_info.get("gbSecrecy"),
+                "gb_password": channel_info.get("gbPassword"),
+                "gps_altitude": channel_info.get("gpsAltitude"),
+                "gps_speed": channel_info.get("gpsSpeed"),
+                "gps_direction": channel_info.get("gpsDirection"),
+                "gps_time": channel_info.get("gpsTime"),
+                "gb_business_group_id": channel_info.get("gbBusinessGroupId"),
+                "gb_ptz_type": channel_info.get("gbPtzType"),
+                "gb_position_type": channel_info.get("gbPositionType"),
+                "gb_room_type": channel_info.get("gbRoomType"),
+                "gb_use_type": channel_info.get("gbUseType"),
+                "gb_supply_light_type": channel_info.get("gbSupplyLightType"),
+                "gb_direction_type": channel_info.get("gbDirectionType"),
+                "gb_resolution": channel_info.get("gbResolution"),
+                "gb_download_speed": channel_info.get("gbDownloadSpeed"),
+                "gb_svc_space_support_mod": channel_info.get("gbSvcSpaceSupportMod"),
+                "gb_svc_time_support_mode": channel_info.get("gbSvcTimeSupportMode"),
+                "record_plan": channel_info.get("recordPLan"),
+                "data_device_id": channel_info.get("dataDeviceId")
             }
-            
-            # 添加所有WVP通道字段，但跳过已处理过的字段
-            already_processed = ["gbId", "gbStatus", "dataType", "gbName", "gbAddress"]
-            
-            for key, value in channel_info.items():
-                if key not in already_processed:
-                    result[key] = value
             
             return result
             
@@ -396,16 +466,16 @@ class CameraService:
             
             # 创建摄像头信息对象
             camera = {
-                "gbName": device.get("name", "Unknown Camera"),
+                "gb_name": device.get("name", "Unknown Camera"),
                 "app": device.get("app", ""),
                 "stream": device.get("stream", ""),
-                "srcUrl": device.get("srcUrl", ""),
+                "src_url": device.get("srcUrl", ""),
                 "ip": device.get("ip", ""),
                 "pulling": device.get("pulling", False),
                 "id": device.get("id", ""),
-                "gbId": device.get("gbId", ""),
-                "gbDeviceId": device.get("gbDeviceId", ""),
-                "dataDeviceId": device.get("dataDeviceId", ""),
+                "gb_id": device.get("gbId", ""),
+                "gb_device_id": device.get("gbDeviceId", ""),
+                "data_device_id": device.get("dataDeviceId", ""),
                 "source_type": "proxy_stream",
                 "original_data": device  # 保存原始数据供前端参考
             }
@@ -439,14 +509,14 @@ class CameraService:
             # 创建摄像头信息对象
             camera = {
                 "id": device.get("id", ""),
-                "gbId": device.get("gbId", ""),
-                "gbDeviceId": device.get("gbDeviceId", ""),
-                "gbName": device.get("gbName", ""),
-                "dataDeviceId": device.get("dataDeviceId", ""),
+                "gb_id": device.get("gbId", ""),
+                "gb_device_id": device.get("gbDeviceId", ""),
+                "gb_name": device.get("gbName", ""),
+                "data_device_id": device.get("dataDeviceId", ""),
                 "app": device.get("app", ""),
                 "stream": device.get("stream", ""),
                 "pushing": device.get("pushing", False),
-                "startOfflinePush": device.get("startOfflinePush", False),
+                "start_offline_push": device.get("startOfflinePush", False),
                 "source_type": "push",
                 "original_data": device  # 保存原始数据供前端参考
             }

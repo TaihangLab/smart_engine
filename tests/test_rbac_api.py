@@ -466,7 +466,7 @@ class RbacApiTest:
         position_data = {
             "tenant_id": 1,  # 使用一个小的租户ID，因为岗位API有特殊限制
             "position_name": "测试岗位",
-            "department": "测试部门",
+            "position_code": "TEST_POS",
             "order_num": 1,
             "status": 0,
             "remark": "测试岗位用于API测试",
@@ -516,7 +516,7 @@ class RbacApiTest:
         print(f"Testing PUT /api/v1/rbac/positions/{position_id}...")
         position_update_data = {
             "position_name": "更新测试岗位",
-            "department": "测试部门",
+            "position_code": "UPDATED_POS",
             "order_num": 2,
             "status": 0,
             "remark": "更新后的测试岗位",

@@ -29,9 +29,9 @@ class PermissionService:
         return RbacDao.permission.get_permission_by_id(db, permission_id)
 
     @staticmethod
-    def get_permission_by_url_and_method(db: Session, url: str, method: str, tenant_id: int) -> Optional[SysPermission]:
+    def get_permission_by_url_and_method(db: Session, url: str, method: str) -> Optional[SysPermission]:
         """根据URL和方法获取权限"""
-        return RbacDao.permission.get_permission_by_url_and_method(db, url, method, tenant_id)
+        return RbacDao.permission.get_permission_by_url_and_method(db, url, method)
 
     @staticmethod
     def _generate_permission_path(db: Session, parent_id: Optional[int]) -> str:
@@ -222,7 +222,7 @@ class PermissionService:
         if success:
             permission = db.query(SysPermission).filter(SysPermission.id == id).first()
             if permission:
-                logger.info(f"删除权限成功: {permission.permission_code}@{permission.tenant_id}")
+                logger.info(f"删除权限成功: {permission.permission_code}")
         return success
 
     @staticmethod

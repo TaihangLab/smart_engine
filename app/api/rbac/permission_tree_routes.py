@@ -92,17 +92,14 @@ async def create_permission_node(
 ):
     """创建权限节点"""
     try:
-        # 如果权限没有指定租户编码，使用默认值
-        if not permission.tenant_id:
-            permission.tenant_id = "default"
-
-        # 检查权限编码在租户内是否已存在
-        existing_permission = RbacService.get_permission_by_code(db, permission.permission_code, permission.tenant_id)
+        # 注：权限表无租户字段，跳过租户验证
+        # 检查权限编码是否已存在
+        existing_permission = RbacService.get_permission_by_code(db, permission.permission_code)
         if existing_permission:
             return UnifiedResponse(
                 success=False,
                 code=400,
-                message=f"权限编码 {permission.permission_code} 在租户 {permission.tenant_id} 中已存在",
+                message=f"权限编码 {permission.permission_code} 已存在",
                 data=None
             )
 
@@ -152,17 +149,17 @@ async def update_permission_node(
         # 如果更新了权限编码，需要检查新编码是否已存在
         update_data = permission_update.model_dump(exclude_unset=True)
         if "permission_code" in update_data and update_data["permission_code"] != permission.permission_code:
-            existing_permission = RbacService.get_permission_by_code(db, update_data["permission_code"], tenant_id)
+            existing_permission = RbacService.get_permission_by_code(db, update_data["permission_code"])
             if existing_permission and existing_permission.id != permission.id:
                 return UnifiedResponse(
                     success=False,
                     code=400,
-                    message=f"权限编码 {update_data['permission_code']} 在租户 {tenant_id} 中已存在",
+                    message=f"权限编码 {update_data['permission_code']} 已存在",
                     data=None
                 )
 
         # 使用权限ID调用更新方法
-        updated_permission = RbacService.update_permission(db, tenant_id, permission.permission_code, update_data)
+        updated_permission = RbacService.update_permission_by_id(db, permission.id, update_data)
         if not updated_permission:
             return UnifiedResponse(
                 success=False,
@@ -207,7 +204,7 @@ async def update_permission_node_status(
 
         # 更新权限状态
         update_data = {"status": status}
-        updated_permission = RbacService.update_permission(db, tenant_id, permission.permission_code, update_data)
+        updated_permission = RbacService.update_permission_by_id(db, permission.id, update_data)
         if not updated_permission:
             return UnifiedResponse(
                 success=False,
@@ -264,8 +261,8 @@ async def delete_permission_node(
                 data=None
             )
 
-        # 使用权限编码调用删除方法
-        success = RbacService.delete_permission(db, tenant_id, permission.permission_code)
+        # 使用权限ID调用删除方法
+        success = RbacService.delete_permission_by_id(db, permission.id)
         if not success:
             return UnifiedResponse(
                 success=False,
@@ -308,7 +305,7 @@ async def get_permission_roles(
             )
 
         # 获取拥有此权限的角色列表
-        roles = RbacService.get_roles_by_permission(db, permission.permission_code, tenant_id)
+        roles = RbacService.get_roles_by_permission_by_id(db, permission.id, tenant_id)
 
         return UnifiedResponse(
             success=True,
@@ -336,8 +333,8 @@ async def validate_permission_code(
     """验证权限码是否已存在"""
     try:
         # 检查权限码是否存在
-        existing_permission = RbacService.get_permission_by_code(db, code, tenant_id)
-        
+        existing_permission = RbacService.get_permission_by_code(db, code)
+
         if existing_permission and (exclude_id is None or existing_permission.id != exclude_id):
             return UnifiedResponse(
                 success=True,

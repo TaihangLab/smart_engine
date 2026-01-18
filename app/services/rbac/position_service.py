@@ -66,12 +66,3 @@ class PositionService:
         """根据岗位名称模糊查询岗位数量"""
         return RbacDao.position.get_position_count_by_name(db, tenant_id, position_name)
 
-    @staticmethod
-    def get_positions_by_department(db: Session, tenant_id: int, department: str, skip: int = 0, limit: int = 100) -> List[SysPosition]:
-        """根据部门模糊查询岗位列表"""
-        return RbacDao.position.get_positions_by_department(db, tenant_id, department, skip, limit)
-
-    @staticmethod
-    def get_position_count_by_department(db: Session, tenant_id: int, department: str) -> int:
-        """根据部门模糊查询岗位数量"""
-        return RbacDao.position.get_position_count_by_department(db, tenant_id, department)

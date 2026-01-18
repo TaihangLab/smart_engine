@@ -155,7 +155,7 @@ CREATE TABLE IF NOT EXISTS sys_position (
     id BIGINT PRIMARY KEY COMMENT '岗位ID，52位合成ID',
     tenant_id BIGINT NOT NULL COMMENT '租户ID',
     position_name VARCHAR(128) NOT NULL COMMENT '岗位名称',
-    department VARCHAR(64) NOT NULL COMMENT '部门',
+    position_code VARCHAR(64) COMMENT '岗位编码',
     order_num INT DEFAULT 0 COMMENT '排序',
     status INT DEFAULT 0 NOT NULL COMMENT '状态: 0(启用)、1(禁用)',
     is_deleted BOOLEAN DEFAULT FALSE NOT NULL COMMENT '逻辑删除标记',
@@ -165,7 +165,7 @@ CREATE TABLE IF NOT EXISTS sys_position (
     update_time DATETIME DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP COMMENT '更新时间',
     remark VARCHAR(500) COMMENT '备注',
     INDEX idx_position_status (status),
-    INDEX idx_position_department (department)
+    INDEX idx_position_code (position_code)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='岗位表';
 
 -- ===========================================

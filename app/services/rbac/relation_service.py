@@ -138,9 +138,9 @@ class RelationService:
             if not permission:
                 raise ValueError(f"权限 {permission_code} 在租户 {tenant_id} 中不存在")
 
-            # 检查租户匹配
-            if role.tenant_id != tenant_id or permission.tenant_id != tenant_id:
-                raise ValueError("角色和权限必须属于同一租户")
+            # 检查租户匹配（注：权限表无租户字段，跳过权限租户检查）
+            if role.tenant_id != tenant_id:
+                raise ValueError("角色必须属于同一租户")
 
             RbacDao.role_permission.assign_permission_to_role(db, role_code, permission_code, tenant_id)
             logger.info(f"为角色 {role.role_code} 分配权限 {permission.permission_code}")
@@ -162,9 +162,9 @@ class RelationService:
             if not permission:
                 raise ValueError(f"权限ID {permission_id} 不存在")
 
-            # 检查租户匹配
-            if role.tenant_id != tenant_id or permission.tenant_id != tenant_id:
-                raise ValueError("角色和权限必须属于同一租户")
+            # 检查租户匹配（注：权限表无租户字段，跳过权限租户检查）
+            if role.tenant_id != tenant_id:
+                raise ValueError("角色必须属于同一租户")
 
             RbacDao.role_permission.assign_permission_to_role_by_id(db, role_id, permission_id, tenant_id)
             logger.info(f"为角色 {role.role_name} (ID: {role.id}) 分配权限 {permission.permission_name} (ID: {permission.id})")
