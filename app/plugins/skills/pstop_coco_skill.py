@@ -396,14 +396,13 @@ class PStopCocoSkill(BaseSkill):
                 tracked_results = [det for det in results if det["class_name"] in self.target_classes]
                 self.log("info", f"帧{self.frame_id}: 检测到{len(results)}个目标，其中{len(tracked_results)}个人员")
 
-            # 3. 电子围栏过滤（如有）
+            # 3. 电子围栏过滤（支持trigger_mode和归一化坐标）
             if self.is_fence_config_valid(fence_config):
-                filtered_results = []
-                for detection in tracked_results:
-                    point = self._get_detection_point(detection)
-                    if point and self.is_point_inside_fence(point, fence_config):
-                        filtered_results.append(detection)
-                tracked_results = filtered_results
+                height, width = image.shape[:2]
+                image_size = (width, height)
+                trigger_mode = fence_config.get("trigger_mode", "inside")
+                self.log("debug", f"应用电子围栏过滤: trigger_mode={trigger_mode}, image_size={image_size}")
+                tracked_results = self.filter_detections_by_fence(tracked_results, fence_config, image_size)
 
             # 4. 安全分析
             safety_metrics = self.analyze_safety(tracked_results, dwell_events)
