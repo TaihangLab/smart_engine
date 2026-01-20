@@ -379,8 +379,8 @@ def start_stream(
             video.stream_id = None
             db.commit()
     
-    # 生成或使用指定的stream_id
-    stream_id = request.stream_id or f"video_{video.id}_{uuid.uuid4().hex[:8]}"
+    # 使用固定的stream_id（基于视频ID），确保重启后推流地址不变
+    stream_id = f"video_{video.id}"
     
     # 检查stream_id是否已被使用
     if local_video_stream_manager.get_stream_status(stream_id):
