@@ -73,10 +73,15 @@ def signal_handler(signum, frame):
                 from app.services.ai_task_executor import task_executor
                 from app.services.llm_task_executor import llm_task_executor
                 from app.services.adaptive_frame_reader import frame_reader_manager
+                from app.services.local_video_streamer import local_video_stream_manager
                 
                 task_executor.shutdown()
                 llm_task_executor.stop()
                 frame_reader_manager.shutdown()
+                
+                # 停止本地视频推流
+                logger.info("🛑 正在停止本地视频推流...")
+                local_video_stream_manager.stop_all()
                 
                 logger.info("✅ 同步关闭完成")
                 
