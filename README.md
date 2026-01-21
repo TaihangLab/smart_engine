@@ -840,7 +840,123 @@ brew install ffmpeg
 ffmpeg -version
 ```
 
-### 4. 配置文件
+### 4. 硬件加速配置（视频编解码）
+
+系统支持硬件加速的视频编解码，可大幅提升视频处理性能。
+
+#### NVIDIA 显卡要求
+
+如果使用 NVIDIA 显卡进行硬件加速编解码，需要满足以下要求：
+
+| 组件 | 最低要求 | 推荐版本 | 说明 |
+|------|----------|----------|------|
+| **NVIDIA 驱动** | 545.84+ | 550.0+ | 需支持 FFmpeg 要求的 NVENC API 版本 |
+| **CUDA Toolkit** | 11.0+ | 12.0+ | 可选，用于 GPU 计算 |
+| **显卡架构** | Kepler (GTX 600+) | Turing/Ampere | Maxwell 及以上推荐 |
+
+**版本匹配原则**：
+```
+NVIDIA 驱动提供的 NVENC API 版本 ≥ FFmpeg 编译时要求的 NVENC API 版本
+```
+
+如果版本不匹配，会出现类似错误：
+```
+Driver does not support the required nvenc API version. Required: 13.0 Found: 12.2
+```
+此时需要**升级 NVIDIA 驱动**，或**降级 FFmpeg 版本**。
+
+**检查 NVIDIA 驱动版本**：
+```bash
+# Windows / Linux
+nvidia-smi
+
+# 查看 NVENC 支持情况
+ffmpeg -hide_banner -encoders | grep nvenc
+```
+
+**支持的编解码器**：
+| 编解码器 | 硬件加速名称 | 用途 |
+|----------|-------------|------|
+| H.264 编码 | `h264_nvenc` | RTSP推流、视频录制 |
+| H.265 编码 | `hevc_nvenc` | RTSP推流、视频录制（更高压缩率） |
+| H.264 解码 | `h264_cuvid` | 视频流解码 |
+| H.265 解码 | `hevc_cuvid` | 视频流解码 |
+
+**驱动版本与 NVENC API 对应关系**（AI 生成，仅供参考）：
+| NVENC API 版本 | 最低驱动版本 (Windows) | 最低驱动版本 (Linux) |
+|----------------|----------------------|---------------------|
+| 12.1 | 522.25 | 520.56 |
+| 12.2 | 531.61 | 530.41 |
+| **13.0** | **545.84** | **545.23** |
+| 13.1 | 551.61 | 550.40 |
+
+> **注意**：新版 FFmpeg（2024年后编译）通常要求 NVENC API 13.0+。如果驱动版本过低，系统会自动回退到软件编码（`libx264`/`libx265`）。
+> 
+> 以上版本对应关系由 AI 生成，实际情况请以 [NVIDIA Video Codec SDK 官方文档](https://developer.nvidia.com/video-codec-sdk) 为准。
+
+#### 没有 NVIDIA 显卡的情况
+
+如果系统**没有 NVIDIA 显卡**或驱动不满足要求，系统会**自动回退到软件编解码**：
+
+| 功能 | 硬件加速 | 软件回退 | 性能影响 |
+|------|----------|----------|----------|
+| 视频编码 | `h264_nvenc` / `hevc_nvenc` | `libx264` / `libx265` | CPU 占用增加 30-50% |
+| 视频解码 | `h264_cuvid` / `hevc_cuvid` | OpenCV 软解码 | CPU 占用增加 20-40% |
+
+**软件编码的系统要求**：
+- CPU：推荐 4 核心以上
+- 内存：推荐 8GB 以上
+- 软件编码会增加 CPU 负载，建议适当降低任务帧率
+
+**日志示例**：
+```
+# 有 NVIDIA 硬件加速
+INFO - 编码器: hevc_nvenc (硬件编码 NVENC)
+INFO - ✅ 检测到 NVDEC 硬件解码器可用 (H.264: True, H.265: True)
+
+# 无硬件加速，使用软件编码
+WARNING - NVENC 不可用，使用软件编码器: libx264
+INFO - 使用 OpenCV 软件解码
+```
+
+#### 国产显卡支持（需自行修改）
+
+如果使用**国产显卡**（如寒武纪、海光、昇腾等），需要**自行修改代码**以适配国产编解码器：
+
+**需要修改的文件**：
+1. `app/services/rtsp_streamer.py` - 视频编码器选择
+2. `app/services/adaptive_frame_reader.py` - 视频解码器选择
+3. `app/services/alert_merge_manager.py` - 预警视频编码
+
+**修改示例**（以华为昇腾 NPU 为例）：
+```python
+# rtsp_streamer.py 中修改编码器检测
+def _check_nvenc_available() -> bool:
+    # 原有 NVENC 检测代码...
+    pass
+
+def _check_ascend_available() -> bool:
+    """检测华为昇腾 VPU 编码器是否可用"""
+    # 实现昇腾编码器检测逻辑
+    pass
+
+# 修改编码器选择逻辑
+if _check_ascend_available():
+    encoder = "h264_ascend"  # 昇腾编码器名称
+elif _check_nvenc_available():
+    encoder = "h264_nvenc"
+else:
+    encoder = "libx264"
+```
+
+**国产硬件参考资料**：
+- 华为昇腾：[昇腾 CANN 开发文档](https://www.hiascend.com/)
+- 寒武纪：[寒武纪 MLU 开发文档](https://www.cambricon.com/)
+- 海光 DCU：[海光 DCU 开发指南](https://www.hygon.cn/)
+
+> **提示**：国产硬件的 FFmpeg 编解码器名称和参数可能与 NVIDIA 不同，请参考各厂商的官方文档进行适配。
+
+### 5. 配置文件
 
 所有系统配置在 `app/core/config.py` 中管理。主要配置项包括：
 

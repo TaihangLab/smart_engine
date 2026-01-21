@@ -167,8 +167,8 @@ class VideoBufferManager:
             return None
     
     def _encode_video_clip(self, video_frames: List[Tuple[float, bytes, int, int]], 
-                          start_time: float, end_time: float) -> Optional[str]:
-        """编码视频片段并上传到MinIO"""
+                         start_time: float, end_time: float) -> Optional[str]:
+        """编码视频片段并上传到MinIO（使用FFmpeg NVENC硬件编码）"""
         try:
             import cv2
             import numpy as np
@@ -176,6 +176,7 @@ class VideoBufferManager:
             from app.core.config import settings
             import tempfile
             import os
+            import subprocess
             
             if not video_frames:
                 return None
@@ -185,30 +186,28 @@ class VideoBufferManager:
             target_width = self.video_width
             target_height = self.video_height
             
-            logger.info(f"创建预警视频: 原始分辨率 {orig_width}x{orig_height} -> 目标分辨率 {target_width}x{target_height}")
+            # 根据实际帧的时间戳计算真实帧率（避免快动作问题）
+            if len(video_frames) > 1:
+                time_span = video_frames[-1][0] - video_frames[0][0]
+                if time_span > 0:
+                    actual_fps = (len(video_frames) - 1) / time_span
+                    # 限制在合理范围内
+                    actual_fps = max(1.0, min(actual_fps, 30.0))
+                else:
+                    actual_fps = self.fps
+            else:
+                actual_fps = self.fps
+            
+            logger.info(f"创建预警视频: 帧数={len(video_frames)}, 实际帧率={actual_fps:.1f}fps, "
+                       f"分辨率 {orig_width}x{orig_height} -> {target_width}x{target_height}")
             
             # 创建临时文件
             with tempfile.NamedTemporaryFile(suffix='.mp4', delete=False) as temp_file:
                 temp_video_path = temp_file.name
             
             try:
-                # 创建视频编码器 - 使用H.264 (AVC)编码
-                # H.264/AVC优势: 
-                # 1. 更好的压缩率，相同质量下文件更小
-                # 2. 广泛的设备和浏览器支持
-                # 3. 硬件加速编解码支持
-                # 4. 更好的流媒体传输性能
-                fourcc = cv2.VideoWriter_fourcc(*'avc1')  # 使用H.264 AVC编码
-                video_writer = cv2.VideoWriter(temp_video_path, fourcc, self.fps, (target_width, target_height))
-                
-                if not video_writer.isOpened():
-                    logger.error("无法创建视频编码器")
-                    return None
-                
-                # 计数成功处理的帧数
-                successful_frames = 0
-                
-                # 编码帧
+                # 先解码所有帧到内存
+                decoded_frames = []
                 for timestamp, frame_bytes, w, h in video_frames:
                     try:
                         # 判断帧数据格式并解码
@@ -223,19 +222,14 @@ class VideoBufferManager:
                             if frame is None:
                                 logger.warning(f"无法解码帧数据，跳过该帧 (数据大小: {len(frame_bytes)})")
                                 continue
-                            
-                            # 更新实际尺寸
-                            h, w = frame.shape[:2]
                         
                         # 调整到目标分辨率
-                        if w != target_width or h != target_height:
+                        if frame.shape[1] != target_width or frame.shape[0] != target_height:
                             frame = cv2.resize(frame, (target_width, target_height))
                         
-                        # 确保颜色通道顺序正确 (OpenCV使用BGR)
+                        # OpenCV 是 BGR 格式，保持不变
                         if frame.shape[2] == 3:
-                            # 写入帧
-                            video_writer.write(frame)
-                            successful_frames += 1
+                            decoded_frames.append(frame)
                         else:
                             logger.warning(f"帧格式不支持: {frame.shape}")
                             continue
@@ -244,12 +238,26 @@ class VideoBufferManager:
                         logger.warning(f"处理视频帧时出错: {str(e)} (数据大小: {len(frame_bytes)})")
                         continue
                 
-                # 释放编码器
-                video_writer.release()
-                
                 # 检查是否有成功处理的帧
-                if successful_frames == 0:
+                if not decoded_frames:
                     logger.warning(f"任务 {self.task_id} 没有成功处理任何视频帧，跳过视频生成")
+                    return None
+                
+                # 使用 FFmpeg NVENC 硬件编码
+                # 优先尝试 NVENC，失败则回退到软件编码
+                success = self._encode_with_ffmpeg(
+                    decoded_frames, temp_video_path, target_width, target_height, actual_fps, use_nvenc=True
+                )
+                
+                if not success:
+                    # NVENC 失败，尝试软件编码
+                    logger.warning("NVENC 编码失败，回退到软件编码")
+                    success = self._encode_with_ffmpeg(
+                        decoded_frames, temp_video_path, target_width, target_height, actual_fps, use_nvenc=False
+                    )
+                
+                if not success:
+                    logger.error(f"任务 {self.task_id} 视频编码失败")
                     return None
                 
                 # 检查文件大小
@@ -273,7 +281,7 @@ class VideoBufferManager:
                         prefix=minio_prefix
                     )
                 
-                logger.info(f"预警视频已上传: {video_object_name}, 时长: {end_time - start_time:.1f}秒, 成功帧数: {successful_frames}")
+                logger.info(f"预警视频已上传: {video_object_name}, 时长: {end_time - start_time:.1f}秒, 帧数: {len(decoded_frames)}")
                 return video_object_name
                 
             finally:
@@ -287,12 +295,83 @@ class VideoBufferManager:
             logger.error(f"编码预警视频失败: {str(e)}")
             return None
     
+    def _encode_with_ffmpeg(self, frames: List, output_path: str, 
+                           width: int, height: int, fps: float, use_nvenc: bool = True) -> bool:
+        """使用 FFmpeg 编码视频（支持 NVENC 硬件加速，支持 H.264/H.265）"""
+        import subprocess
+        
+        try:
+            # 判断是否使用 H.265 编码
+            use_h265 = self.video_codec in ('h265', 'hevc')
+            
+            # 构建 FFmpeg 命令
+            if use_nvenc:
+                # NVIDIA NVENC 硬件编码
+                encoder = 'hevc_nvenc' if use_h265 else 'h264_nvenc'
+                encoder_opts = ['-preset', 'p4', '-tune', 'll', '-b:v', '2M']
+            else:
+                # 软件编码回退
+                encoder = 'libx265' if use_h265 else 'libx264'
+                encoder_opts = ['-preset', 'fast', '-crf', '23']
+            
+            cmd = [
+                'ffmpeg', '-y',
+                '-f', 'rawvideo',
+                '-vcodec', 'rawvideo',
+                '-pix_fmt', 'bgr24',  # OpenCV 输出 BGR 格式
+                '-s', f'{width}x{height}',
+                '-r', str(fps),
+                '-i', '-',  # 从 stdin 读取
+                '-c:v', encoder,
+                *encoder_opts,
+                '-pix_fmt', 'yuv420p',
+                '-movflags', '+faststart',
+                output_path
+            ]
+            
+            logger.debug(f"FFmpeg 命令: {' '.join(cmd)}")
+            
+            # 启动 FFmpeg 进程
+            process = subprocess.Popen(
+                cmd,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
+            
+            # 写入帧数据
+            for frame in frames:
+                process.stdin.write(frame.tobytes())
+            
+            # 关闭 stdin 并等待完成
+            process.stdin.close()
+            stdout, stderr = process.communicate(timeout=60)
+            
+            if process.returncode != 0:
+                stderr_text = stderr.decode('utf-8', errors='ignore')
+                logger.warning(f"FFmpeg 编码失败 (encoder={encoder}): {stderr_text[:500]}")
+                return False
+            
+            logger.info(f"FFmpeg 编码成功: encoder={encoder}, 帧数={len(frames)}")
+            return True
+            
+        except subprocess.TimeoutExpired:
+            logger.error("FFmpeg 编码超时")
+            process.kill()
+            return False
+        except Exception as e:
+            logger.error(f"FFmpeg 编码异常: {str(e)}")
+            return False
+    
     def cleanup(self):
         """清理资源"""
         try:
-            self.video_executor.shutdown(wait=True, timeout=10)
-        except:
-            pass
+            # 注意：ThreadPoolExecutor.shutdown() 没有 timeout 参数
+            # 使用 wait=False 避免长时间阻塞，让任务自然完成
+            self.video_executor.shutdown(wait=False, cancel_futures=True)
+            logger.debug(f"任务 {self.task_id} 的视频编码器已关闭")
+        except Exception as e:
+            logger.warning(f"关闭视频编码器时出错: {str(e)}")
 
 
 class AlertMergeManager:
@@ -335,11 +414,7 @@ class AlertMergeManager:
         self.video_width = settings.ALERT_VIDEO_WIDTH
         self.video_height = settings.ALERT_VIDEO_HEIGHT
         self.video_encoding_timeout = settings.ALERT_VIDEO_ENCODING_TIMEOUT_SECONDS
-        
-        # H.264编码配置
-        self.video_codec = settings.ALERT_VIDEO_CODEC
-        self.video_bitrate = settings.ALERT_VIDEO_BITRATE
-        self.video_gop_size = settings.ALERT_VIDEO_GOP_SIZE
+        self.video_codec = settings.ALERT_VIDEO_CODEC.lower()
         
         # 分级视频缓冲配置
         self.video_critical_pre_buffer = settings.ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS
@@ -348,7 +423,7 @@ class AlertMergeManager:
         logger.info(f"✅ 预警合并管理器已初始化（简化版）")
         logger.info(f"📊 核心配置: 合并窗口={self.merge_window}s, 基础延迟={self.base_delay}s, 最大持续={self.max_duration}s")
         logger.info(f"🚀 智能策略: 等级延迟系数={self.level_delay_factor}, 快速发送阈值={self.quick_send_threshold}, 立即发送等级={self.immediate_levels}")
-        logger.info(f"🎬 视频配置: {'启用' if self.video_enabled else '禁用'}, 编码={self.video_codec}, 码率={self.video_bitrate}bps")
+        logger.info(f"🎬 视频配置: {'启用' if self.video_enabled else '禁用'}, 分辨率={self.video_width}x{self.video_height}, 编码={self.video_codec}")
     
     def get_or_create_video_buffer(self, task_id: int, fps: float = None) -> VideoBufferManager:
         """获取或创建视频缓冲管理器"""
@@ -365,7 +440,7 @@ class AlertMergeManager:
                     buffer_duration=self.video_buffer_duration,
                     fps=fps
                 )
-                logger.info(f"为任务 {task_id} 创建视频缓冲管理器 (缓冲时长: {self.video_buffer_duration}秒, FPS: {fps}, 编码格式: {self.video_codec})")
+                logger.info(f"为任务 {task_id} 创建视频缓冲管理器 (缓冲时长: {self.video_buffer_duration}秒, FPS: {fps})")
             return self.video_buffers[task_id]
     
     def add_frame_to_buffer(self, task_id: int, frame_bytes: bytes, width: int, height: int, fps: float = None):
@@ -604,15 +679,15 @@ class AlertMergeManager:
             # 构建最终预警信息
             final_alert = base_alert_data.copy()
             
+            # 生成最终预警的唯一ID（task_id + 时间戳足够唯一）
+            alert_id = f"{task_id}_{int(merged_alert.first_timestamp)}"
+            
             # 将图片数据缓存到 Redis（用于复判，5分钟过期）
             image_cache_key = None
             if merged_alert.alert_instances and merged_alert.alert_instances[0].frame_data:
                 try:
                     from app.services.redis_client import redis_client
-                    alert_id = base_alert_data.get("alert_id", "")
-                    task_id = base_alert_data.get("task_id", "")
-                    timestamp = int(merged_alert.first_timestamp)
-                    image_cache_key = f"alert_image:{task_id}_{alert_id}_{timestamp}"
+                    image_cache_key = f"alert_image:{alert_id}"
                     
                     # 缓存图片数据，5分钟过期（足够复判使用）
                     redis_client.setex_bytes(
@@ -625,6 +700,9 @@ class AlertMergeManager:
                     logger.warning(f"缓存图片到 Redis 失败: {str(e)}")
             
             final_alert.update({
+                # 预警唯一标识
+                "alert_id": alert_id,
+                
                 # 合并信息
                 "alert_count": merged_alert.alert_count,
                 "alert_duration": merged_alert.get_duration(),
@@ -643,8 +721,19 @@ class AlertMergeManager:
                 "alert_description": self._generate_merged_description(base_alert_data, merged_alert)
             })
             
-            # 发送到RabbitMQ
-            success = rabbitmq_client.publish_alert(final_alert)
+            # 发送到RabbitMQ（带重试机制）
+            max_retries = 3
+            retry_delay = 0.5
+            success = False
+            
+            for retry in range(max_retries):
+                success = rabbitmq_client.publish_alert(final_alert)
+                if success:
+                    break
+                if retry < max_retries - 1:
+                    logger.warning(f"⚠️ 发送合并预警失败，第{retry + 1}次重试: {alert_key}")
+                    time.sleep(retry_delay)
+                    retry_delay *= 2  # 指数退避
             
             if success:
                 logger.info(f"✅ 合并预警已发送: {alert_key}, 预警数量: {merged_alert.alert_count}, "
@@ -652,16 +741,82 @@ class AlertMergeManager:
                 
                 # 🔍 预警发送成功后，检查是否需要复判
                 self._check_and_trigger_review_after_alert(final_alert)
+                
+                # 清理已发送的预警
+                if alert_key in self.active_alerts:
+                    del self.active_alerts[alert_key]
             else:
-                logger.error(f"❌ 发送合并预警失败: {alert_key}")
-            
-            # 清理已发送的预警
-            if alert_key in self.active_alerts:
-                del self.active_alerts[alert_key]
+                # 发送失败，保留预警数据以便后续重试
+                logger.error(f"❌ 发送合并预警失败（已重试{max_retries}次）: {alert_key}")
+                # 重置发送状态，允许后续重试
+                merged_alert.is_sent = False
+                # 设置一个延迟重试定时器
+                self._schedule_retry_send(alert_key, merged_alert, retry_count=1)
                 
         except Exception as e:
             logger.error(f"发送合并预警失败: {str(e)}")
     
+    def _schedule_retry_send(self, alert_key: str, merged_alert: MergedAlert, retry_count: int = 1, max_retry: int = 5):
+        """调度延迟重试发送预警
+        
+        Args:
+            alert_key: 预警键
+            merged_alert: 合并预警对象
+            retry_count: 当前重试次数
+            max_retry: 最大重试次数
+        """
+        if retry_count > max_retry:
+            logger.error(f"🚨 预警发送彻底失败，已达到最大重试次数({max_retry}): {alert_key}")
+            # 最终失败，清理预警
+            if alert_key in self.active_alerts:
+                del self.active_alerts[alert_key]
+            return
+        
+        # 使用指数退避策略计算延迟时间
+        delay = min(5.0 * (2 ** (retry_count - 1)), 60.0)  # 最大延迟60秒
+        
+        logger.warning(f"⏰ 预警发送将在 {delay:.1f} 秒后重试（第{retry_count}次）: {alert_key}")
+        
+        # 创建延迟重试定时器
+        retry_timer = threading.Timer(
+            delay,
+            self._retry_send_alert,
+            args=[alert_key, retry_count, max_retry]
+        )
+        retry_timer.start()
+    
+    def _retry_send_alert(self, alert_key: str, retry_count: int, max_retry: int):
+        """重试发送预警
+        
+        Args:
+            alert_key: 预警键
+            retry_count: 当前重试次数
+            max_retry: 最大重试次数
+        """
+        try:
+            with self.alerts_lock:
+                if alert_key not in self.active_alerts:
+                    logger.debug(f"预警已被清理，跳过重试: {alert_key}")
+                    return
+                
+                merged_alert = self.active_alerts[alert_key]
+                if merged_alert.is_sent:
+                    logger.debug(f"预警已被发送，跳过重试: {alert_key}")
+                    return
+                
+                # 重新尝试发送
+                logger.info(f"🔄 重试发送预警（第{retry_count}次）: {alert_key}")
+                self._send_merged_alert(alert_key, merged_alert)
+                
+                # 如果发送后仍未成功（is_sent 被重置为 False），继续调度重试
+                if not merged_alert.is_sent and alert_key in self.active_alerts:
+                    self._schedule_retry_send(alert_key, merged_alert, retry_count + 1, max_retry)
+                    
+        except Exception as e:
+            logger.error(f"重试发送预警时出错: {str(e)}")
+            # 继续调度重试
+            self._schedule_retry_send(alert_key, self.active_alerts.get(alert_key), retry_count + 1, max_retry)
+
     def _generate_merged_description(self, base_alert_data: Dict[str, Any], merged_alert: MergedAlert) -> str:
         """生成合并预警的描述"""
         try:
@@ -710,41 +865,54 @@ class AlertMergeManager:
             logger.error(f"清理任务 {task_id} 资源失败: {str(e)}")
     
     def _send_immediate_alert(self, alert_data: Dict[str, Any], frame_bytes: Optional[bytes] = None) -> bool:
-        """直接发送预警（不进行合并）- 支持异步视频生成"""
+        """直接发送预警（不进行合并）- 同步生成视频后发送"""
         try:
-            # 🎬 为1级预警预生成视频文件名和路径
             task_id = alert_data.get("task_id")
             timestamp = time.time()
             
-            # 生成预期的视频文件名（即使视频还未生成）
-            timestamp_str = datetime.fromtimestamp(timestamp).strftime("%Y%m%d_%H%M%S")
-            expected_video_filename = f"alert_video_{task_id}_{timestamp_str}.mp4"
+            # 生成最终预警的唯一ID
+            alert_id = f"{task_id}_{int(timestamp)}"
             
-            # 构建预期的MinIO对象名（只返回文件名，保持与upload_bytes一致）
-            from app.core.config import settings
-            minio_prefix = f"{settings.MINIO_ALERT_VIDEO_PREFIX}{task_id}"
-            expected_video_object_name = expected_video_filename  # 只使用文件名，保持与upload_bytes一致
+            # 同步生成视频（先生成视频，再发送预警）
+            video_object_name = ""
+            if task_id and task_id in self.video_buffers:
+                video_buffer = self.video_buffers[task_id]
+                
+                # 根据预警等级选择视频缓冲时间
+                alert_level = alert_data.get("alert_level", 4)
+                if alert_level <= 2:  # 1-2级关键预警使用更长的缓冲时间
+                    pre_buffer = self.video_critical_pre_buffer
+                    post_buffer = self.video_critical_post_buffer
+                    logger.info(f"关键预警({alert_level}级)使用扩展视频缓冲: 前{pre_buffer}秒, 后{post_buffer}秒")
+                else:  # 3-4级普通预警使用标准缓冲时间
+                    pre_buffer = self.video_pre_buffer
+                    post_buffer = self.video_post_buffer
+                    logger.info(f"普通预警({alert_level}级)使用标准视频缓冲: 前{pre_buffer}秒, 后{post_buffer}秒")
+                
+                # 同步生成视频
+                video_object_name = video_buffer.create_video_clip(
+                    start_time=timestamp,
+                    end_time=timestamp,  # 单点事件
+                    pre_buffer=pre_buffer,
+                    post_buffer=post_buffer
+                ) or ""
             
-            # 🖼️ 将图片数据缓存到 Redis（用于复判，5分钟过期）
+            # 将图片数据缓存到 Redis（用于复判，5分钟过期）
             image_cache_key = None
             if frame_bytes:
                 try:
                     from app.services.redis_client import redis_client
-                    alert_id = alert_data.get("alert_id", "")
-                    image_cache_key = f"alert_image:{task_id}_{alert_id}_{int(timestamp)}"
-                    
-                    # 缓存图片数据，5分钟过期
+                    image_cache_key = f"alert_image:{alert_id}"
                     redis_client.setex_bytes(image_cache_key, 300, frame_bytes)
-                    logger.debug(f"紧急预警图片已缓存到 Redis: {image_cache_key}")
+                    logger.debug(f"预警图片已缓存到 Redis: {image_cache_key}")
                 except Exception as e:
-                    logger.warning(f"缓存紧急预警图片到 Redis 失败: {str(e)}")
+                    logger.warning(f"缓存预警图片到 Redis 失败: {str(e)}")
             
-            # 立即发送预警，包含预期的视频地址
+            # 构建预警（视频已生成完成）
             immediate_alert = alert_data.copy()
             immediate_alert.update({
-                "minio_video_object_name": expected_video_object_name,
-                "video_status": "generating",  # 视频状态：生成中
-                "video_estimated_ready_time": timestamp + 3.0,  # 预计3秒后可用
+                "alert_id": alert_id,
+                "minio_video_object_name": video_object_name,
                 "alert_count": 1,
                 "alert_duration": 0.0,
                 "first_alert_time": datetime.fromtimestamp(timestamp).isoformat(),
@@ -754,116 +922,23 @@ class AlertMergeManager:
                     "object_name": alert_data.get("minio_frame_object_name", ""),
                     "relative_time": 0.0
                 }],
-                "image_cache_key": image_cache_key  # Redis 缓存 key，用于复判
+                "image_cache_key": image_cache_key
             })
             
-            # 🚀 立即发送预警（不等待视频）
+            # 发送预警（视频已就绪）
             success = rabbitmq_client.publish_alert(immediate_alert)
             
             if success:
-                logger.info(f"✅ 1级预警已立即发送: task_id={task_id}, 视频异步生成中: {expected_video_object_name}")
-                
-                # 🔍 预警发送成功后，检查是否需要复判
+                logger.info(f"✅ 预警已发送: task_id={task_id}, 视频: {'有' if video_object_name else '无'}")
                 self._check_and_trigger_review_after_alert(immediate_alert)
-                
-                # 🎬 异步生成视频（在后台进行）
-                self._schedule_async_video_generation(
-                    task_id=task_id,
-                    timestamp=timestamp,
-                    expected_object_name=expected_video_object_name,
-                    alert_data=alert_data
-                )
-                
             else:
-                logger.error(f"❌ 直接发送预警失败: task_id={task_id}")
+                logger.error(f"❌ 发送预警失败: task_id={task_id}")
                 
             return success
             
         except Exception as e:
-            logger.error(f"直接发送预警时出错: {str(e)}")
+            logger.error(f"发送预警时出错: {str(e)}")
             return False
-    
-    def _schedule_async_video_generation(self, task_id: int, timestamp: float, 
-                                       expected_object_name: str, alert_data: Dict[str, Any]):
-        """异步调度视频生成"""
-        try:
-            # 使用线程池异步生成视频
-            import threading
-            video_thread = threading.Thread(
-                target=self._generate_immediate_alert_video,
-                args=(task_id, timestamp, expected_object_name, alert_data),
-                daemon=True,
-                name=f"ImmediateVideo-{task_id}-{int(timestamp)}"
-            )
-            video_thread.start()
-            logger.info(f"已启动1级预警视频异步生成线程: {expected_object_name}")
-            
-        except Exception as e:
-            logger.error(f"启动异步视频生成失败: {str(e)}")
-    
-    def _generate_immediate_alert_video(self, task_id: int, timestamp: float, 
-                                      expected_object_name: str, alert_data: Dict[str, Any]):
-        """生成1级预警的视频片段"""
-        try:
-            logger.info(f"开始生成1级预警视频: task_id={task_id}, timestamp={timestamp}")
-            
-            # 检查是否有视频缓冲区
-            if task_id not in self.video_buffers:
-                logger.warning(f"任务 {task_id} 没有视频缓冲区，无法生成视频")
-                return
-            
-            video_buffer = self.video_buffers[task_id]
-            
-            # 根据预警等级选择视频缓冲时间
-            alert_level = alert_data.get("alert_level", 4)
-            if alert_level <= 2:  # 1-2级关键预警使用更长的缓冲时间
-                pre_buffer = self.video_critical_pre_buffer
-                post_buffer = self.video_critical_post_buffer
-            else:  # 3-4级普通预警使用标准缓冲时间
-                pre_buffer = self.video_pre_buffer
-                post_buffer = self.video_post_buffer
-            
-            # 生成视频片段
-            actual_video_object_name = video_buffer.create_video_clip(
-                start_time=timestamp,
-                end_time=timestamp,  # 单点事件
-                pre_buffer=pre_buffer,
-                post_buffer=post_buffer
-            )
-            
-            if actual_video_object_name:
-                # 检查生成的文件名是否与预期一致
-                if actual_video_object_name == expected_object_name:
-                    logger.info(f"✅ 1级预警视频生成成功: {actual_video_object_name}")
-                else:
-                    logger.info(f"✅ 1级预警视频生成成功: {actual_video_object_name} (与预期 {expected_object_name} 不同)")
-                
-                # 可选：发送视频生成完成的通知
-                self._notify_video_ready(task_id, actual_video_object_name, alert_data)
-            else:
-                logger.error(f"❌ 1级预警视频生成失败: task_id={task_id}")
-                
-        except Exception as e:
-            logger.error(f"生成1级预警视频时出错: {str(e)}")
-    
-    def _notify_video_ready(self, task_id: int, video_object_name: str, alert_data: Dict[str, Any]):
-        """通知视频已准备就绪（可选功能）"""
-        try:
-            # 可以发送一个视频就绪的通知消息
-            video_ready_notification = {
-                "type": "video_ready",
-                "task_id": task_id,
-                "camera_id": alert_data.get("camera_id"),
-                "video_object_name": video_object_name,
-                "original_alert_time": alert_data.get("alert_time"),
-                "video_ready_time": datetime.now().isoformat()
-            }
-            
-            # 可以选择发送到专门的视频就绪队列，或者通过SSE推送
-            logger.info(f"1级预警视频已就绪: {video_object_name}")
-            
-        except Exception as e:
-            logger.error(f"发送视频就绪通知失败: {str(e)}")
     
     def get_status(self) -> Dict[str, Any]:
         """获取管理器状态"""
@@ -886,13 +961,9 @@ class AlertMergeManager:
             "alert_level_counts": alert_level_counts,
             "video_buffers": buffer_count,
             "merge_window": self.merge_window,
-            "max_merge_duration": self.max_merge_duration,
-            "critical_max_duration": self.critical_max_duration,
-            "normal_max_duration": self.normal_max_duration,
-            "adaptive_window": self.adaptive_window,
-            "min_merge_delay": self.min_merge_delay,
-            "max_merge_delay": self.max_merge_delay,
-            "emergency_delay": self.emergency_delay,
+            "max_duration": self.max_duration,
+            "base_delay": self.base_delay,
+            "level_delay_factor": self.level_delay_factor,
             "immediate_levels": list(self.immediate_levels),
             "quick_send_threshold": self.quick_send_threshold,
             "video_buffer_duration": self.video_buffer_duration,

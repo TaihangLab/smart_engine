@@ -25,6 +25,7 @@ from app.db.session import get_db
 from app.services.camera_service import CameraService
 from app.services.minio_client import minio_client
 from app.services.alert_merge_manager import alert_merge_manager
+from app.services.rtsp_streamer import FFmpegFrameStreamer, PyAVFrameStreamer
 
 logger = logging.getLogger(__name__)
 
@@ -482,232 +483,6 @@ class OptimizedAsyncProcessor:
         }
 
 
-class FFmpegRTSPStreamer:
-    """FFmpeg RTSP推流器 - 用于推送检测结果视频流"""
-    
-    def __init__(self, rtsp_url: str, fps: float = 15.0, width: int = 1920, height: int = 1080, 
-                 crf: int = 23, max_bitrate: str = "2M", buffer_size: str = "4M"):
-        self.rtsp_url = rtsp_url
-        self.fps = fps
-        self.width = width
-        self.height = height
-        self.crf = crf
-        self.max_bitrate = max_bitrate
-        self.buffer_size = buffer_size
-        self.process = None
-        self.is_running = False
-        
-        # 自动重启相关参数
-        self.restart_count = 0
-        self.max_restart_attempts = 5
-        self.last_restart_time = 0
-        self.restart_interval = 10  # 重启间隔（秒）
-        
-    def start(self) -> bool:
-        """启动FFmpeg推流进程"""
-        try:
-            if self.is_running:
-                logger.warning("FFmpeg推流器已在运行")
-                return True
-            
-            # 构建FFmpeg命令
-            ffmpeg_cmd = [
-                'ffmpeg',
-                '-y',  # 覆盖输出文件
-                '-f', 'rawvideo',  # 输入格式
-                '-vcodec', 'rawvideo',
-                '-pix_fmt', 'bgr24',  # OpenCV的BGR格式
-                '-s', f'{self.width}x{self.height}',  # 视频尺寸
-                '-r', str(self.fps),  # 帧率
-                '-i', '-',  # 从stdin读取
-                '-c:v', 'libx264',  # H264编码
-                '-preset', 'ultrafast',  # 编码速度
-                '-tune', 'zerolatency',  # 零延迟调优
-                '-crf', str(self.crf),  # 质量参数
-                '-maxrate', self.max_bitrate,  # 最大码率
-                '-bufsize', self.buffer_size,  # 缓冲区大小
-                '-g', str(int(self.fps)),  # GOP大小
-                '-f', 'rtsp',  # 输出格式
-                self.rtsp_url
-            ]
-            
-            # 启动FFmpeg进程
-            self.process = subprocess.Popen(
-                ffmpeg_cmd,
-                stdin=subprocess.PIPE,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                bufsize=0
-            )
-            
-            self.is_running = True
-            logger.info(f"FFmpeg RTSP推流器已启动: {self.rtsp_url}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"启动FFmpeg推流器失败: {str(e)}")
-            return False
-    
-    def push_frame(self, frame: np.ndarray) -> bool:
-        """推送一帧数据"""
-        try:
-            if not self.is_running or not self.process:
-                # 尝试自动重启
-                if self._should_restart():
-                    logger.info("尝试自动重启FFmpeg推流器")
-                    if self._restart():
-                        logger.info("FFmpeg推流器自动重启成功")
-                    else:
-                        return False
-                else:
-                    return False
-            
-            # 检查进程是否还在运行
-            if self.process.poll() is not None:
-                logger.warning("FFmpeg进程已退出，尝试自动重启")
-                if self._should_restart() and self._restart():
-                    logger.info("FFmpeg进程重启成功")
-                else:
-                    self.is_running = False
-                    return False
-            
-            # 调整帧尺寸
-            if frame.shape[1] != self.width or frame.shape[0] != self.height:
-                frame = cv2.resize(frame, (self.width, self.height))
-            
-            # 写入帧数据
-            self.process.stdin.write(frame.tobytes())
-            self.process.stdin.flush()
-            
-            # 推流成功，重置重启计数
-            self.restart_count = 0
-            return True
-            
-        except BrokenPipeError:
-            logger.warning("FFmpeg推流管道断开，尝试自动重启")
-            if self._should_restart() and self._restart():
-                logger.info("管道断开后重启成功，重新推送帧")
-                return self.push_frame(frame)  # 递归调用一次
-            else:
-                self.is_running = False
-                return False
-        except Exception as e:
-            logger.error(f"推送帧数据失败: {str(e)}")
-            return False
-    
-    def stop(self):
-        """停止FFmpeg推流"""
-        try:
-            if self.process:
-                self.is_running = False
-                
-                # 关闭stdin
-                if self.process.stdin:
-                    self.process.stdin.close()
-                
-                # 等待进程结束
-                try:
-                    self.process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    # 强制终止
-                    self.process.terminate()
-                    try:
-                        self.process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        self.process.kill()
-                
-                self.process = None
-                logger.info("FFmpeg推流器已停止")
-                
-        except Exception as e:
-            logger.error(f"停止FFmpeg推流器时出错: {str(e)}")
-    
-    def _should_restart(self) -> bool:
-        """判断是否应该尝试重启"""
-        current_time = time.time()
-        
-        # 检查重启次数限制
-        if self.restart_count >= self.max_restart_attempts:
-            logger.error(f"FFmpeg推流器重启次数已达上限({self.max_restart_attempts})，停止重启")
-            return False
-        
-        # 检查重启间隔
-        if current_time - self.last_restart_time < self.restart_interval:
-            logger.debug(f"距离上次重启时间不足{self.restart_interval}秒，暂不重启")
-            return False
-        
-        return True
-    
-    def _restart(self) -> bool:
-        """重启FFmpeg推流器"""
-        try:
-            # 先停止当前进程
-            self._force_stop()
-            
-            # 更新重启统计
-            self.restart_count += 1
-            self.last_restart_time = time.time()
-            
-            logger.info(f"正在重启FFmpeg推流器(第{self.restart_count}次): {self.rtsp_url}")
-            
-            # 重新启动
-            return self.start()
-            
-        except Exception as e:
-            logger.error(f"重启FFmpeg推流器失败: {str(e)}")
-            return False
-    
-    def _force_stop(self):
-        """强制停止FFmpeg进程"""
-        try:
-            if self.process:
-                self.is_running = False
-                
-                # 尝试优雅关闭
-                if self.process.stdin:
-                    try:
-                        self.process.stdin.close()
-                    except:
-                        pass
-                
-                # 等待进程结束
-                try:
-                    self.process.wait(timeout=2)
-                except subprocess.TimeoutExpired:
-                    # 强制终止
-                    self.process.terminate()
-                    try:
-                        self.process.wait(timeout=2)
-                    except subprocess.TimeoutExpired:
-                        self.process.kill()
-                        self.process.wait()
-                
-                self.process = None
-                logger.debug("FFmpeg进程已强制停止")
-                
-        except Exception as e:
-            logger.error(f"强制停止FFmpeg进程时出错: {str(e)}")
-    
-    def reset_restart_count(self):
-        """重置重启计数（用于外部调用）"""
-        self.restart_count = 0
-        logger.info("FFmpeg推流器重启计数已重置")
-    
-    def get_status(self) -> dict:
-        """获取推流器状态信息"""
-        status = {
-            "is_running": self.is_running,
-            "process_alive": self.process is not None and self.process.poll() is None if self.process else False,
-            "restart_count": self.restart_count,
-            "max_restart_attempts": self.max_restart_attempts,
-            "last_restart_time": self.last_restart_time,
-            "rtsp_url": self.rtsp_url,
-            "fps": self.fps,
-            "resolution": f"{self.width}x{self.height}"
-        }
-        return status
-
-
 class AITaskExecutor:
     """基于精确调度的AI任务执行器"""
     
@@ -961,6 +736,27 @@ class AITaskExecutor:
         else:
             logger.warning(f"任务 {task_id} 不在运行状态")
     
+    def _pause_task_on_failure(self, task_id: int, db: Session, reason: str):
+        """
+        任务启动失败时自动暂停任务
+        
+        Args:
+            task_id: 任务ID
+            db: 数据库会话
+            reason: 暂停原因
+        """
+        try:
+            # 更新任务状态为禁用
+            AITaskService.update_task(task_id, {"status": False}, db)
+            logger.warning(f"⚠️ 任务 {task_id} 已自动暂停，原因: {reason}")
+            
+            # 清理调度作业
+            self._clear_task_jobs(task_id)
+            logger.info(f"已清理任务 {task_id} 的调度作业")
+            
+        except Exception as e:
+            logger.error(f"暂停任务 {task_id} 时出错: {str(e)}")
+    
     def _execute_task(self, task: AITask, stop_event: threading.Event):
         """执行AI任务"""
         logger.info(f"开始执行任务 {task.id}: {task.name}")
@@ -988,7 +784,8 @@ class AITaskExecutor:
             # 加载技能实例
             skill_instance = self._load_skill_for_task(task, db)
             if not skill_instance:
-                logger.error(f"加载任务 {task.id} 的技能实例失败")
+                logger.error(f"加载任务 {task.id} 的技能实例失败，自动暂停任务")
+                self._pause_task_on_failure(task.id, db, "技能实例加载失败")
                 return
                 
             # 使用智能自适应帧读取器
@@ -1006,7 +803,8 @@ class AITaskExecutor:
             )
             
             if not frame_reader.start():
-                logger.error(f"无法启动自适应帧读取器，摄像头: {task.camera_id}")
+                logger.error(f"无法启动自适应帧读取器，摄像头: {task.camera_id}，自动暂停任务")
+                self._pause_task_on_failure(task.id, db, f"无法获取摄像头 {task.camera_id} 视频流")
                 return
             
             # 初始化优化的异步帧处理器
@@ -1061,8 +859,7 @@ class AITaskExecutor:
                 
                 if rtsp_backend == "pyav":
                     # 🚀 PyAV推流器（高性能实时推流）
-                    from app.services.pyav_rtsp_streamer import PyAVRTSPStreamer
-                    rtsp_streamer = PyAVRTSPStreamer(
+                    rtsp_streamer = PyAVFrameStreamer(
                         rtsp_url=rtsp_url,
                         fps=stream_fps,
                         width=stream_width,
@@ -1070,14 +867,15 @@ class AITaskExecutor:
                     )
                 else:
                     # 使用FFmpeg推流器（默认选择）
-                    rtsp_streamer = FFmpegRTSPStreamer(
+                    rtsp_streamer = FFmpegFrameStreamer(
                         rtsp_url=rtsp_url, 
                         fps=stream_fps, 
                         width=stream_width, 
                         height=stream_height,
                         crf=settings.RTSP_STREAMING_QUALITY_CRF,
-                        max_bitrate=settings.RTSP_STREAMING_MAX_BITRATE,
-                        buffer_size=settings.RTSP_STREAMING_BUFFER_SIZE
+                        bitrate=settings.RTSP_STREAMING_MAX_BITRATE,
+                        buffer_size=settings.RTSP_STREAMING_BUFFER_SIZE,
+                        codec=settings.RTSP_STREAMING_CODEC
                     )
                 if rtsp_streamer.start():
                     backend_name = {
@@ -1113,6 +911,10 @@ class AITaskExecutor:
             frame_interval = 1.0 / task.frame_rate if task.frame_rate > 0 else 1.0
             last_frame_time = 0
             
+            # 连续无帧计数器
+            consecutive_no_frame = 0
+            max_consecutive_no_frame = 20  # 连续20次无帧（约2秒）后暂停任务
+            
             # 主视频采集循环（只负责读取和投递帧）
             while not stop_event.is_set():
                 # 帧率控制
@@ -1128,9 +930,21 @@ class AITaskExecutor:
                 # 自适应模式：获取最新帧
                 frame = frame_reader.get_latest_frame()
                 if frame is None:
-                    logger.warning(f"任务 {task.id} 自适应读取器无帧可用")
+                    consecutive_no_frame += 1
+                    if consecutive_no_frame <= 3 or consecutive_no_frame % 20 == 0:
+                        logger.warning(f"任务 {task.id} 自适应读取器无帧可用 (连续{consecutive_no_frame}次)")
+                    
+                    # 连续无帧达到阈值，暂停任务
+                    if consecutive_no_frame >= max_consecutive_no_frame:
+                        logger.error(f"任务 {task.id} 连续{consecutive_no_frame}次无法获取帧，自动暂停任务")
+                        self._pause_task_on_failure(task.id, db, f"视频流断开，连续{consecutive_no_frame}次无法获取帧")
+                        break
+                    
                     time.sleep(0.1)
                     continue
+                
+                # 获取到帧，重置计数器
+                consecutive_no_frame = 0
                 
                 # 将原始帧投递到优化的异步处理器
                 # 注意：这里frame会被直接引用，不进行拷贝
@@ -1442,31 +1256,6 @@ class AITaskExecutor:
         finally:
             db.close()
     
-    def _generate_alert_async_optimized(self, task: AITask, alert_data: Dict, frame: np.ndarray, level: int) -> Optional[Dict]:
-        """🚀 高性能优化版异步生成预警
-        
-        优化策略：
-        1. 异步MinIO上传：不阻塞主流程
-        2. 数据库查询缓存：减少重复查询
-        3. 图像处理优化：优化编码参数和质量
-        4. 快速响应：先发送预警，后续补充图片URL
-        
-        Args:
-            task: AI任务对象
-            alert_data: 报警数据（安全分析结果）
-            frame: 报警截图帧
-            level: 预警等级
-            
-        Returns:
-            生成的预警信息字典，失败时返回None
-        """
-        # 创建新的数据库会话（因为在新线程中）
-        db = next(get_db())
-        try:
-            return self._generate_alert_with_merge_optimized(task, alert_data, frame, db, level)
-        finally:
-            db.close()
-    
     def _generate_alert_with_merge(self, task: AITask, alert_data, frame, db: Session, level: int):
         """生成预警并发送到合并管理器
         
@@ -1555,7 +1344,7 @@ class AITaskExecutor:
             skill_class_id = skill_class["id"] if skill_class else task.skill_class_id
             skill_name_zh = skill_class["name_zh"] if skill_class else "未知技能"
             
-            # 构建完整的预警信息
+            # 构建完整的预警信息（alert_id 由合并管理器在最终发送时生成）
             complete_alert = {
                 "alert_time": datetime.now().isoformat(),
                 "alert_level": level,
@@ -1620,221 +1409,6 @@ class AITaskExecutor:
             
         except Exception as e:
             logger.error(f"生成报警时出错: {str(e)}")
-            return None
-    
-    def _generate_alert_with_merge_optimized(self, task: AITask, alert_data, frame, db: Session, level: int):
-        """🚀 高性能优化版生成预警并发送到合并管理器
-        
-        优化策略：
-        1. 数据库查询缓存：使用缓存减少重复查询
-        2. 异步MinIO上传：不阻塞主流程
-        3. 快速预警发送：先发送基础信息，后补充图片
-        
-        Args:
-            task: AI任务对象
-            alert_data: 报警数据（安全分析结果）
-            frame: 报警截图帧
-            db: 数据库会话
-            level: 预警等级（技能返回的实际预警等级）
-        """
-        try:
-            from app.services.camera_service import CameraService
-            from app.services.minio_client import minio_client
-            from app.services.rabbitmq_client import rabbitmq_client
-            from datetime import datetime
-            import cv2
-            import threading
-            
-            # 🚀 优化1：使用缓存获取摄像头信息（避免重复数据库查询）
-            camera_info = self._get_cached_camera_info(task.camera_id, db)
-            camera_name = camera_info.get("name", f"摄像头{task.camera_id}") if camera_info else f"摄像头{task.camera_id}"
-            
-            # 确保location字段不为None
-            location = "未知位置"
-            if camera_info:
-                camera_location = camera_info.get("location")
-                if camera_location:
-                    location = camera_location
-            
-            # 直接从alert_data中获取预警信息
-            alert_info_data = alert_data.get("alert_info", {})
-            alert_info = {
-                "name": alert_info_data.get("alert_name", "系统预警"),
-                "type": alert_info_data.get("alert_type", "安全生产预警"),
-                "description": alert_info_data.get("alert_description", f"{camera_name}检测到安全风险，请及时处理。")
-            }
-            
-            # 在frame上绘制检测框（预警截图，尝试使用技能的自定义绘制函数）
-            annotated_frame = self._draw_alert_detections_with_skill(task, frame.copy(), alert_data)
-            
-            # 🚀 优化3：使用缓存获取技能信息
-            skill_info = self._get_cached_skill_info(task.skill_class_id, db)
-            skill_class_id = skill_info["id"] if skill_info else task.skill_class_id
-            skill_name_zh = skill_info["name_zh"] if skill_info else "未知技能"
-            
-            # 处理检测结果格式
-            formatted_results = self._format_detection_results(alert_data)
-            
-            # 解析电子围栏配置
-            electronic_fence = self._parse_fence_config(task)
-            
-            # 🚀 优化4：先构建预警基础信息（不包含图片URL）
-            timestamp = int(time.time())
-            complete_alert = {
-                "alert_time": datetime.now().isoformat(),
-                "alert_level": level,
-                "alert_name": alert_info["name"],
-                "alert_type": alert_info["type"], 
-                "alert_description": alert_info["description"],
-                "location": location,
-                "camera_id": task.camera_id,
-                "camera_name": camera_name,
-                "task_id": task.id,
-                "skill_class_id": skill_class_id,
-                "skill_name_zh": skill_name_zh,
-                "electronic_fence": electronic_fence,
-                "minio_frame_object_name": "",  # 先为空，异步上传后更新
-                "minio_video_object_name": "",
-                "result": formatted_results,
-                "processing_status": "uploading_image"  # 标记图片正在上传
-            }
-            
-            # 🚀 优化5：企业级异步MinIO上传（多层保障机制）
-            def enterprise_async_upload_image():
-                try:
-                    # 将绘制了检测框的frame编码为JPEG字节数据
-                    success, img_encoded = cv2.imencode('.jpg', annotated_frame)
-                    if not success:
-                        logger.error("图像编码失败")
-                        return
-                    
-                    # 构建文件名和路径
-                    img_filename = f"alert_{task.id}_{task.camera_id}_{timestamp}.jpg"
-                    from app.core.config import settings
-                    minio_prefix = f"{settings.MINIO_ALERT_IMAGE_PREFIX}{task.id}"
-                    
-                    # 🎯 使用企业级上传编排器（包含智能重试、降级存储、补偿队列）
-                    from app.services.minio_upload_orchestrator import minio_upload_orchestrator, UploadPriority, UploadStrategy
-                    
-                    async def upload_callback(result):
-                        """上传完成回调"""
-                        if result.status.value == "success":
-                            logger.info(f"✅ 企业级预警图片上传成功: {result.object_name}")
-                            # TODO: 可以在这里发送更新消息，告知图片上传完成
-                        elif result.status.value == "fallback":
-                            logger.warning(f"⚠️ 预警图片已保存到降级存储: {result.fallback_file_id}")
-                        elif result.status.value == "compensating":
-                            logger.warning(f"⚠️ 预警图片上传失败，已加入补偿队列: {result.compensation_task_id}")
-                        else:
-                            logger.error(f"❌ 企业级预警图片上传失败: {result.error_message}")
-                    
-                    # 同步调用企业级上传编排器
-                    upload_result = minio_upload_orchestrator.upload_sync(
-                        data=img_encoded.tobytes(),
-                        object_name=img_filename,
-                        content_type="image/jpeg",
-                        prefix=minio_prefix,
-                        priority=UploadPriority.CRITICAL,  # 预警图片为关键优先级
-                        strategy=UploadStrategy.HYBRID,    # 使用混合策略
-                        metadata={
-                            "task_id": task.id,
-                            "camera_id": task.camera_id,
-                            "alert_level": level,
-                            "timestamp": timestamp
-                        }
-                    )
-                    
-                    # 处理上传结果
-                    if hasattr(upload_result, 'result'):
-                        # 如果返回的是Future对象，等待结果
-                        try:
-                            final_result = upload_result.result(timeout=30)  # 最多等待30秒
-                            # 检查callback是否是协程函数
-                            if asyncio.iscoroutinefunction(upload_callback):
-                                # 创建新的事件循环（因为在普通线程中）
-                                try:
-                                    loop = asyncio.get_event_loop()
-                                except RuntimeError:
-                                    loop = asyncio.new_event_loop()
-                                    asyncio.set_event_loop(loop)
-                                loop.run_until_complete(upload_callback(final_result))
-                            else:
-                                upload_callback(final_result)
-                        except Exception as e:
-                            logger.error(f"❌ 等待企业级上传结果超时: {str(e)}")
-                    else:
-                        # 直接处理结果
-                        # 检查callback是否是协程函数
-                        if asyncio.iscoroutinefunction(upload_callback):
-                            # 创建新的事件循环（因为在普通线程中）
-                            try:
-                                loop = asyncio.get_event_loop()
-                            except RuntimeError:
-                                loop = asyncio.new_event_loop()
-                                asyncio.set_event_loop(loop)
-                            loop.run_until_complete(upload_callback(upload_result))
-                        else:
-                            upload_callback(upload_result)
-                    
-                except Exception as e:
-                    logger.error(f"❌ 企业级异步MinIO上传失败: {str(e)}")
-                    # 即使企业级上传失败，也要尝试降级处理
-                    try:
-                        from app.services.minio_fallback_storage import minio_fallback_storage
-                        fallback_id = minio_fallback_storage.store_file(
-                            data=img_encoded.tobytes(),
-                            object_name=img_filename,
-                            content_type="image/jpeg",
-                            prefix=minio_prefix,
-                            priority=1,
-                            metadata={"task_id": task.id, "camera_id": task.camera_id}
-                        )
-                        logger.info(f"💾 预警图片已紧急保存到降级存储: {fallback_id}")
-                    except Exception as fallback_error:
-                        logger.critical(f"🚨 预警图片保存完全失败: {str(fallback_error)}")
-            
-            # 启动企业级异步上传线程
-            upload_thread = threading.Thread(target=enterprise_async_upload_image, daemon=True)
-            upload_thread.start()
-            
-            # 准备原始帧数据（用于视频录制）
-            frame_bytes = None
-            try:
-                if frame is not None:
-                    # 先缩放到目标分辨率以减少存储压力
-                    height, width = frame.shape[:2]
-                    from app.core.config import settings
-                    target_width = getattr(settings, 'ALERT_VIDEO_WIDTH', 1280)
-                    target_height = getattr(settings, 'ALERT_VIDEO_HEIGHT', 720)
-                    video_quality = getattr(settings, 'ALERT_VIDEO_QUALITY', 75)
-                    
-                    if width != target_width or height != target_height:
-                        frame = cv2.resize(frame, (target_width, target_height))
-                    
-                    # 编码为低质量JPEG字节数据
-                    success, encoded = cv2.imencode('.jpg', frame, [cv2.IMWRITE_JPEG_QUALITY, video_quality])
-                    if success:
-                        frame_bytes = encoded.tobytes()
-            except Exception as e:
-                logger.warning(f"编码原始帧失败: {str(e)}")
-            
-            # 🚀 优化7：立即发送到预警合并管理器（不等待图片上传）
-            success = alert_merge_manager.add_alert(
-                alert_data=complete_alert,
-                image_object_name="",  # 图片正在异步上传
-                frame_bytes=frame_bytes
-            )
-            
-            if success:
-                logger.info(f"✅ 高性能预警已添加到合并管理器: task_id={task.id}, camera_id={task.camera_id}, level={level}")
-                logger.info(f"🚀 性能优化: 图片异步上传中，预警已提前发送")
-                return complete_alert
-            else:
-                logger.error(f"❌ 添加高性能预警到合并管理器失败: task_id={task.id}")
-                return None
-            
-        except Exception as e:
-            logger.error(f"🚀 高性能生成报警时出错: {str(e)}")
             return None
     
     # 🚀 性能优化：数据库查询缓存
