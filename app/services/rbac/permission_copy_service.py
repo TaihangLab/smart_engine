@@ -197,9 +197,7 @@ class PermissionCopyService:
                 role_perm = SysRolePermission(
                     id=assoc_id,
                     role_id=role.id,
-                    permission_id=perm.id,
-                    create_by="system",
-                    update_by="system"
+                    permission_id=perm.id
                 )
                 db.add(role_perm)
                 copied_count += 1

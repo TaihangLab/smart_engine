@@ -188,21 +188,24 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
 
         dept_name = user_info.get('deptName', f'Dept-{dept_id}')
 
-    # 检查用户是否已存在（根据 user_name + tenant_id 检查用户）
-    existing_user = RbacService.get_user_by_user_name_and_tenant_id(db, user_name, tenant_id)
+    # 检查用户是否已存在（根据 user_id + tenant_id 检查用户）
+    existing_user = RbacService.get_user_by_user_id_and_tenant_id(db, user_id, tenant_id)
 
     if existing_user:
-        # 更新用户信息
-        update_data = {
-            "nick_name": user_info.get('userName', existing_user.nick_name),
-            "dept_id": dept_id,
-            "tenant_id": tenant_id
-        }
-        updated_user = RbacService.update_user_by_id(db, existing_user.id, update_data)
+        # 存在：获取用户
+        # 获取该用户所有的角色
+        user_roles = RelationService.get_user_roles_by_id(db, existing_user.id, tenant_id)
+
+        # 获取该用户当前的部门
+        current_dept = RbacService.get_dept_by_id(db, dept_id)
+
+        # 获取该用户当前的部门的子部门
+        sub_depts = RbacService.get_dept_subtree(db, dept_id)
+
+        logger.info(f"用户 {user_name} 已存在，获取其角色、部门和子部门信息")
 
         # 检查并分配ROLE_ACCESS角色
         role_code = RoleConstants.ROLE_ACCESS
-        user_roles = RelationService.get_user_roles_by_id(db, updated_user.id, tenant_id)
         role_exists = any(role.role_code == role_code for role in user_roles)
 
         if not role_exists:
@@ -215,7 +218,6 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
             logger.info(f"用户 {user_name} 已拥有 {role_code} 角色")
 
         # 获取用户角色，优先检查 ROLE_ALL（超管角色）
-        user_roles = RelationService.get_user_roles_by_id(db, updated_user.id, tenant_id)
         logger.info(f"用户 {user_name} 的角色列表: {[(r.id, r.role_code, r.role_name) for r in user_roles]}")
         role = next((r for r in user_roles if r.role_code == RoleConstants.ROLE_ALL), None)
         if role is None:
@@ -223,10 +225,33 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         logger.info(f"选择的角色: {role.role_code if role else None} (id={role.id if role else None})")
 
         # 构建完整用户态
-        return _build_user_state(db, updated_user, role, dept_id, dept_name, tenant_id, user_info)
+        return _build_user_state(db, existing_user, role, dept_id, dept_name, tenant_id, user_info)
 
     else:
-        # 创建新用户
+        # 不存在：上述逻辑中新增租户，部门，角色，用户逻辑
+        logger.info(f"用户 {user_name} 不存在，开始执行新增租户、部门、角色、用户逻辑")
+
+        # 1. 确保租户存在
+        tenant_info = {
+            'tenantId': tenant_id,
+            'tenantName': user_info.get('tenantName', f'Tenant-{tenant_id}'),
+            'companyName': user_info.get('companyName', f'Company-{tenant_id}'),
+            'companyCode': user_info.get('companyCode', f'COMP-{tenant_id}')
+        }
+        ensure_tenant_exists(tenant_info, db)
+
+        # 2. 确保部门存在
+        dept_info = {
+            'deptId': dept_id,
+            'deptName': dept_name,
+            'tenantId': tenant_id
+        }
+        ensure_dept_exists(dept_info, db)
+
+        # 3. 确保角色存在（ROLE_ACCESS角色检查）
+        ensure_role_exists(int(tenant_id), db)
+
+        # 4. 创建新用户
         user_data = {
             "tenant_id": tenant_id,
             "user_name": user_name,
@@ -243,7 +268,7 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
 
         created_user = RbacService.create_user(db, user_data)
 
-        # 为新用户分配ROLE_ACCESS角色
+        # 5. 为新用户分配ROLE_ACCESS角色
         role_code = RoleConstants.ROLE_ACCESS
         success = RelationService.assign_role_to_user(db, user_name, role_code, tenant_id)
         if success:
@@ -251,7 +276,7 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         else:
             logger.warning(f"为新用户 {user_name} 分配 {role_code} 角色失败")
 
-        # 获取用户角色，优先检查 ROLE_ALL（超管角色）
+        # 6. 获取用户角色，优先检查 ROLE_ALL（超管角色）
         user_roles = RelationService.get_user_roles_by_id(db, created_user.id, tenant_id)
         logger.info(f"用户 {user_name} 的角色列表: {[(r.id, r.role_code, r.role_name) for r in user_roles]}")
         role = next((r for r in user_roles if r.role_code == RoleConstants.ROLE_ALL), None)
@@ -287,6 +312,10 @@ def _build_user_state(db, user, role: Optional[Any], dept_id: int, dept_name: st
     api_permissions = []  # List[ApiPermission]
     url_paths = set()
 
+    # 获取用户的所有角色
+    from app.services.rbac.relation_service import RelationService
+    user_roles = RelationService.get_user_roles_by_id(db, user.id, tenant_id)
+
     # 判断是否为超管
     is_super_admin = False
 
@@ -321,6 +350,10 @@ def _build_user_state(db, user, role: Optional[Any], dept_id: int, dept_name: st
                 if perm.url:
                     url_paths.add(perm.url)
 
+    # 获取用户当前的部门和子部门
+    current_dept = RbacService.get_dept_by_id(db, dept_id)
+    sub_depts = RbacService.get_dept_subtree(db, dept_id)
+
     return UserInfo(
         userId=str(user.id),
         userName=user.user_name,
@@ -333,6 +366,9 @@ def _build_user_state(db, user, role: Optional[Any], dept_id: int, dept_name: st
         permissionCodes=permission_codes,
         apiPermissions=api_permissions,
         urlPaths=url_paths,
+        userRoles=user_roles,  # 添加用户的所有角色
+        currentDept=current_dept,  # 添加当前部门
+        subDepts=sub_depts,  # 添加子部门
         extra=user_info
     )
 
