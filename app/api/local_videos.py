@@ -107,7 +107,7 @@ async def upload_video(
         
         # 生成唯一文件名（白名单扩展名验证）
         file_ext = Path(file.filename).suffix.lower()
-        allowed_extensions = {'.mp4', '.avi', '.mov', '.mkv', '.flv', '.wmv', '.webm', '.m4v'}
+        allowed_extensions = {'.mp4', '.mov', '.mkv', '.flv', '.wmv', '.webm', '.m4v'}
         if file_ext not in allowed_extensions:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,

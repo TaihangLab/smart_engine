@@ -104,7 +104,15 @@ class Alert(Base):
     result = Column(JSON, comment="检测结果")
     minio_frame_object_name = Column(String(255), comment="MinIO图片对象名")
     minio_video_object_name = Column(String(255), comment="MinIO视频对象名")
-    
+
+    # 预警合并元数据
+    is_merged = Column(Boolean, default=False, comment="是否为合并预警")
+    alert_count = Column(Integer, default=1, comment="合并预警数量")
+    alert_duration = Column(Float, default=0.0, comment="合并时长(秒)")
+    first_alert_time = Column(DateTime, comment="首次预警时间")
+    last_alert_time = Column(DateTime, comment="最后预警时间")
+    alert_images = Column(JSON, comment="所有预警图片列表")
+
     # 当前状态
     status = Column(StatusType, default=AlertStatus.PENDING, index=True, 
                    comment="当前状态：1=待处理，2=处理中，3=已处理，4=已归档，5=误报")
@@ -489,96 +497,13 @@ class AlertCreate(BaseModel):
     processing_notes: Optional[str] = None
     process: Optional[Dict[str, Any]] = None
 
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "alert_time": "2025-04-06T12:30:00",
-                "alert_type": "no_helmet",
-                "alert_level": 1,
-                "alert_name": "未戴安全帽",
-                "alert_description": "检测到工人未佩戴安全帽",
-                "location": "工厂01",
-                "camera_id": 1,
-                "camera_name": "摄像头01",
-                "task_id": 1,
-                "minio_frame_object_name": "5678/frame.jpg",
-                "minio_video_object_name": "5678/video.mp4",
-                "skill_class_id": 1001,
-                "skill_name_zh": "安全帽检测",
-                "status": 1,
-                "processing_notes": "系统自动检测到的安全隐患"
-            }
-        }
-    }
-
-
-class AlertUpdate(BaseModel):
-    """更新报警状态的模型"""
-    status: AlertStatus
-    processed_by: Optional[str] = None
-    processing_notes: Optional[str] = None
-
-
-class AlertResponse(BaseModel):
-    """报警响应模型"""
-    alert_id: int
-    alert_time: datetime
-    alert_type: str
-    alert_level: int
-    alert_name: str
-    alert_description: str
-    location: str
-    camera_id: int
-    camera_name: str
-    task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
-    result: Optional[List[Dict[str, Any]]] = None
-    minio_frame_url: Optional[str] = ""
-    minio_video_url: Optional[str] = ""
-    skill_class_id: Optional[int] = None
-    skill_name_zh: Optional[str] = None
-    status: int = AlertStatus.PENDING
-    status_display: str = AlertStatus.get_display_name(AlertStatus.PENDING)
-    processed_at: Optional[datetime] = None
-    processed_by: Optional[str] = None
-    processing_notes: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    process: Optional[Dict[str, Any]] = None
-    
-    model_config = {"from_attributes": True}
-
-
-class ProcessingHistoryResponse(BaseModel):
-    """处理历史响应模型"""
-    alert_id: int
-    total_records: int
-    records: List[Dict[str, Any]]
-    
-    model_config = {"from_attributes": True}
-
-
-# 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
-    """创建报警的模型"""
-    alert_time: datetime
-    alert_type: str
-    alert_level: int = 1
-    alert_name: str
-    alert_description: str
-    location: str
-    camera_id: int
-    camera_name: str
-    task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
-    result: Optional[List[Dict[str, Any]]] = None
-    minio_frame_object_name: str
-    minio_video_object_name: str
-    skill_class_id: Optional[int] = None
-    skill_name_zh: Optional[str] = None
-    status: int = AlertStatus.PENDING
-    processing_notes: Optional[str] = None
-    process: Optional[Dict[str, Any]] = None
+    # 预警合并元数据
+    is_merged: bool = False
+    alert_count: int = 1
+    alert_duration: float = 0.0
+    first_alert_time: Optional[datetime] = None
+    last_alert_time: Optional[datetime] = None
+    alert_images: Optional[List[Dict[str, Any]]] = None
 
     model_config = {
         "json_schema_extra": {
@@ -597,214 +522,9 @@ class AlertCreate(BaseModel):
                 "skill_class_id": 1001,
                 "skill_name_zh": "安全帽检测",
                 "status": 1,
-                "processing_notes": "系统自动检测到的安全隐患"
-            }
-        }
-    }
-
-
-class AlertUpdate(BaseModel):
-    """更新报警状态的模型"""
-    status: AlertStatus
-    processed_by: Optional[str] = None
-    processing_notes: Optional[str] = None
-
-
-class AlertResponse(BaseModel):
-    """报警响应模型"""
-    alert_id: int
-    alert_time: datetime
-    alert_type: str
-    alert_level: int
-    alert_name: str
-    alert_description: str
-    location: str
-    camera_id: int
-    camera_name: str
-    task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
-    result: Optional[List[Dict[str, Any]]] = None
-    minio_frame_url: Optional[str] = ""
-    minio_video_url: Optional[str] = ""
-    skill_class_id: Optional[int] = None
-    skill_name_zh: Optional[str] = None
-    status: int = AlertStatus.PENDING
-    status_display: str = AlertStatus.get_display_name(AlertStatus.PENDING)
-    processed_at: Optional[datetime] = None
-    processed_by: Optional[str] = None
-    processing_notes: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    process: Optional[Dict[str, Any]] = None
-    
-    model_config = {"from_attributes": True}
-
-
-class AlertListResponse(BaseModel):
-    """预警列表响应模型"""
-    alert_id: int
-    alert_time: datetime
-    alert_type: str
-    alert_level: int
-    alert_name: str
-    alert_description: str
-    location: str
-    camera_name: str
-    skill_name_zh: Optional[str] = None
-    status: int
-    status_display: str
-    
-    # 简化的处理信息
-    current_operator: Optional[str] = None
-    last_processed_at: Optional[datetime] = None
-    
-    model_config = {"from_attributes": True}
-
-
-# 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
-    """创建报警的模型"""
-    alert_time: datetime
-    alert_type: str
-    alert_level: int = 1
-    alert_name: str
-    alert_description: str
-    location: str
-    camera_id: int
-    camera_name: str
-    task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
-    result: Optional[List[Dict[str, Any]]] = None
-    minio_frame_object_name: str
-    minio_video_object_name: str
-    skill_class_id: Optional[int] = None
-    skill_name_zh: Optional[str] = None
-    status: int = AlertStatus.PENDING
-    processing_notes: Optional[str] = None
-    process: Optional[Dict[str, Any]] = None
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "alert_time": "2025-04-06T12:30:00",
-                "alert_type": "no_helmet",
-                "alert_level": 1,
-                "alert_name": "未戴安全帽",
-                "alert_description": "检测到工人未佩戴安全帽",
-                "location": "工厂01",
-                "camera_id": 1,
-                "camera_name": "摄像头01",
-                "task_id": 1,
-                "minio_frame_object_name": "5678/frame.jpg",
-                "minio_video_object_name": "5678/video.mp4",
-                "skill_class_id": 1001,
-                "skill_name_zh": "安全帽检测",
-                "status": 1,
-                "processing_notes": "系统自动检测到的安全隐患"
-            }
-        }
-    }
-
-
-class AlertUpdate(BaseModel):
-    """更新报警状态的模型"""
-    status: AlertStatus
-    processed_by: Optional[str] = None
-    processing_notes: Optional[str] = None
-
-
-class AlertResponse(BaseModel):
-    """报警响应模型"""
-    alert_id: int
-    alert_time: datetime
-    alert_type: str
-    alert_level: int
-    alert_name: str
-    alert_description: str
-    location: str
-    camera_id: int
-    camera_name: str
-    task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
-    result: Optional[List[Dict[str, Any]]] = None
-    minio_frame_url: Optional[str] = ""
-    minio_video_url: Optional[str] = ""
-    skill_class_id: Optional[int] = None
-    skill_name_zh: Optional[str] = None
-    status: int = AlertStatus.PENDING
-    status_display: str = AlertStatus.get_display_name(AlertStatus.PENDING)
-    processed_at: Optional[datetime] = None
-    processed_by: Optional[str] = None
-    processing_notes: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
-    process: Optional[Dict[str, Any]] = None
-    
-    model_config = {"from_attributes": True}
-
-
-class ProcessingStatistics(BaseModel):
-    """处理统计模型"""
-    total_alerts: int
-    pending_alerts: int
-    processing_alerts: int
-    resolved_alerts: int
-    archived_alerts: int
-    false_alarm_alerts: int
-    
-    # 处理效率统计
-    avg_processing_time: Optional[float] = None
-    total_operators: int
-    most_active_operator: Optional[str] = None
-    
-    # 时间统计
-    today_alerts: int
-    week_alerts: int
-    month_alerts: int
-    
-    model_config = {"from_attributes": True}
-
-
-# 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
-    """创建报警的模型"""
-    alert_time: datetime
-    alert_type: str
-    alert_level: int = 1
-    alert_name: str
-    alert_description: str
-    location: str
-    camera_id: int
-    camera_name: str
-    task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
-    result: Optional[List[Dict[str, Any]]] = None
-    minio_frame_object_name: str
-    minio_video_object_name: str
-    skill_class_id: Optional[int] = None
-    skill_name_zh: Optional[str] = None
-    status: int = AlertStatus.PENDING
-    processing_notes: Optional[str] = None
-    process: Optional[Dict[str, Any]] = None
-
-    model_config = {
-        "json_schema_extra": {
-            "example": {
-                "alert_time": "2025-04-06T12:30:00",
-                "alert_type": "no_helmet",
-                "alert_level": 1,
-                "alert_name": "未戴安全帽",
-                "alert_description": "检测到工人未佩戴安全帽",
-                "location": "工厂01",
-                "camera_id": 1,
-                "camera_name": "摄像头01",
-                "task_id": 1,
-                "minio_frame_object_name": "5678/frame.jpg",
-                "minio_video_object_name": "5678/video.mp4",
-                "skill_class_id": 1001,
-                "skill_name_zh": "安全帽检测",
-                "status": 1,
-                "processing_notes": "系统自动检测到的安全隐患"
+                "processing_notes": "系统自动检测到的安全隐患",
+                "is_merged": False,
+                "alert_count": 1
             }
         }
     }
@@ -848,6 +568,14 @@ class AlertResponse(BaseModel):
     minio_frame_object_name: Optional[str] = None
     minio_video_object_name: Optional[str] = None
 
+    # 预警合并元数据
+    is_merged: bool = False
+    alert_count: int = 1
+    alert_duration: float = 0.0
+    first_alert_time: Optional[datetime] = None
+    last_alert_time: Optional[datetime] = None
+    alert_images: Optional[List[Dict[str, Any]]] = None
+
     model_config = {"from_attributes": True}
 
     def model_post_init(self, __context):
@@ -877,3 +605,57 @@ class AlertResponse(BaseModel):
                 )
             except Exception:
                 self.minio_video_url = ""
+
+
+class ProcessingHistoryResponse(BaseModel):
+    """处理历史响应模型"""
+    alert_id: int
+    total_records: int
+    records: List[Dict[str, Any]]
+    
+    model_config = {"from_attributes": True}
+
+
+class AlertListResponse(BaseModel):
+    """预警列表响应模型"""
+    alert_id: int
+    alert_time: datetime
+    alert_type: str
+    alert_level: int
+    alert_name: str
+    alert_description: str
+    location: str
+    camera_name: str
+    skill_name_zh: Optional[str] = None
+    status: int
+    status_display: str
+    
+    # 简化的处理信息
+    current_operator: Optional[str] = None
+    last_processed_at: Optional[datetime] = None
+    
+    model_config = {"from_attributes": True}
+
+
+class ProcessingStatistics(BaseModel):
+    """处理统计模型"""
+    total_alerts: int
+    pending_alerts: int
+    processing_alerts: int
+    resolved_alerts: int
+    archived_alerts: int
+    false_alarm_alerts: int
+    
+    # 处理效率统计
+    avg_processing_time: Optional[float] = None
+    total_operators: int
+    most_active_operator: Optional[str] = None
+    
+    # 时间统计
+    today_alerts: int
+    week_alerts: int
+    month_alerts: int
+    
+    model_config = {"from_attributes": True}
+
+
