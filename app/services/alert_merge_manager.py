@@ -77,6 +77,26 @@ class MergedAlert:
             return self.alert_instances[0].alert_data
         return {}
 
+    def get_middle_index(self) -> int:
+        """获取中间实例的索引"""
+        if not self.alert_instances:
+            return 0
+        return len(self.alert_instances) // 2
+
+    def get_middle_result(self) -> Optional[List[Dict[str, Any]]]:
+        """获取中间的检测结果"""
+        if self.alert_instances:
+            mid_idx = self.get_middle_index()
+            return self.alert_instances[mid_idx].alert_data.get("result")
+        return None
+
+    def get_middle_instance(self) -> Optional['AlertInstance']:
+        """获取中间的预警实例"""
+        if self.alert_instances:
+            mid_idx = self.get_middle_index()
+            return self.alert_instances[mid_idx]
+        return None
+
 
 class VideoBufferManager:
     """视频缓冲管理器 - 管理预警视频录制"""
@@ -678,45 +698,53 @@ class AlertMergeManager:
             
             # 构建最终预警信息
             final_alert = base_alert_data.copy()
-            
+
             # 生成最终预警的唯一ID（task_id + 时间戳足够唯一）
             alert_id = f"{task_id}_{int(merged_alert.first_timestamp)}"
-            
-            # 将图片数据缓存到 Redis（用于复判，5分钟过期）
+
+            # 获取中间的检测结果和实例（平衡首条和最新）
+            middle_result = merged_alert.get_middle_result()
+            middle_instance = merged_alert.get_middle_instance()
+
+            # 将中间图片数据缓存到 Redis（用于复判，5分钟过期）
             image_cache_key = None
-            if merged_alert.alert_instances and merged_alert.alert_instances[0].frame_data:
+            if middle_instance and middle_instance.frame_data:
                 try:
                     from app.services.redis_client import redis_client
                     image_cache_key = f"alert_image:{alert_id}"
-                    
-                    # 缓存图片数据，5分钟过期（足够复判使用）
+
+                    # 缓存中间图片数据，5分钟过期（足够复判使用）
                     redis_client.setex_bytes(
                         image_cache_key,
                         300,  # 5分钟
-                        merged_alert.alert_instances[0].frame_data
+                        middle_instance.frame_data
                     )
-                    logger.debug(f"图片已缓存到 Redis: {image_cache_key}")
+                    logger.debug(f"中间图片已缓存到 Redis: {image_cache_key} (索引: {merged_alert.get_middle_index()})")
                 except Exception as e:
                     logger.warning(f"缓存图片到 Redis 失败: {str(e)}")
-            
+
             final_alert.update({
                 # 预警唯一标识
                 "alert_id": alert_id,
-                
-                # 合并信息
+
+                # 合并标识和信息
+                "is_merged": merged_alert.alert_count > 1,
                 "alert_count": merged_alert.alert_count,
                 "alert_duration": merged_alert.get_duration(),
                 "first_alert_time": datetime.fromtimestamp(merged_alert.first_timestamp).isoformat(),
                 "last_alert_time": datetime.fromtimestamp(merged_alert.last_timestamp).isoformat(),
-                
+
+                # 使用中间的检测结果
+                "result": middle_result,
+
                 # 视频和图片
                 "minio_video_object_name": video_object_name,
                 "alert_images": merged_alert.get_image_list(),
-                
-                # 使用第一个图片作为主图片
-                "minio_frame_object_name": merged_alert.alert_instances[0].image_object_name if merged_alert.alert_instances else "",
+
+                # 使用中间图片作为主图片
+                "minio_frame_object_name": middle_instance.image_object_name if middle_instance else "",
                 "image_cache_key": image_cache_key,  # Redis 缓存 key，用于复判
-                
+
                 # 更新描述
                 "alert_description": self._generate_merged_description(base_alert_data, merged_alert)
             })
@@ -912,6 +940,7 @@ class AlertMergeManager:
             immediate_alert = alert_data.copy()
             immediate_alert.update({
                 "alert_id": alert_id,
+                "is_merged": False,
                 "minio_video_object_name": video_object_name,
                 "alert_count": 1,
                 "alert_duration": 0.0,
@@ -1083,24 +1112,28 @@ class AlertMergeManager:
             
     def _trigger_llm_review(self, alert_data: Dict[str, Any], ai_task: AITask, review_config):
         """
-        触发LLM复判（使用队列服务）
-        
+        触发LLM复判（使用 RabbitMQ 队列服务）
+
         Args:
             alert_data: 预警数据
             ai_task: AI任务对象
             review_config: 复判配置对象（TaskReviewConfig）
         """
         try:
-            from app.services.alert_review_queue_service import alert_review_queue_service
-            
-            # 调用队列服务添加复判任务（同步调用）
-            success = alert_review_queue_service.enqueue_review_task(alert_data, ai_task, review_config.review_skill_class_id)
-            
+            from app.services.alert_review_rabbitmq_service import alert_review_rabbitmq_service
+
+            # 调用 RabbitMQ 队列服务添加复判任务
+            success = alert_review_rabbitmq_service.enqueue_review_task(
+                alert_data=alert_data,
+                task_id=ai_task.id,
+                skill_class_id=review_config.review_skill_class_id
+            )
+
             if success:
-                logger.info(f"🎯 任务 {ai_task.id} 的预警复判任务已加入队列")
+                logger.info(f"🐰 任务 {ai_task.id} 的预警复判任务已加入 RabbitMQ 队列")
             else:
-                logger.error(f"❌ 任务 {ai_task.id} 的预警复判任务加入队列失败")
-                
+                logger.error(f"❌ 任务 {ai_task.id} 的预警复判任务加入 RabbitMQ 队列失败")
+
         except Exception as e:
             logger.error(f"触发LLM复判失败: {str(e)}")
 

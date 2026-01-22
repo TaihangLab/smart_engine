@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     RABBITMQ_DEAD_LETTER_MAX_LENGTH: int = Field(default=10000, description="死信队列最大长度")
     RABBITMQ_MESSAGE_TTL: int = Field(default=86400000, description="主队列消息TTL（毫秒）- 24小时")
     RABBITMQ_MAX_RETRIES: int = Field(default=3, description="消息最大重试次数")
+
+    # 复判队列配置
+    RABBITMQ_REVIEW_EXCHANGE: str = Field(default="alert_review_exchange", description="复判交换机名称")
+    RABBITMQ_REVIEW_QUEUE: str = Field(default="alert_review_queue", description="复判队列名称")
+    RABBITMQ_REVIEW_ROUTING_KEY: str = Field(default="review", description="复判路由键")
+    RABBITMQ_REVIEW_MAX_RETRIES: int = Field(default=3, description="复判最大重试次数")
+    RABBITMQ_REVIEW_RETRY_DELAY: int = Field(default=5000, description="复判重试延迟（毫秒）")
+    RABBITMQ_REVIEW_PREFETCH_COUNT: int = Field(default=5, description="复判消费者预取数量")
     
     # 报警补偿服务配置 - 🆕 状态驱动补偿机制
     ALERT_COMPENSATION_INTERVAL: int = Field(default=30, description="补偿检查间隔（秒）")
