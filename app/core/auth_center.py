@@ -188,13 +188,23 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
 
         dept_name = user_info.get('deptName', f'Dept-{dept_id}')
 
-    # 检查用户是否已存在（根据 user_id + tenant_id 检查用户）
-    existing_user = RbacService.get_user_by_user_id_and_tenant_id(db, user_id, tenant_id)
+    # 检查用户是否已存在（根据 user_name + tenant_id 检查用户）
+    # 注意：外部系统的userId通常对应我们系统中的user_name字段
+    # 使用用户名而非ID进行查找是因为外部系统传递的userId实际上是我们的用户名标识
+    existing_user = RbacService.get_user_by_user_name_and_tenant_id(db, user_name, tenant_id)
 
     if existing_user:
         # 存在：获取用户
+        # 更新用户信息
+        update_data = {
+            "nick_name": user_info.get('userName', existing_user.nick_name),
+            "dept_id": dept_id,
+            "tenant_id": tenant_id
+        }
+        updated_user = RbacService.update_user_by_id(db, existing_user.id, update_data)
+
         # 获取该用户所有的角色
-        user_roles = RelationService.get_user_roles_by_id(db, existing_user.id, tenant_id)
+        user_roles = RelationService.get_user_roles_by_id(db, updated_user.id, tenant_id)
 
         # 获取该用户当前的部门
         current_dept = RbacService.get_dept_by_id(db, dept_id)
@@ -225,7 +235,7 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         logger.info(f"选择的角色: {role.role_code if role else None} (id={role.id if role else None})")
 
         # 构建完整用户态
-        return _build_user_state(db, existing_user, role, dept_id, dept_name, tenant_id, user_info)
+        return _build_user_state(db, updated_user, role, dept_id, dept_name, tenant_id, user_info)
 
     else:
         # 不存在：上述逻辑中新增租户，部门，角色，用户逻辑
@@ -252,6 +262,7 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         ensure_role_exists(int(tenant_id), db)
 
         # 4. 创建新用户
+        from app.utils.password_utils import hash_password
         user_data = {
             "tenant_id": tenant_id,
             "user_name": user_name,
@@ -263,7 +274,7 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
             "gender": user_info.get('gender', 0),
             "status": user_info.get('status', 0),
             "remark": user_info.get('remark', ''),
-            "password": "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"
+            "password": hash_password("DefaultPass123!")  # 使用默认密码并进行哈希
         }
 
         created_user = RbacService.create_user(db, user_data)
