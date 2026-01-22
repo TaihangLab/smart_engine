@@ -152,15 +152,13 @@ class MinerDetectorSkill(BaseSkill):
             if self.config.get("params", {}).get("enable_default_sort_tracking", True):
                 results = self.add_tracking_ids(results)
 
-            # 4. 应用电子围栏过滤（如果提供了有效的围栏配置）
+            # 4. 应用电子围栏过滤（支持trigger_mode和归一化坐标）
             if self.is_fence_config_valid(fence_config):
-                self.log("info", f"应用电子围栏过滤: {fence_config}")
-                filtered_results = []
-                for detection in results:
-                    point = self._get_detection_point(detection)
-                    if point and self.is_point_inside_fence(point, fence_config):
-                        filtered_results.append(detection)
-                results = filtered_results
+                height, width = image.shape[:2]
+                image_size = (width, height)
+                trigger_mode = fence_config.get("trigger_mode", "inside")
+                self.log("info", f"应用电子围栏过滤: trigger_mode={trigger_mode}, image_size={image_size}")
+                results = self.filter_detections_by_fence(results, fence_config, image_size)
                 self.log("info", f"围栏过滤后检测结果数量: {len(results)}")
             elif fence_config:
                 self.log("info",

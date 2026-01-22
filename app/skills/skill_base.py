@@ -249,34 +249,35 @@ class BaseSkill(ABC):
         
         return False
 
-    def is_point_inside_fence(self, point: Tuple[float, float], fence_config: Dict) -> bool:
+    def is_point_inside_fence(self, point: Tuple[float, float], fence_config: Dict, image_size: Tuple[int, int] = None) -> bool:
         """
         判断点是否在围栏内
         
         Args:
-            point: 检测点坐标 (x, y)
-            fence_config: 电子围栏配置
+            point: 检测点坐标 (x, y)，像素坐标
+            fence_config: 电子围栏配置（围栏点使用归一化坐标 0-1）
+            image_size: 图像尺寸 (width, height)，用于将归一化坐标转换为像素坐标
             
         Returns:
             是否在围栏内
         """
         try:
-            # 如果围栏配置无效，返回False
             if not self.is_fence_config_valid(fence_config):
                 return False
             
-            # 现有系统使用points字段，它本身就是多边形数组格式
+            if not image_size:
+                self.log("warning", "未提供图像尺寸，无法进行围栏判断")
+                return False
+            
             polygons = fence_config.get("points", [])
             
-            # 判断点是否在任一多边形内
             for polygon in polygons:
                 if len(polygon) < 3:
-                    continue  # 跳过点数不足的多边形
+                    continue
                 
-                # 转换多边形点格式
-                poly_points = [(p["x"], p["y"]) for p in polygon]
+                # 将归一化坐标转换为像素坐标
+                poly_points = [(p["x"] * image_size[0], p["y"] * image_size[1]) for p in polygon]
                 
-                # 判断点是否在多边形内
                 if self._point_in_polygon(point, poly_points):
                     return True
             
@@ -285,6 +286,45 @@ class BaseSkill(ABC):
         except Exception as e:
             self.log("error", f"判断点是否在围栏内时出错: {str(e)}")
             return False
+    
+    def filter_detections_by_fence(self, detections: List[Dict], fence_config: Dict, image_size: Tuple[int, int] = None) -> List[Dict]:
+        """
+        根据电子围栏配置过滤检测结果，支持 trigger_mode（inside/outside）
+        
+        Args:
+            detections: 检测结果列表
+            fence_config: 电子围栏配置
+            image_size: 图像尺寸 (width, height)，用于坐标转换
+            
+        Returns:
+            过滤后的检测结果列表
+        """
+        if not self.is_fence_config_valid(fence_config):
+            return detections
+        
+        trigger_mode = fence_config.get("trigger_mode", "inside")
+        filtered_results = []
+        
+        for detection in detections:
+            point = self._get_detection_point(detection)
+            if not point:
+                continue
+            
+            is_inside = self.is_point_inside_fence(point, fence_config, image_size)
+            
+            # 根据触发模式决定是否保留检测结果
+            if trigger_mode == "inside" and is_inside:
+                # inside模式：只保留围栏内的检测结果
+                filtered_results.append(detection)
+            elif trigger_mode == "outside" and not is_inside:
+                # outside模式：只保留围栏外的检测结果
+                filtered_results.append(detection)
+            elif trigger_mode == "cross":
+                # cross模式（穿越检测）：需要跟踪支持，暂时保留所有结果
+                # 实际的穿越检测需要在跟踪器中实现
+                filtered_results.append(detection)
+        
+        return filtered_results
     
     def _get_detection_point(self, detection: Dict) -> Optional[Tuple[float, float]]:
         """

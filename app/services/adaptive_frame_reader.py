@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 class ThreadedFrameReader:
-    """多线程帧读取器 - 用于获取最新帧"""
+    """多线程帧读取器 - 支持NVDEC硬件解码和OpenCV软件解码"""
     
     def __init__(self, stream_url: str):
         self.stream_url = stream_url
@@ -35,20 +35,221 @@ class ThreadedFrameReader:
         self.running = False
         self.read_thread = None
         self.cap = None
+        self.ffmpeg_process = None
+        self.use_nvdec = False
+        self.width = 1920
+        self.height = 1080
+        
+    def _check_nvdec_available(self) -> bool:
+        """
+        检测 NVDEC 硬件解码是否可用
+        
+        检查 H.264 (h264_cuvid) 和 H.265 (hevc_cuvid) 解码器，
+        并实际测试是否能工作
+        """
+        try:
+            import subprocess
+            
+            # 首先检查解码器是否存在
+            result = subprocess.run(
+                ['ffmpeg', '-hide_banner', '-decoders'],
+                capture_output=True, text=True, timeout=5
+            )
+            
+            has_h264_cuvid = 'h264_cuvid' in result.stdout
+            has_hevc_cuvid = 'hevc_cuvid' in result.stdout
+            
+            if not has_h264_cuvid and not has_hevc_cuvid:
+                logger.debug("FFmpeg 未包含 NVDEC 解码器 (h264_cuvid/hevc_cuvid)")
+                return False
+            
+            # 实际测试 NVDEC 是否能工作（使用 H.264 测试）
+            # 使用 lavfi 生成测试视频，用 h264_nvenc 编码后再用 h264_cuvid 解码
+            test_result = subprocess.run(
+                [
+                    'ffmpeg', '-hide_banner', '-loglevel', 'error',
+                    '-f', 'lavfi', '-i', 'color=black:s=256x256:d=0.1',
+                    '-c:v', 'h264_nvenc', '-f', 'h264', '-',
+                ],
+                capture_output=True, timeout=10
+            )
+            
+            if test_result.returncode == 0 and test_result.stdout:
+                # 尝试用 h264_cuvid 解码
+                decode_result = subprocess.run(
+                    [
+                        'ffmpeg', '-hide_banner', '-loglevel', 'error',
+                        '-hwaccel', 'cuda',
+                        '-c:v', 'h264_cuvid',
+                        '-f', 'h264', '-i', '-',
+                        '-frames:v', '1',
+                        '-f', 'null', '-'
+                    ],
+                    input=test_result.stdout,
+                    capture_output=True, timeout=10
+                )
+                
+                if decode_result.returncode == 0:
+                    logger.info(f"✅ 检测到 NVDEC 硬件解码器可用 (H.264: {has_h264_cuvid}, H.265: {has_hevc_cuvid})")
+                    return True
+                else:
+                    stderr = decode_result.stderr.decode('utf-8', errors='ignore')
+                    logger.warning(f"NVDEC 解码测试失败: {stderr[:200]}")
+                    return False
+            else:
+                logger.debug("无法生成测试视频流")
+                return False
+                
+        except subprocess.TimeoutExpired:
+            logger.warning("NVDEC 检测超时")
+            return False
+        except Exception as e:
+            logger.debug(f"NVDEC 检测失败: {e}")
+        return False
+    
+    def _get_stream_info(self) -> Tuple[int, int, str]:
+        """获取视频流分辨率和编码格式"""
+        width, height = 1920, 1080  # 默认分辨率
+        codec_name = "h264"  # 默认编码格式
+        
+        try:
+            import subprocess
+            import json
+            
+            # 使用 JSON 输出格式，更可靠
+            cmd = [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=width,height,codec_name',
+                '-of', 'json',
+                '-rtsp_transport', 'tcp',
+                self.stream_url
+            ]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                data = json.loads(result.stdout)
+                if 'streams' in data and len(data['streams']) > 0:
+                    stream = data['streams'][0]
+                    width = stream.get('width', 1920)
+                    height = stream.get('height', 1080)
+                    codec_name = stream.get('codec_name', 'h264').lower()
+        except Exception as e:
+            logger.debug(f"获取视频流信息失败: {e}")
+        
+        return width, height, codec_name
         
     def start(self) -> bool:
-        """启动帧读取线程"""
+        """启动帧读取线程（优先使用NVDEC硬件解码）"""
         try:
-            self.cap = cv2.VideoCapture(self.stream_url)
+            # 检测 NVDEC 是否可用
+            self.use_nvdec = self._check_nvdec_available()
+            
+            if self.use_nvdec:
+                # 使用 FFmpeg + NVDEC 硬件解码
+                return self._start_ffmpeg_nvdec()
+            else:
+                # 回退到 OpenCV 软件解码
+                return self._start_opencv()
+                
+        except Exception as e:
+            logger.error(f"启动帧读取器失败: {str(e)}")
+            return False
+    
+    def _start_ffmpeg_nvdec(self) -> bool:
+        """使用 FFmpeg NVDEC 硬件解码启动，支持 H.264 和 H.265"""
+        try:
+            import subprocess
+            
+            # 获取视频流分辨率和编码格式
+            self.width, self.height, codec_name = self._get_stream_info()
+            logger.info(f"视频流分辨率: {self.width}x{self.height}, 编码: {codec_name}")
+            
+            # 根据源视频编码选择解码器
+            if codec_name in ('hevc', 'h265'):
+                decoder = 'hevc_cuvid'
+            else:
+                decoder = 'h264_cuvid'  # 默认使用 H.264 解码器
+            
+            logger.info(f"使用 NVDEC 解码器: {decoder}")
+            
+            # 构建 FFmpeg 命令 - 使用 NVDEC 硬件解码
+            # 注意：不使用 hwaccel_output_format cuda，因为需要输出到 CPU
+            cmd = [
+                'ffmpeg',
+                '-rtsp_transport', 'tcp',     # 使用 TCP 传输（更稳定）
+                '-timeout', '3000000',        # 超时 3秒（微秒）
+                '-hwaccel', 'cuda',           # 使用 CUDA 硬件加速
+                '-c:v', decoder,              # 根据源视频选择 NVDEC 解码器
+                '-i', self.stream_url,
+                '-f', 'rawvideo',
+                '-pix_fmt', 'bgr24',          # OpenCV 使用 BGR 格式
+                '-an',                         # 不处理音频
+                '-sn',                         # 不处理字幕
+                '-'
+            ]
+            
+            self.ffmpeg_process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                bufsize=self.width * self.height * 3 * 2  # 2帧缓冲
+            )
+            
+            self.running = True
+            self.read_thread = threading.Thread(target=self._read_frames_ffmpeg, daemon=True)
+            self.read_thread.start()
+            
+            # 等待第一帧
+            max_wait_time = 5.0
+            wait_start = time.time()
+            while self.latest_frame is None and (time.time() - wait_start) < max_wait_time:
+                # 检查进程是否还在运行
+                if self.ffmpeg_process.poll() is not None:
+                    stderr = self.ffmpeg_process.stderr.read().decode('utf-8', errors='ignore')
+                    # 提取最后500字符，通常包含实际错误信息
+                    error_msg = stderr[-500:] if len(stderr) > 500 else stderr
+                    logger.warning(f"FFmpeg NVDEC 启动失败: {error_msg}")
+                    # 回退到 OpenCV
+                    self.use_nvdec = False
+                    return self._start_opencv()
+                time.sleep(0.1)
+            
+            if self.latest_frame is not None:
+                logger.info(f"NVDEC硬件解码帧读取器已启动: {self.stream_url}")
+                return True
+            else:
+                logger.warning("NVDEC 首帧超时，回退到 OpenCV")
+                self._stop_ffmpeg()
+                self.use_nvdec = False
+                return self._start_opencv()
+                
+        except Exception as e:
+            logger.warning(f"NVDEC 启动失败: {e}，回退到 OpenCV")
+            self._stop_ffmpeg()
+            self.use_nvdec = False
+            return self._start_opencv()
+    
+    def _start_opencv(self) -> bool:
+        """使用 OpenCV 软件解码启动"""
+        try:
+            # 设置 RTSP 超时参数（通过环境变量传递给 FFmpeg 后端）
+            import os
+            os.environ['OPENCV_FFMPEG_CAPTURE_OPTIONS'] = 'rtsp_transport;tcp|timeout;3000000'
+            
+            self.cap = cv2.VideoCapture(self.stream_url, cv2.CAP_FFMPEG)
             if not self.cap.isOpened():
                 logger.error(f"无法打开视频流: {self.stream_url}")
                 return False
+            
+            # 获取实际分辨率
+            self.width = int(self.cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            self.height = int(self.cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
                 
             # 设置缓冲区为1以减少延迟
             self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
             
             self.running = True
-            self.read_thread = threading.Thread(target=self._read_frames, daemon=True)
+            self.read_thread = threading.Thread(target=self._read_frames_opencv, daemon=True)
             self.read_thread.start()
             
             # 等待第一帧可用（最多等待3秒）
@@ -58,18 +259,108 @@ class ThreadedFrameReader:
                 time.sleep(0.1)
             
             if self.latest_frame is not None:
-                logger.info(f"多线程帧读取器已启动，首帧已就绪: {self.stream_url}")
+                logger.info(f"OpenCV软件解码帧读取器已启动: {self.stream_url}")
             else:
-                logger.warning(f"多线程帧读取器已启动，但首帧未就绪（{max_wait_time}s超时）: {self.stream_url}")
+                logger.warning(f"帧读取器已启动，但首帧未就绪（{max_wait_time}s超时）: {self.stream_url}")
             
             return True
             
         except Exception as e:
-            logger.error(f"启动多线程帧读取器失败: {str(e)}")
+            logger.error(f"启动OpenCV帧读取器失败: {str(e)}")
             return False
     
-    def _read_frames(self):
-        """帧读取线程函数"""
+    def _force_stop_ffmpeg(self):
+        """强制停止 FFmpeg 并关闭管道（让阻塞的 read() 立即返回）"""
+        self.running = False
+        with self.frame_lock:
+            self.latest_frame = None
+        
+        if self.ffmpeg_process:
+            # 关键：先关闭 stdout 管道，让阻塞的 read() 立即返回
+            try:
+                if self.ffmpeg_process.stdout:
+                    self.ffmpeg_process.stdout.close()
+            except:
+                pass
+            try:
+                if self.ffmpeg_process.stderr:
+                    self.ffmpeg_process.stderr.close()
+            except:
+                pass
+            # 使用 kill() 而不是 terminate()，更强制
+            try:
+                self.ffmpeg_process.kill()
+            except:
+                pass
+    
+    def _monitor_ffmpeg_process(self):
+        """监控 FFmpeg 进程状态"""
+        no_new_frame_timeout = 5.0  # 5秒没有新帧认为流断开
+        
+        while self.running and self.ffmpeg_process:
+            time.sleep(0.5)
+            
+            # 检查进程是否退出
+            if self.ffmpeg_process.poll() is not None:
+                logger.warning("FFmpeg 进程已退出，流已断开")
+                self._force_stop_ffmpeg()
+                break
+            
+            # 检查是否长时间没有新帧（通过 _last_frame_update_time 判断）
+            with self.frame_lock:
+                last_update = getattr(self, '_last_frame_update_time', time.time())
+            
+            if time.time() - last_update > no_new_frame_timeout:
+                logger.warning(f"FFmpeg 超过{no_new_frame_timeout}秒没有新帧，认为流已断开")
+                self._force_stop_ffmpeg()
+                break
+        
+        logger.info("FFmpeg 监控线程已退出")
+    
+    def _read_frames_ffmpeg(self):
+        """FFmpeg NVDEC 帧读取线程"""
+        frame_size = self.width * self.height * 3
+        
+        # 初始化帧更新时间
+        self._last_frame_update_time = time.time()
+        
+        # 启动监控线程
+        monitor_thread = threading.Thread(target=self._monitor_ffmpeg_process, daemon=True)
+        monitor_thread.start()
+        
+        while self.running and self.ffmpeg_process:
+            try:
+                # 从 FFmpeg stdout 读取原始帧数据
+                raw_frame = self.ffmpeg_process.stdout.read(frame_size)
+                if not self.running:
+                    # 被监控线程终止
+                    break
+                if len(raw_frame) == frame_size:
+                    frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((self.height, self.width, 3))
+                    with self.frame_lock:
+                        self.latest_frame = frame.copy()
+                        self._last_frame_update_time = time.time()  # 更新帧时间戳
+                elif len(raw_frame) == 0:
+                    # FFmpeg 进程已退出或流结束
+                    logger.warning("FFmpeg 输出流已关闭")
+                    self.running = False
+                    with self.frame_lock:
+                        self.latest_frame = None
+                    break
+                # 不完整的帧直接丢弃，继续读取
+                    
+            except Exception as e:
+                if self.running:
+                    logger.error(f"FFmpeg读取帧出错: {str(e)}")
+                break
+        
+        logger.info("FFmpeg 帧读取线程已退出")
+    
+    def _read_frames_opencv(self):
+        """OpenCV 帧读取线程函数"""
+        consecutive_failures = 0
+        max_failures = 50  # 连续50次失败（约5秒）认为流断开
+        
         while self.running:
             try:
                 if self.cap and self.cap.isOpened():
@@ -78,18 +369,43 @@ class ThreadedFrameReader:
                         # 只保留最新帧，线程安全更新
                         with self.frame_lock:
                             self.latest_frame = frame.copy()
+                        consecutive_failures = 0  # 重置失败计数
                     else:
-                        # 读取失败，稍作延迟后继续
+                        # 读取失败
+                        consecutive_failures += 1
+                        if consecutive_failures >= max_failures:
+                            logger.warning(f"OpenCV 连续{consecutive_failures}次读取失败，认为流已断开")
+                            self.running = False
+                            with self.frame_lock:
+                                self.latest_frame = None
+                            break
                         time.sleep(0.1)
                 else:
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_failures:
+                        logger.warning(f"OpenCV 连接已断开，连续{consecutive_failures}次无法读取")
+                        self.running = False
+                        with self.frame_lock:
+                            self.latest_frame = None
+                        break
                     time.sleep(0.1)
             except Exception as e:
                 logger.error(f"读取帧时出错: {str(e)}")
+                consecutive_failures += 1
                 time.sleep(0.1)
+        
+        logger.info("OpenCV 帧读取线程已退出")
     
     def get_latest_frame(self) -> Optional[np.ndarray]:
         """获取最新帧"""
         try:
+            # 检查读取器是否还在运行
+            if not self.running:
+                # 读取器已停止，清空缓存并返回 None
+                with self.frame_lock:
+                    self.latest_frame = None
+                return None
+            
             with self.frame_lock:
                 if self.latest_frame is not None:
                     return self.latest_frame.copy()
@@ -98,6 +414,16 @@ class ThreadedFrameReader:
             logger.error(f"获取最新帧时出错: {str(e)}")
             return None
     
+    def _stop_ffmpeg(self):
+        """停止 FFmpeg 进程"""
+        if self.ffmpeg_process:
+            try:
+                self.ffmpeg_process.terminate()
+                self.ffmpeg_process.wait(timeout=3)
+            except:
+                self.ffmpeg_process.kill()
+            self.ffmpeg_process = None
+    
     def stop(self):
         """停止帧读取"""
         self.running = False
@@ -105,7 +431,10 @@ class ThreadedFrameReader:
             self.read_thread.join(timeout=5)
         if self.cap:
             self.cap.release()
-        logger.info("多线程帧读取器已停止")
+            self.cap = None
+        self._stop_ffmpeg()
+        decoder_type = "NVDEC" if self.use_nvdec else "OpenCV"
+        logger.info(f"{decoder_type}帧读取器已停止")
 
 
 class SharedFrameReader:
@@ -159,9 +488,26 @@ class SharedFrameReader:
             
             if was_empty:
                 # 第一个订阅者，需要启动帧读取器
-                return self._start_reading(new_min_interval)
+                if not self._start_reading(new_min_interval):
+                    # 启动失败，回滚订阅者添加
+                    self.subscribers.discard(subscriber_id)
+                    self.subscriber_intervals.pop(subscriber_id, None)
+                    self.ref_count = max(0, self.ref_count - 1)
+                    self.stats["subscribers_count"] = len(self.subscribers)
+                    logger.error(f"摄像头 {self.camera_id} 帧读取器启动失败，已移除订阅者 {subscriber_id}")
+                    return False
+                return True
             else:
-                # 已有订阅者，检查是否需要调整模式
+                # 已有订阅者，但需要检查当前模式是否有效
+                if self.mode is None:
+                    # 之前的订阅者启动失败，当前共享读取器不可用
+                    self.subscribers.discard(subscriber_id)
+                    self.subscriber_intervals.pop(subscriber_id, None)
+                    self.ref_count = max(0, self.ref_count - 1)
+                    self.stats["subscribers_count"] = len(self.subscribers)
+                    logger.error(f"摄像头 {self.camera_id} 共享读取器不可用(mode=None)，拒绝订阅者 {subscriber_id}")
+                    return False
+                # 检查是否需要调整模式
                 return self._maybe_adjust_mode(new_min_interval)
     
     def remove_subscriber(self, subscriber_id: int):
@@ -196,45 +542,80 @@ class SharedFrameReader:
             
             # 确定工作模式
             if frame_interval >= self.connection_overhead_threshold:
+                # 低帧率：使用截图模式，但先验证截图功能可用
+                logger.info(f"摄像头 {self.camera_id} 尝试启动按需截图模式，间隔: {frame_interval}s")
+                
+                # 测试截图是否可用
+                test_frame = self._get_snapshot_frame()
+                if test_frame is None:
+                    logger.error(f"摄像头 {self.camera_id} 截图模式启动失败，无法获取截图")
+                    self.mode = None
+                    return False
+                
                 self.mode = "on_demand"
-                logger.info(f"摄像头 {self.camera_id} 共享读取器采用按需截图模式，间隔: {frame_interval}s")
+                logger.info(f"摄像头 {self.camera_id} ✅ 按需截图模式已启动")
                 return True
             else:
-                self.mode = "persistent"
-                logger.info(f"摄像头 {self.camera_id} 共享读取器采用持续连接模式，间隔: {frame_interval}s")
+                # 高帧率：必须使用持续连接模式
+                if self._try_start_persistent_mode():
+                    return True
                 
-                # 获取流播放信息
-                play_info = wvp_client.play_channel(self.camera_id)
-                if not play_info:
-                    logger.error(f"摄像头 {self.camera_id} 无法获取流播放信息")
-                    return False
-                
-                # 选择最佳流地址（优先RTSP）
-                if play_info.get("rtsp"):
-                    self.stream_url = play_info["rtsp"]
-                elif play_info.get("flv"):
-                    self.stream_url = play_info["flv"]
-                elif play_info.get("hls"):
-                    self.stream_url = play_info["hls"]
-                elif play_info.get("rtmp"):
-                    self.stream_url = play_info["rtmp"]
-                else:
-                    logger.error(f"摄像头 {self.camera_id} 无可用的流地址")
-                    return False
-                
-                logger.info(f"摄像头 {self.camera_id} 共享流地址: {self.stream_url}")
-                
-                # 启动ThreadedFrameReader
-                self.threaded_reader = ThreadedFrameReader(self.stream_url)
-                if not self.threaded_reader.start():
-                    logger.error(f"摄像头 {self.camera_id} 共享ThreadedFrameReader启动失败")
-                    return False
-                    
-                logger.info(f"摄像头 {self.camera_id} 共享持续连接模式已启动")
-                return True
+                # 持续连接模式启动失败，直接返回失败（不回退到截图模式）
+                logger.error(f"摄像头 {self.camera_id} 持续连接模式启动失败，高帧率任务无法使用截图模式")
+                self.mode = None
+                return False
                 
         except Exception as e:
             logger.error(f"启动摄像头 {self.camera_id} 共享帧读取器失败: {str(e)}")
+            self.mode = None
+            return False
+    
+    def _try_start_persistent_mode(self) -> bool:
+        """尝试启动持续连接模式"""
+        try:
+            logger.info(f"摄像头 {self.camera_id} 尝试启动持续连接模式，间隔: {self.current_frame_interval}s")
+            
+            # 获取流播放信息
+            play_info = wvp_client.play_channel(self.camera_id)
+            if not play_info:
+                logger.warning(f"摄像头 {self.camera_id} 无法获取流播放信息")
+                return False
+            
+            # 选择最佳流地址（优先RTSP）
+            if play_info.get("rtsp"):
+                self.stream_url = play_info["rtsp"]
+            elif play_info.get("flv"):
+                self.stream_url = play_info["flv"]
+            elif play_info.get("hls"):
+                self.stream_url = play_info["hls"]
+            elif play_info.get("rtmp"):
+                self.stream_url = play_info["rtmp"]
+            else:
+                logger.warning(f"摄像头 {self.camera_id} 无可用的流地址")
+                return False
+            
+            logger.info(f"摄像头 {self.camera_id} 共享流地址: {self.stream_url}")
+            
+            # 启动ThreadedFrameReader
+            self.threaded_reader = ThreadedFrameReader(self.stream_url)
+            if not self.threaded_reader.start():
+                logger.warning(f"摄像头 {self.camera_id} ThreadedFrameReader启动失败")
+                self.threaded_reader = None
+                return False
+            
+            # 所有步骤都成功，设置模式
+            self.mode = "persistent"
+            logger.info(f"摄像头 {self.camera_id} ✅ 持续连接模式已启动")
+            return True
+            
+        except Exception as e:
+            logger.warning(f"启动摄像头 {self.camera_id} 持续连接模式异常: {str(e)}")
+            if self.threaded_reader:
+                try:
+                    self.threaded_reader.stop()
+                except:
+                    pass
+                self.threaded_reader = None
             return False
     
     def _maybe_adjust_mode(self, new_min_interval: float) -> bool:
@@ -308,7 +689,7 @@ class SharedFrameReader:
                     
                 return frame
                 
-            else:
+            elif self.mode == "on_demand":
                 # 按需模式：调用WVP截图接口
                 frame = self._get_snapshot_frame()
                 if frame is not None:
@@ -317,6 +698,12 @@ class SharedFrameReader:
                     self.stats["failed_requests"] += 1
                     
                 return frame
+            
+            else:
+                # mode 为 None，说明启动失败，不应该继续运行
+                logger.error(f"摄像头 {self.camera_id} 共享帧读取器未正确初始化 (mode={self.mode})")
+                self.stats["failed_requests"] += 1
+                return None
                 
         except Exception as e:
             logger.error(f"获取摄像头 {self.camera_id} 共享帧数据失败: {str(e)}")

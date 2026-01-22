@@ -281,15 +281,13 @@ class PersonTrackSkill(BaseSkill):
             if self.enable_dwell_analysis:
                 dwell_events = self._analyze_dwell_time(tracked_results)
 
-            # 电子围栏过滤
+            # 电子围栏过滤（支持trigger_mode和归一化坐标）
             if self.is_fence_config_valid(fence_config):
-                self.log("debug", f"应用电子围栏过滤: {fence_config}")
-                filtered_results = []
-                for detection in tracked_results:
-                    point = self._get_detection_point(detection)
-                    if point and self.is_point_inside_fence(point, fence_config):
-                        filtered_results.append(detection)
-                tracked_results = filtered_results
+                height, width = image.shape[:2]
+                image_size = (width, height)
+                trigger_mode = fence_config.get("trigger_mode", "inside")
+                self.log("debug", f"应用电子围栏过滤: trigger_mode={trigger_mode}, image_size={image_size}")
+                tracked_results = self.filter_detections_by_fence(tracked_results, fence_config, image_size)
                 self.log("debug", f"围栏过滤后结果数量: {len(tracked_results)}")
 
             # 安全指标分析

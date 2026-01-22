@@ -727,19 +727,16 @@ def get_alert_process(
     logger.info(f"获取报警处理流程成功: ID={alert_id}, 步骤数: {process_summary['total_steps']}")
     return response
 
-@router.post("/test", description="发送测试报警（高性能优化版本）")
+@router.post("/test", description="发送测试报警")
 async def send_test_alert(
     db: Session = Depends(get_db)
 ):
     """
-    🚀 高性能测试报警接口 - 异步处理优化
+    测试报警接口 - 异步处理
     
-    优化策略：
-    1. 快速响应：接口立即返回，后台异步处理
-    2. 异步MinIO上传：避免IO阻塞
-    3. 数据库查询缓存：减少重复查询
+    接口立即返回，后台异步处理预警
     """
-    logger.info("收到发送测试报警请求 - 高性能版本")
+    logger.info("收到发送测试报警请求")
     
     try:
         # 导入必要的模块
@@ -751,7 +748,7 @@ async def send_test_alert(
         import asyncio
         from datetime import datetime
         
-        # 🚀 优化1：预构建轻量级模拟数据
+        # 构建模拟数据
         mock_task = AITask(
             id=9999, name="测试报警任务", description="高性能测试", status=True,
             alert_level=1, frame_rate=1.0, task_type="detection", config='{}',
@@ -760,7 +757,7 @@ async def send_test_alert(
             electronic_fence='{"enabled": true, "points": [[{"x": 100, "y": 80}, {"x": 500, "y": 80}, {"x": 500, "y": 350}, {"x": 100, "y": 350}]], "trigger_mode": "inside"}'
         )
         
-        # 🚀 优化2：简化报警数据结构
+        # 模拟报警数据
         mock_alert_data = {
             "detections": [
                 {"bbox": [383, 113, 472, 317], "confidence": 0.82, "class_name": "果蔬生鲜"},
@@ -795,7 +792,7 @@ async def send_test_alert(
         cv2.putText(mock_frame, timestamp_text, (10, 25), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         cv2.putText(mock_frame, "摄像头ID: 123", (10, 50), cv2.FONT_HERSHEY_SIMPLEX, 0.6, (255, 255, 255), 2)
         
-        # 🚀 优化6：异步处理 - 立即返回响应，后台处理
+        # 异步处理 - 立即返回响应，后台处理
         task_id = f"test_{int(datetime.now().timestamp())}"
         
         # 创建异步任务，不等待完成
@@ -803,7 +800,7 @@ async def send_test_alert(
             try:
                 result = await asyncio.get_event_loop().run_in_executor(
                     task_executor.alert_executor,  # 使用现有线程池
-                    task_executor._generate_alert_async_optimized,  # 新的优化方法
+                    task_executor._generate_alert_async,  # 标准预警生成方法
                     mock_task, mock_alert_data, mock_frame, 1
                 )
                 if result:
@@ -816,19 +813,13 @@ async def send_test_alert(
         # 启动异步任务（fire-and-forget）
         asyncio.create_task(process_alert_async())
         
-        # 🚀 立即返回响应（不等待MinIO上传）
+        # 立即返回响应
         logger.info(f"✅ 测试报警请求已接收并进入异步处理队列: task_id={task_id}")
         return {
             "success": True,
             "message": "测试报警已进入处理队列，正在后台异步处理",
             "task_id": task_id,
-            "method": "async_optimized",
-            "optimization": {
-                "async_processing": True,
-                "database_cache": "摄像头和技能信息缓存5分钟",
-                "fast_response": "立即返回，后台处理",
-                "expected_improvement": "响应时间从数秒降至数十毫秒"
-            }
+            "method": "async"
         }
             
     except Exception as e:

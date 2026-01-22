@@ -486,6 +486,14 @@ class SystemStartupService:
             logger.info("✅ 全局帧读取器管理池已关闭")
         except Exception as e:
             logger.error(f"❌ 关闭全局帧读取器管理池失败: {str(e)}")
+        
+        # 关闭本地视频推流
+        try:
+            from app.services.local_video_streamer import local_video_stream_manager
+            local_video_stream_manager.stop_all()
+            logger.info("✅ 本地视频推流已关闭")
+        except Exception as e:
+            logger.error(f"❌ 关闭本地视频推流失败: {str(e)}")
     
     def _update_service_status(self, service_name: str, status: str, message: str):
         """更新服务状态"""

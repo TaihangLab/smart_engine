@@ -315,7 +315,8 @@ class Settings(BaseSettings):
 
     # RTSP推流配置
     RTSP_STREAMING_ENABLED: bool = Field(default=True, description="是否全局启用RTSP推流功能")
-    RTSP_STREAMING_BACKEND: str = Field(default="pyav", description="推流后端选择: 'pyav'(推荐，高性能), 'ffmpeg'(兼容模式)")
+    RTSP_STREAMING_BACKEND: str = Field(default="ffmpeg", description="推流后端选择: 'ffmpeg'(推荐，NVENC硬件编码), 'pyav'(软件编码)")
+    RTSP_STREAMING_CODEC: str = Field(default="h265", description="视频编码格式: 'h264'(兼容性好), 'h265'/'hevc'(压缩率高)")
     RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://192.168.0.14/detection", description="RTSP推流基础地址")
     RTSP_STREAMING_SIGN: str = Field(default="a9b7ba70783b617e9998dc4dd82eb3c5", description="RTSP推流验证签名")
     RTSP_STREAMING_DEFAULT_FPS: float = Field(default=30.0, description="RTSP推流默认帧率")
@@ -350,12 +351,7 @@ class Settings(BaseSettings):
     ALERT_VIDEO_ENCODING_TIMEOUT_SECONDS: int = Field(default=45, description="视频编码超时时间（秒）")
     ALERT_VIDEO_WIDTH: int = Field(default=1280, description="预警视频宽度（像素）")
     ALERT_VIDEO_HEIGHT: int = Field(default=720, description="预警视频高度（像素）")
-
-
-    # H.264 (AVC) 视频编码配置
-    ALERT_VIDEO_CODEC: str = Field(default="avc1", description="视频编码格式 (avc1=H.264)")
-    ALERT_VIDEO_BITRATE: int = Field(default=2000000, description="视频码率 (bps, 2Mbps默认)")
-    ALERT_VIDEO_GOP_SIZE: int = Field(default=30, description="GOP大小 (关键帧间隔)")
+    ALERT_VIDEO_CODEC: str = Field(default="h265", description="视频编码格式: 'h264'(兼容性好), 'h265'/'hevc'(压缩率高)")
 
     # 针对高优先级预警的视频配置
     ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS: float = Field(default=5.0, description="1-2级预警前缓冲时间（秒）")
