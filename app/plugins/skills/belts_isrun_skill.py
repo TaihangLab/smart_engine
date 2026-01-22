@@ -48,7 +48,7 @@ class BeltStartStopSkill(BaseSkill):
 
             # 光流相关配置
             "flow_method": "farneback",
-            "belt_motion_threshold": 0.5,          # 平均光流模长阈值，需按实际视频调参
+            "belt_motion_threshold": 0.1,          # 平均光流模长阈值，需按实际视频调参
             "belt_motion_consecutive_frames": 3,   # 连续多少帧超过 / 低于阈值才切换状态
         },
         "alert_definitions": (
@@ -474,28 +474,25 @@ class BeltStartStopSkill(BaseSkill):
 
             # 7. 电子围栏：筛选处于危险区域（皮带区域）的人员
             persons_in_fence: List[Dict[str, Any]] = []
-            
-            # 详细日志：电子围栏配置状态
-            self.log("info", f"电子围栏配置检查: fence_config={'有配置' if fence_config else '无配置'}, "
-                            f"有效性={self.is_fence_config_valid(fence_config)}")
-            
+
+            # --- 修改开始：与安全帽检测逻辑保持一致 ---
             if self.is_fence_config_valid(fence_config):
-                self.log("info", f"应用电子围栏过滤，人员总数: {len(person_detections)}")
-                for det in person_detections:
-                    point = self._get_detection_point(det)  # 检测框中心点
-                    if point:
-                        is_inside = self.is_point_inside_fence(point, fence_config)
-                        self.log("debug", f"人员中心点 {point}, 在围栏内: {is_inside}, "
-                                        f"置信度: {det.get('confidence', 0):.2f}")
-                        if is_inside:
-                            persons_in_fence.append(det)
+                # 获取原始图像尺寸用于坐标转换
+                height, width = image.shape[:2]
+                image_size = (width, height)
+
+                trigger_mode = fence_config.get("trigger_mode", "inside")
+                self.log("info", f"应用电子围栏过滤: trigger_mode={trigger_mode}, image_size={image_size}")
+
+                # 直接调用基类的通用过滤方法
+                # 注意：传入的是 person_detections，返回的是过滤后的列表
+                persons_in_fence = self.filter_detections_by_fence(person_detections, fence_config, image_size)
+
                 self.log("info", f"围栏过滤后危险区域内人员数量: {len(persons_in_fence)}")
+
             elif fence_config:
-                self.log(
-                    "info",
-                    f"围栏配置无效，跳过电子围栏判断: enabled={fence_config.get('enabled', False)}, "
-                    f"points_count={len(fence_config.get('points', []))}",
-                )
+                self.log("info",
+                         f"围栏配置无效，跳过过滤: enabled={fence_config.get('enabled', False)}, points_count={len(fence_config.get('points', []))}")
             else:
                 self.log("info", "未提供电子围栏配置，persons_in_fence 保持为空")
 
