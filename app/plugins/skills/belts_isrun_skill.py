@@ -316,24 +316,15 @@ class BeltStartStopSkill(BaseSkill):
         """
         获取检测对象的关键点（用于电子围栏判断）
 
-        约定：
-          - 对于 person：使用人体框底边中心点（脚部附近），用于判断是否进入皮带危险区域围栏；
-          - 对于其他目标（如 belts）：用框中心（一般不会用于围栏）。
+        使用检测框中心点进行判断
         """
         bbox = detection.get("bbox", [])
         if len(bbox) < 4:
             return None
 
         x1, y1, x2, y2 = bbox
-        target_type = detection.get("target_type", "")
-
-        # 人员：脚点（下边中心）
-        if target_type == "person" or detection.get("class_name") == "person":
-            px = (x1 + x2) / 2.0
-            py = y2
-            return (px, py)
-
-        # 其他：默认用框中心
+        
+        # 使用框中心点
         cx = (x1 + x2) / 2.0
         cy = (y1 + y2) / 2.0
         return (cx, cy)
@@ -352,6 +343,11 @@ class BeltStartStopSkill(BaseSkill):
           - 电子围栏由前端绘制，表示皮带危险区域。
         """
         persons_in_fence_count = len(persons_in_fence)
+        
+        # 详细日志：报警判断条件
+        self.log("info", f"报警判断: belt_state={belt_state}, "
+                        f"persons_in_fence_count={persons_in_fence_count}, "
+                        f"total_person_count={total_person_count}")
 
         alert_triggered = False
         alert_name = ""
@@ -359,6 +355,7 @@ class BeltStartStopSkill(BaseSkill):
         alert_description = ""
 
         if belt_state == "running" and persons_in_fence_count > 0:
+            self.log("warning", f"触发报警! 皮带运行且围栏内有 {persons_in_fence_count} 人")
             alert_triggered = True
             alert_name = "皮带运行人员进入危险区"
             alert_type = "安全生产预警"
@@ -367,6 +364,14 @@ class BeltStartStopSkill(BaseSkill):
                 f"（共检测到人员 {total_person_count} 名）。"
                 "请立即通知现场人员远离皮带，确保安全生产。"
             )
+        else:
+            # 未触发报警时也记录原因
+            if belt_state != "running":
+                self.log("info", f"未触发报警: 皮带未运行 (state={belt_state})")
+            elif persons_in_fence_count == 0:
+                self.log("info", f"未触发报警: 围栏内无人员")
+            else:
+                self.log("info", f"未触发报警: 其他原因")
 
         is_safe = not alert_triggered
 
@@ -469,12 +474,21 @@ class BeltStartStopSkill(BaseSkill):
 
             # 7. 电子围栏：筛选处于危险区域（皮带区域）的人员
             persons_in_fence: List[Dict[str, Any]] = []
+            
+            # 详细日志：电子围栏配置状态
+            self.log("info", f"电子围栏配置检查: fence_config={'有配置' if fence_config else '无配置'}, "
+                            f"有效性={self.is_fence_config_valid(fence_config)}")
+            
             if self.is_fence_config_valid(fence_config):
-                self.log("info", f"应用电子围栏过滤: {fence_config}")
+                self.log("info", f"应用电子围栏过滤，人员总数: {len(person_detections)}")
                 for det in person_detections:
-                    point = self._get_detection_point(det)  # 脚点
-                    if point and self.is_point_inside_fence(point, fence_config):
-                        persons_in_fence.append(det)
+                    point = self._get_detection_point(det)  # 检测框中心点
+                    if point:
+                        is_inside = self.is_point_inside_fence(point, fence_config)
+                        self.log("debug", f"人员中心点 {point}, 在围栏内: {is_inside}, "
+                                        f"置信度: {det.get('confidence', 0):.2f}")
+                        if is_inside:
+                            persons_in_fence.append(det)
                 self.log("info", f"围栏过滤后危险区域内人员数量: {len(persons_in_fence)}")
             elif fence_config:
                 self.log(
@@ -482,6 +496,8 @@ class BeltStartStopSkill(BaseSkill):
                     f"围栏配置无效，跳过电子围栏判断: enabled={fence_config.get('enabled', False)}, "
                     f"points_count={len(fence_config.get('points', []))}",
                 )
+            else:
+                self.log("info", "未提供电子围栏配置，persons_in_fence 保持为空")
 
             # 8. 光流计算 + 皮带启停状态
             motion_value = self._compute_belt_motion(image, belt_detections)
