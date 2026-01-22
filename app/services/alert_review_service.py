@@ -415,7 +415,7 @@ class AlertReviewService:
             review_dao = ReviewRecordDAO(db)
             review_record = review_dao.create_review_record(
                 alert_id=alert.alert_id,
-                review_type="automatic",  # 自动复判
+                review_type="auto",  # 多模态大模型复判
                 reviewer_name="AI复判系统",
                 review_notes=review_summary
             )
@@ -583,6 +583,148 @@ class AlertReviewService:
         except Exception as e:
             self.logger.error(f"提取复判摘要失败: {str(e)}")
             return "摘要提取失败"
+
+    async def process_review(
+        self,
+        alert_data: Dict[str, Any],
+        skill_class_id: int,
+        max_retries: int = 3,
+        retry_delay: float = 2.0
+    ) -> bool:
+        """
+        处理复判任务（RabbitMQ 服务调用入口）
+
+        特性：
+        - 重试机制：预警可能还没写入数据库
+        - 状态检查：避免覆盖用户已处理的预警
+        - 去重检查：避免重复创建复判记录
+
+        Args:
+            alert_data: 预警数据
+            skill_class_id: 复判技能类ID
+            max_retries: 最大重试次数
+            retry_delay: 重试延迟（秒）
+
+        Returns:
+            是否处理成功
+        """
+        task_id = alert_data.get("task_id")
+        camera_id = alert_data.get("camera_id")
+
+        self.logger.info(f"🔍 开始处理复判任务: task_id={task_id}, skill_class_id={skill_class_id}")
+
+        try:
+            # 构建复判数据
+            review_data = {
+                "task_id": task_id,
+                "llm_skill_class_id": skill_class_id,
+                "alert_data": alert_data,
+                "review_type": "auto",
+                "trigger_source": "rabbitmq_queue"
+            }
+
+            # 执行复判（带重试机制）
+            for attempt in range(max_retries):
+                try:
+                    # 先检查预警是否已存在且状态是否允许复判
+                    can_proceed, reason = await self._check_can_proceed_review(alert_data)
+
+                    if not can_proceed:
+                        self.logger.info(f"⏭️ 跳过复判: {reason}")
+                        return True  # 返回 True 表示"处理成功"（无需处理）
+
+                    # 执行复判
+                    result = await self.execute_review_for_alert_data(review_data)
+
+                    if result.get("success"):
+                        self.logger.info(f"✅ 复判任务处理成功: task_id={task_id}")
+                        return True
+                    else:
+                        error_msg = result.get("message", "未知错误")
+                        self.logger.warning(f"⚠️ 复判执行返回失败: {error_msg}")
+
+                        # 如果是预警记录不存在，等待后重试
+                        if "未找到" in error_msg or "不存在" in error_msg:
+                            if attempt < max_retries - 1:
+                                wait_time = retry_delay * (attempt + 1)
+                                self.logger.info(f"🔄 预警记录可能未就绪，{wait_time}秒后重试 ({attempt+1}/{max_retries})")
+                                await asyncio.sleep(wait_time)
+                                continue
+
+                        return False
+
+                except Exception as e:
+                    self.logger.error(f"❌ 复判执行异常 (attempt {attempt+1}): {str(e)}")
+
+                    if attempt < max_retries - 1:
+                        wait_time = retry_delay * (attempt + 1)
+                        await asyncio.sleep(wait_time)
+                        continue
+                    else:
+                        raise
+
+            return False
+
+        except Exception as e:
+            self.logger.error(f"❌ 处理复判任务失败: {str(e)}", exc_info=True)
+            return False
+
+    async def _check_can_proceed_review(self, alert_data: Dict[str, Any]) -> tuple:
+        """
+        检查是否可以继续执行复判
+
+        检查条件：
+        1. 预警是否已被用户处理（状态不是 PENDING）
+        2. 是否已有复判记录
+
+        Args:
+            alert_data: 预警数据
+
+        Returns:
+            (can_proceed, reason) - 是否可以继续，原因说明
+        """
+        db = None
+        try:
+            db = next(get_db())
+
+            # 查找预警记录
+            alert = self._find_alert_from_data(db, alert_data)
+
+            if alert is None:
+                # 预警记录不存在，可能还没写入数据库，允许继续（后续会重试）
+                return True, "预警记录未找到，将在后续步骤处理"
+
+            # 检查预警状态
+            from app.models.alert import AlertStatus
+            if alert.status != AlertStatus.PENDING:
+                status_names = {
+                    AlertStatus.PENDING: "待处理",
+                    AlertStatus.PROCESSING: "处理中",
+                    AlertStatus.RESOLVED: "已处理",
+                    AlertStatus.ARCHIVED: "已归档",
+                    AlertStatus.FALSE_ALARM: "误报"
+                }
+                status_name = status_names.get(alert.status, str(alert.status))
+                return False, f"预警已被处理，当前状态: {status_name}"
+
+            # 检查是否已有复判记录
+            from app.db.review_record_dao import ReviewRecordDAO
+            review_dao = ReviewRecordDAO(db)
+            existing_reviews = review_dao.get_review_records_by_alert_id(alert.alert_id)
+
+            if existing_reviews and len(existing_reviews) > 0:
+                return False, f"预警已有复判记录: review_id={existing_reviews[0].review_id}"
+
+            return True, "检查通过，可以执行复判"
+
+        except Exception as e:
+            self.logger.warning(f"检查复判条件时出错: {str(e)}")
+            # 出错时允许继续，让后续逻辑处理
+            return True, f"检查时出错: {str(e)}"
+        finally:
+            if db:
+                db.close()
+
 
 # 全局复判服务实例
 alert_review_service = AlertReviewService() 

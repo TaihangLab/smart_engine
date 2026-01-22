@@ -192,17 +192,17 @@ class SystemStartupService:
             except Exception as e:
                 logger.error(f"❌ 初始化Redis连接失败: {str(e)}")
             
-            # 7. 启动预警复判队列服务
-            logger.info("🔄 启动预警复判队列服务...")
+            # 7. 启动预警复判 RabbitMQ 队列服务
+            logger.info("🐰 启动预警复判 RabbitMQ 队列服务...")
             try:
-                from app.services.alert_review_queue_service import start_alert_review_queue_service
+                from app.services.alert_review_rabbitmq_service import alert_review_rabbitmq_service
                 if getattr(settings, 'ALERT_REVIEW_QUEUE_ENABLED', True):
-                    start_alert_review_queue_service()
-                    logger.info("✅ 预警复判队列服务已启动")
+                    alert_review_rabbitmq_service.start()
+                    logger.info("✅ 预警复判 RabbitMQ 队列服务已启动")
                 else:
                     logger.info("⚪ 预警复判队列服务已禁用")
             except Exception as e:
-                logger.error(f"❌ 启动预警复判队列服务失败: {str(e)}")
+                logger.error(f"❌ 启动预警复判 RabbitMQ 队列服务失败: {str(e)}")
             
             # 8. 启动LLM任务执行器
             logger.info("🚀 启动LLM任务执行器...")
@@ -434,13 +434,13 @@ class SystemStartupService:
         except Exception as e:
             logger.error(f"❌ 关闭LLM任务执行器失败: {str(e)}")
         
-        # 关闭预警复判队列服务
+        # 关闭预警复判 RabbitMQ 队列服务
         try:
-            from app.services.alert_review_queue_service import stop_alert_review_queue_service
-            stop_alert_review_queue_service()
-            logger.info("✅ 预警复判队列服务已关闭")
+            from app.services.alert_review_rabbitmq_service import alert_review_rabbitmq_service
+            alert_review_rabbitmq_service.stop()
+            logger.info("✅ 预警复判 RabbitMQ 队列服务已关闭")
         except Exception as e:
-            logger.error(f"❌ 关闭预警复判队列服务失败: {str(e)}")
+            logger.error(f"❌ 关闭预警复判 RabbitMQ 队列服务失败: {str(e)}")
         
         # 关闭Redis连接
         try:

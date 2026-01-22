@@ -354,15 +354,15 @@ async def get_review_enabled_tasks(
 
 @router.get("/review-service/status",
            summary="获取复判服务状态",
-           description="获取复判队列服务的运行状态")
+           description="获取复判 RabbitMQ 队列服务的运行状态")
 async def get_review_service_status() -> Dict[str, Any]:
     """获取复判队列服务状态"""
-    
-    from app.services.alert_review_queue_service import alert_review_queue_service
-    
+
+    from app.services.alert_review_rabbitmq_service import alert_review_rabbitmq_service
+
     try:
-        queue_status = alert_review_queue_service.get_queue_status()
-        
+        queue_status = alert_review_rabbitmq_service.get_queue_status()
+
         return {
             "status": "running" if queue_status.get("is_running", False) else "stopped",
             "is_running": queue_status.get("is_running", False),
@@ -370,8 +370,9 @@ async def get_review_service_status() -> Dict[str, Any]:
             "processing_count": queue_status.get("processing_count", 0),
             "completed_count": queue_status.get("completed_count", 0),
             "failed_count": queue_status.get("failed_count", 0),
-            "service_type": "alert_review_queue_service",
-            "description": "基于Redis队列的可靠复判服务"
+            "dlq_count": queue_status.get("dlq_count", 0),
+            "service_type": "alert_review_rabbitmq_service",
+            "description": "基于 RabbitMQ 的可靠复判服务"
         }
     except Exception as e:
         logger.error(f"获取复判服务状态失败: {str(e)}")
@@ -389,26 +390,26 @@ async def get_review_service_status() -> Dict[str, Any]:
 async def start_review_service() -> Dict[str, Any]:
     """
     启动复判队列服务（仅供调试）
-    
+
     ⚠️ 注意：复判服务已配置为随系统自动启动，正常情况下无需手动启动。
     此接口仅用于调试或异常恢复场景。
     """
-    
-    from app.services.alert_review_queue_service import alert_review_queue_service
-    
+
+    from app.services.alert_review_rabbitmq_service import alert_review_rabbitmq_service
+
     try:
-        if alert_review_queue_service.is_running:
+        if alert_review_rabbitmq_service.is_running:
             return {
-                "success": False, 
+                "success": False,
                 "message": "复判服务已经在运行（系统启动时已自动启动）",
                 "auto_start": True
             }
-        
+
         logger.warning("⚠️ 手动启动复判服务（调试模式）")
-        alert_review_queue_service.start()
+        alert_review_rabbitmq_service.start()
         return {
-            "success": True, 
-            "message": "复判队列服务手动启动成功",
+            "success": True,
+            "message": "复判 RabbitMQ 队列服务手动启动成功",
             "note": "复判服务通常由系统自动启动，此次为手动启动"
         }
     except Exception as e:
@@ -422,26 +423,26 @@ async def start_review_service() -> Dict[str, Any]:
 async def stop_review_service() -> Dict[str, Any]:
     """
     停止复判队列服务（仅供调试）
-    
+
     ⚠️ 警告：停止复判服务后，系统将无法自动过滤误报预警！
     此接口仅用于调试或维护场景，不建议在生产环境使用。
     """
-    
-    from app.services.alert_review_queue_service import alert_review_queue_service
-    
+
+    from app.services.alert_review_rabbitmq_service import alert_review_rabbitmq_service
+
     try:
-        if not alert_review_queue_service.is_running:
+        if not alert_review_rabbitmq_service.is_running:
             return {
-                "success": False, 
+                "success": False,
                 "message": "复判服务未在运行",
                 "note": "复判服务应该在系统启动时自动运行"
             }
-        
+
         logger.warning("⚠️ 手动停止复判服务（调试模式），预警复判功能将不可用")
-        alert_review_queue_service.stop()
+        alert_review_rabbitmq_service.stop()
         return {
-            "success": True, 
-            "message": "复判队列服务已停止",
+            "success": True,
+            "message": "复判 RabbitMQ 队列服务已停止",
             "warning": "预警复判功能已停止，误报将不再被自动过滤"
         }
     except Exception as e:

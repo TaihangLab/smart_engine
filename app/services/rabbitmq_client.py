@@ -46,7 +46,12 @@ class RabbitMQClient:
                 port=settings.RABBITMQ_PORT,
                 credentials=credentials,
                 heartbeat=600,
-                blocked_connection_timeout=300
+                blocked_connection_timeout=300,
+                # 增加连接稳定性参数
+                connection_attempts=3,
+                retry_delay=2.0,
+                socket_timeout=30.0,
+                stack_timeout=30.0
             )
             
             # 创建连接和通道
@@ -124,38 +129,69 @@ class RabbitMQClient:
             logger.error(f"❌ 配置死信队列失败: {str(e)}")
             raise
     
-    def publish_alert(self, alert_data: Dict[str, Any]) -> bool:
-        """发布报警消息到RabbitMQ"""
-        if not self.is_connected:
-            if not self._connect():
+    def publish_alert(self, alert_data: Dict[str, Any], max_retries: int = 3) -> bool:
+        """发布报警消息到RabbitMQ - 增强版本，带自动重连"""
+        for attempt in range(max_retries):
+            if not self.is_connected:
+                if not self._connect():
+                    if attempt < max_retries - 1:
+                        time.sleep(1)
+                        continue
+                    return False
+            
+            try:
+                # 检查通道状态
+                if not self.channel or self.channel.is_closed:
+                    logger.warning("📡 通道已关闭，尝试重新连接...")
+                    self.is_connected = False
+                    if not self._connect():
+                        continue
+                
+                # 将消息转换为JSON
+                message = json.dumps(alert_data)
+                
+                # 发布消息
+                self.channel.basic_publish(
+                    exchange=settings.RABBITMQ_ALERT_EXCHANGE,
+                    routing_key=settings.RABBITMQ_ALERT_ROUTING_KEY,
+                    body=message,
+                    properties=pika.BasicProperties(
+                        delivery_mode=2,  # 持久化消息
+                        content_type='application/json',
+                        headers={
+                            'retry_count': 0,  # 初始重试次数
+                            'first_attempt_time': str(int(time.time() * 1000))  # 首次尝试时间戳
+                        }
+                    )
+                )
+                
+                logger.info(f"📤 已发布报警消息: 类型={alert_data.get('alert_type', 'unknown')}")
+                return True
+                
+            except IndexError as e:
+                # 捕获 pika 内部的 "pop from an empty deque" 错误
+                logger.warning(f"⚠️ pika内部错误 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                self.is_connected = False
+                if attempt < max_retries - 1:
+                    time.sleep(0.5 * (attempt + 1))  # 递增延迟
+                    continue
+                    
+            except (pika.exceptions.AMQPConnectionError, 
+                    pika.exceptions.AMQPChannelError,
+                    pika.exceptions.StreamLostError) as e:
+                logger.warning(f"⚠️ 连接错误 (尝试 {attempt + 1}/{max_retries}): {str(e)}")
+                self.is_connected = False
+                if attempt < max_retries - 1:
+                    time.sleep(1)
+                    continue
+                    
+            except Exception as e:
+                logger.error(f"❌ 发布报警消息失败: {str(e)}")
+                self.is_connected = False
                 return False
         
-        try:
-            # 将消息转换为JSON
-            message = json.dumps(alert_data)
-            
-            # 发布消息
-            self.channel.basic_publish(
-                exchange=settings.RABBITMQ_ALERT_EXCHANGE,
-                routing_key=settings.RABBITMQ_ALERT_ROUTING_KEY,
-                body=message,
-                properties=pika.BasicProperties(
-                    delivery_mode=2,  # 持久化消息
-                    content_type='application/json',
-                    headers={
-                        'retry_count': 0,  # 初始重试次数
-                        'first_attempt_time': str(int(time.time() * 1000))  # 首次尝试时间戳
-                    }
-                )
-            )
-            
-            logger.info(f"📤 已发布报警消息: 类型={alert_data.get('alert_type', 'unknown')}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"❌ 发布报警消息失败: {str(e)}")
-            self.is_connected = False
-            return False
+        logger.error(f"❌ 发布报警消息失败，已重试 {max_retries} 次")
+        return False
     
     def get_dead_letter_messages(self, max_count: int = 100) -> List[Dict[str, Any]]:
         """获取死信队列中的消息"""
@@ -470,29 +506,50 @@ class RabbitMQClient:
         logger.warning("⚠️ RabbitMQ消费者线程已退出")
     
     def _republish_with_retry(self, message_data: Dict[str, Any], retry_count: int) -> bool:
-        """重新发布消息（带重试计数）"""
-        try:
-            message_json = json.dumps(message_data)
-            
-            # 发布消息（延迟一段时间再重试）
-            self.channel.basic_publish(
-                exchange=settings.RABBITMQ_ALERT_EXCHANGE,
-                routing_key=settings.RABBITMQ_ALERT_ROUTING_KEY,
-                body=message_json,
-                properties=pika.BasicProperties(
-                    delivery_mode=2,
-                    content_type='application/json',
-                    headers={
-                        'retry_count': retry_count,
-                        'first_attempt_time': str(int(time.time() * 1000)),
-                        'retry_delay': min(retry_count * 5, 30)  # 递增延迟，最大30秒
-                    }
+        """重新发布消息（带重试计数）- 增强异常处理"""
+        for attempt in range(3):
+            try:
+                # 检查通道状态
+                if not self.channel or self.channel.is_closed:
+                    logger.warning("📡 重新发布时通道已关闭，尝试重连...")
+                    if not self._connect():
+                        continue
+                
+                message_json = json.dumps(message_data)
+                
+                # 发布消息（延迟一段时间再重试）
+                self.channel.basic_publish(
+                    exchange=settings.RABBITMQ_ALERT_EXCHANGE,
+                    routing_key=settings.RABBITMQ_ALERT_ROUTING_KEY,
+                    body=message_json,
+                    properties=pika.BasicProperties(
+                        delivery_mode=2,
+                        content_type='application/json',
+                        headers={
+                            'retry_count': retry_count,
+                            'first_attempt_time': str(int(time.time() * 1000)),
+                            'retry_delay': min(retry_count * 5, 30)  # 递增延迟，最大30秒
+                        }
+                    )
                 )
-            )
-            return True
-        except Exception as e:
-            logger.error(f"❌ 重新发布消息失败: {str(e)}")
-            return False
+                return True
+                
+            except IndexError as e:
+                # 捕获 pika 内部的 deque 错误
+                logger.warning(f"⚠️ _republish pika内部错误: {str(e)}")
+                self.is_connected = False
+                time.sleep(0.5)
+                continue
+                
+            except Exception as e:
+                logger.error(f"❌ 重新发布消息失败: {str(e)}")
+                self.is_connected = False
+                if attempt < 2:
+                    time.sleep(0.5)
+                    continue
+                return False
+        
+        return False
     
     def close(self) -> None:
         """关闭连接"""
@@ -514,7 +571,7 @@ class RabbitMQClient:
         logger.info("RabbitMQ连接已关闭")
     
     def health_check(self) -> Dict[str, Any]:
-        """🏥 全面健康检查"""
+        """🏥 全面健康检查 - 使用独立连接避免与消费者线程冲突"""
         health_status = {
             "rabbitmq_connected": self.is_connected,
             "channel_open": self.channel is not None and not self.channel.is_closed if self.channel else False,
@@ -523,10 +580,29 @@ class RabbitMQClient:
             "timestamp": datetime.now().isoformat()
         }
         
-        # 检查队列状态
+        # 使用独立连接获取队列状态，避免与消费者 channel 冲突
+        # pika BlockingConnection 不是线程安全的，不能在健康监控线程中使用消费者的 channel
+        temp_connection = None
+        temp_channel = None
         try:
-            if self.is_connected and self.channel:
-                queue_info = self.channel.queue_declare(queue=settings.RABBITMQ_ALERT_QUEUE, passive=True)
+            if self.is_connected:
+                # 创建临时连接进行查询
+                credentials = pika.PlainCredentials(
+                    settings.RABBITMQ_USER,
+                    settings.RABBITMQ_PASSWORD
+                )
+                parameters = pika.ConnectionParameters(
+                    host=settings.RABBITMQ_HOST,
+                    port=settings.RABBITMQ_PORT,
+                    credentials=credentials,
+                    heartbeat=30,
+                    blocked_connection_timeout=10
+                )
+                
+                temp_connection = pika.BlockingConnection(parameters)
+                temp_channel = temp_connection.channel()
+                
+                queue_info = temp_channel.queue_declare(queue=settings.RABBITMQ_ALERT_QUEUE, passive=True)
                 health_status["queue_message_count"] = queue_info.method.message_count
                 health_status["queue_consumer_count"] = queue_info.method.consumer_count
                 health_status["queue_accessible"] = True
@@ -535,6 +611,18 @@ class RabbitMQClient:
         except Exception as e:
             health_status["queue_accessible"] = False
             health_status["queue_error"] = str(e)
+        finally:
+            # 确保关闭临时连接
+            try:
+                if temp_channel and temp_channel.is_open:
+                    temp_channel.close()
+            except:
+                pass
+            try:
+                if temp_connection and temp_connection.is_open:
+                    temp_connection.close()
+            except:
+                pass
         
         # 整体健康评估
         critical_checks = [
