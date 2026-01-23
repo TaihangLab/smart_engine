@@ -300,8 +300,13 @@ class ThreadedFrameReader:
         while self.running and self.ffmpeg_process:
             time.sleep(0.5)
             
+            # 使用局部变量避免竞态条件（其他线程可能将 ffmpeg_process 设为 None）
+            process = self.ffmpeg_process
+            if process is None:
+                break
+            
             # 检查进程是否退出
-            if self.ffmpeg_process.poll() is not None:
+            if process.poll() is not None:
                 logger.warning("FFmpeg 进程已退出，流已断开")
                 self._force_stop_ffmpeg()
                 break
