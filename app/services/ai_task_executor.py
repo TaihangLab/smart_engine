@@ -1828,18 +1828,40 @@ class AITaskExecutor:
             return []
     
     def shutdown(self):
-        """优雅关闭AI任务执行器"""
+        """优雅关闭AI任务执行器 - 停止所有任务并更新数据库状态为禁用"""
         logger.info("🛑 开始关闭AI任务执行器...")
         
         try:
-            # 停止所有正在运行的任务
+            # 获取所有正在运行的任务ID
             running_task_ids = list(self.running_tasks.keys())
-            for task_id in running_task_ids:
+            
+            if running_task_ids:
+                logger.info(f"🔍 发现 {len(running_task_ids)} 个正在执行的任务: {running_task_ids}")
+                
+                # 更新数据库中任务状态为禁用，确保下次启动不会自动运行
+                db = next(get_db())
                 try:
-                    self._stop_task_thread(task_id)
-                    logger.info(f"✅ 已停止任务 {task_id}")
-                except Exception as e:
-                    logger.error(f"❌ 停止任务 {task_id} 失败: {str(e)}")
+                    for task_id in running_task_ids:
+                        try:
+                            # 更新任务状态为禁用
+                            AITaskService.update_task(task_id, {"status": False}, db)
+                            logger.info(f"📝 已将任务 {task_id} 状态更新为禁用")
+                        except Exception as e:
+                            logger.error(f"❌ 更新任务 {task_id} 状态失败: {str(e)}")
+                finally:
+                    db.close()
+                
+                # 停止所有正在运行的任务线程
+                for task_id in running_task_ids:
+                    try:
+                        self._stop_task_thread(task_id)
+                        logger.info(f"✅ 已停止任务 {task_id}")
+                    except Exception as e:
+                        logger.error(f"❌ 停止任务 {task_id} 失败: {str(e)}")
+                
+                logger.info(f"📊 已停止并禁用 {len(running_task_ids)} 个任务，下次启动时不会自动运行")
+            else:
+                logger.info("ℹ️ 当前没有正在执行的任务")
             
             # 停止调度器
             if hasattr(self, 'scheduler') and self.scheduler.running:

@@ -119,6 +119,7 @@ class VideoBufferManager:
         self.video_encoding_timeout = settings.ALERT_VIDEO_ENCODING_TIMEOUT_SECONDS
         self.video_width = settings.ALERT_VIDEO_WIDTH
         self.video_height = settings.ALERT_VIDEO_HEIGHT
+        self.video_codec = settings.ALERT_VIDEO_CODEC.lower()  # 视频编码格式 (h264/h265)
         
     def add_frame(self, timestamp: float, frame_bytes: bytes, width: int, height: int):
         """添加帧到缓冲区"""

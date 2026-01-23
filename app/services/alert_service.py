@@ -205,7 +205,14 @@ class AlertService:
                 skill_name_zh=alert.skill_name_zh,
                 # 🆕 新增状态相关字段 - 确保始终有值
                 status=status_value,
-                processing_notes=alert.processing_notes
+                processing_notes=alert.processing_notes,
+                # 🔧 修复：添加合并预警相关字段
+                is_merged=alert.is_merged,
+                alert_count=alert.alert_count,
+                alert_duration=alert.alert_duration,
+                first_alert_time=alert.first_alert_time,
+                last_alert_time=alert.last_alert_time,
+                alert_images=alert.alert_images
             )
             
             # 🆕 如果没有提供process数据，自动生成初始处理流程

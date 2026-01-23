@@ -606,6 +606,24 @@ class AlertResponse(BaseModel):
             except Exception:
                 self.minio_video_url = ""
 
+        # 🔧 修复：为合并预警的图片列表生成完整URL
+        if self.alert_images:
+            try:
+                from app.services.minio_client import minio_client
+                from app.core.config import settings
+                for img in self.alert_images:
+                    if isinstance(img, dict) and 'object_name' in img:
+                        object_name = img['object_name']
+                        # 为每个图片生成预签名URL
+                        img['image_url'] = minio_client.get_presigned_url(
+                            bucket_name=settings.MINIO_BUCKET,
+                            prefix=f"{settings.MINIO_ALERT_IMAGE_PREFIX}{self.task_id}/",
+                            object_name=object_name,
+                            expires=3600  # 1小时有效期
+                        )
+            except Exception:
+                pass  # 保持原有的object_name，前端可以用其他方式访问
+
 
 class ProcessingHistoryResponse(BaseModel):
     """处理历史响应模型"""

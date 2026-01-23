@@ -154,34 +154,145 @@ app/
 
 #### 1. 预警去重机制
 - **MD5唯一键**：基于任务ID、摄像头ID、技能类型、预警等级生成唯一标识
-- **智能合并窗口**：相同预警在4秒内自动合并（可配置：`ALERT_MERGE_WINDOW_SECONDS`）
+- **智能合并窗口**：相同预警在指定时间窗口内自动合并
 - **时序信息保留**：记录首次和最后预警时间，提供完整的事件时序
 
-#### 2. 分级延时发送策略
-- **1级预警**：立即发送（0秒延迟），确保紧急事件最快响应
-- **2级预警**：最大3秒延迟，平衡实时性和合并效果
-- **3-4级预警**：最大5秒延迟，充分合并常规预警
+#### 2. 预警合并流程图
 
-#### 3. 分级合并持续时间
-- **1-2级关键预警**：最长合并30秒（`ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS`）
-- **3-4级普通预警**：最长合并15秒（`ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS`）
-- **自适应窗口**：根据预警频率动态调整合并策略
-
-#### 4. 预警合并配置参数
-```python
-# 基础合并配置
-ALERT_MERGE_ENABLED = True                    # 是否启用预警合并
-ALERT_MERGE_WINDOW_SECONDS = 4.0             # 合并时间窗口
-ALERT_MERGE_IMMEDIATE_LEVELS = "1"            # 立即发送的预警等级
-
-# 分级持续时间配置
-ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS = 30.0   # 1-2级最大持续时间
-ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS = 15.0     # 3-4级最大持续时间
-
-# 延时策略配置
-ALERT_MERGE_EMERGENCY_DELAY_SECONDS = 1.0    # 紧急预警延迟
-ALERT_MERGE_QUICK_SEND_THRESHOLD = 3         # 快速发送阈值
 ```
+                    ┌─────────────────────────────┐
+                    │        预警触发              │
+                    └─────────────┬───────────────┘
+                                  ▼
+                    ┌─────────────────────────────┐
+                    │  检查 alert_level 是否在     │
+                    │  IMMEDIATE_LEVELS 中？       │
+                    └─────────────┬───────────────┘
+                           │
+              ┌────────────┴────────────┐
+              ▼ 是                      ▼ 否
+    ┌─────────────────┐      ┌─────────────────────────┐
+    │ 立即发送        │      │ 生成 alert_key          │
+    │ (不参与合并)    │      │ 进入合并流程            │
+    └─────────────────┘      └────────────┬────────────┘
+                                          ▼
+                             ┌─────────────────────────┐
+                             │ 相同 alert_key 已存在？  │
+                             └────────────┬────────────┘
+                                    │
+                    ┌───────────────┴───────────────┐
+                    ▼ 是                            ▼ 否
+          ┌─────────────────────┐        ┌─────────────────────┐
+          │ 检查持续时间         │        │ 创建新的合并预警组   │
+          │ 是否超过限制         │        │ 设置定时器           │
+          └─────────┬───────────┘        └─────────────────────┘
+                    │
+        ┌───────────┼───────────┐
+        ▼           ▼           ▼
+   超过最大      在合并窗口内    超过合并窗口
+   持续时间                     
+        │           │           │
+        ▼           ▼           ▼
+   发送旧预警    合并到现有组    发送旧预警
+   创建新组      重置定时器      创建新组
+```
+
+#### 3. 定时器延迟计算规则
+
+```python
+# 如果预警数量 >= QUICK_SEND_THRESHOLD（快速发送阈值）
+delay = 0.5秒  # 几乎立即发送
+
+# 否则，根据预警等级计算延迟
+delay = BASE_DELAY + (alert_level × LEVEL_DELAY_FACTOR)
+
+# 示例（BASE_DELAY=4秒, LEVEL_DELAY_FACTOR=0.5）：
+# 1级预警: 4 + (1 × 0.5) = 4.5秒
+# 2级预警: 4 + (2 × 0.5) = 5.0秒
+# 3级预警: 4 + (3 × 0.5) = 5.5秒
+# 4级预警: 4 + (4 × 0.5) = 6.0秒
+```
+
+#### 4. 预警合并配置参数详解
+
+| 参数名 | 默认值 | 说明 |
+|--------|--------|------|
+| `ALERT_MERGE_ENABLED` | `True` | 是否启用预警合并功能 |
+| `ALERT_MERGE_WINDOW_SECONDS` | `8.0` | **合并窗口**：从第一次预警开始，多长时间内的相似预警可以合并。超过此时间会发送旧组，创建新组 |
+| `ALERT_MERGE_BASE_DELAY_SECONDS` | `4.0` | **基础延迟**：每次预警后等待多久发送。在此期间如果有新预警会合并并重置定时器 |
+| `ALERT_MERGE_MAX_DURATION_SECONDS` | `30.0` | **最大持续时间**：一个合并组最长能持续多久，超过强制发送 |
+| `ALERT_MERGE_IMMEDIATE_LEVELS` | `"1"` | **立即发送等级**：这些等级的预警不参与合并，立即发送。多个等级用逗号分隔，如 `"1,2"` |
+| `ALERT_MERGE_QUICK_SEND_THRESHOLD` | `8` | **快速发送阈值**：合并组内预警数量达到此值时，将定时器改为0.5秒快速发送 |
+| `ALERT_MERGE_LEVEL_DELAY_FACTOR` | `0.5` | **等级延迟系数**：用于计算不同等级的延迟差异，等级越高（数字越大）延迟越长 |
+
+#### 5. 配置示例与场景说明
+
+```python
+# ========== 预警合并配置 ==========
+
+# 核心配置
+ALERT_MERGE_ENABLED = True                    # 启用预警合并
+ALERT_MERGE_WINDOW_SECONDS = 8.0              # 8秒合并窗口
+ALERT_MERGE_BASE_DELAY_SECONDS = 4.0          # 4秒基础延迟
+ALERT_MERGE_MAX_DURATION_SECONDS = 30.0       # 最长合并30秒
+ALERT_MERGE_IMMEDIATE_LEVELS = "1"            # 1级预警立即发送，不合并
+
+# 高级配置（一般不需要修改）
+ALERT_MERGE_QUICK_SEND_THRESHOLD = 8          # 8次预警后快速发送
+ALERT_MERGE_LEVEL_DELAY_FACTOR = 0.5          # 等级延迟系数
+```
+
+#### 6. 典型场景示例
+
+**场景1：正常合并（4级预警）**
+```
+0秒  - 第1次预警 → 创建合并组，定时器=6秒
+2秒  - 第2次预警 → 合并，重置定时器=6秒
+4秒  - 第3次预警 → 合并，重置定时器=6秒
+     （没有新预警）
+10秒 - 定时器到期 → 发送合并预警（3次合并）
+
+结果：发送1条预警，描述"XX摄像头在4秒内连续3次检测到安全风险"
+```
+
+**场景2：快速发送（预警频繁）**
+```
+0秒   - 第1次预警
+0.5秒 - 第2次预警 → 合并
+1秒   - 第3次预警 → 合并
+...
+3.5秒 - 第8次预警 → 达到快速发送阈值！定时器改为0.5秒
+4秒   - 发送！
+
+结果：发送1条预警，描述"XX摄像头在4秒内连续8次检测到安全风险"
+```
+
+**场景3：1级紧急预警（立即发送）**
+```
+0秒 - 1级预警触发 → 检测到在 IMMEDIATE_LEVELS 中 → 立即发送！
+
+结果：每次1级预警都单独发送，不合并
+```
+
+**场景4：超过合并窗口**
+```
+0秒  - 第1次预警 → 创建组
+3秒  - 第2次预警 → 合并
+6秒  - 第3次预警 → 合并
+9秒  - 第4次预警 → 超过8秒窗口！发送旧组（3次），第4次作为新组开始
+
+结果：发送2条预警
+```
+
+#### 7. 参数调优建议
+
+| 场景 | 调整建议 |
+|------|---------|
+| 预警太频繁，想多合并减少噪音 | 增大 `MERGE_WINDOW` 和 `MAX_DURATION` |
+| 预警响应太慢，想更快收到 | 减小 `BASE_DELAY` |
+| 频繁预警时想更快发送 | 减小 `QUICK_SEND_THRESHOLD` |
+| 1-2级预警也想参与合并 | 设置 `IMMEDIATE_LEVELS = ""` |
+| 1-2级预警都不合并 | 设置 `IMMEDIATE_LEVELS = "1,2"` |
 
 ### 🆕 多模态大模型复判系统
 
@@ -1039,12 +1150,13 @@ class Settings(BaseSettings):
     ALERT_REVIEW_QUEUE_ENABLED: bool = True
     
     # 预警合并配置（重要：避免大量重复预警）
-    ALERT_MERGE_ENABLED: bool = True
-    ALERT_MERGE_WINDOW_SECONDS: float = 4.0  # 建议6-10秒
-    ALERT_MERGE_MAX_DURATION_SECONDS: float = 15.0
-    ALERT_MERGE_CRITICAL_MAX_DURATION_SECONDS: float = 30.0
-    ALERT_MERGE_NORMAL_MAX_DURATION_SECONDS: float = 15.0
-    ALERT_MERGE_IMMEDIATE_LEVELS: str = "1"  # 立即发送的预警等级
+    ALERT_MERGE_ENABLED: bool = True              # 启用预警合并
+    ALERT_MERGE_WINDOW_SECONDS: float = 10.0       # 合并窗口（秒）
+    ALERT_MERGE_BASE_DELAY_SECONDS: float = 4.0   # 基础延迟（秒）
+    ALERT_MERGE_MAX_DURATION_SECONDS: float = 30.0  # 最大持续时间（秒）
+    ALERT_MERGE_IMMEDIATE_LEVELS: str = ""       # 立即发送的等级（不合并）
+    ALERT_MERGE_QUICK_SEND_THRESHOLD: int = 10     # 快速发送阈值
+    ALERT_MERGE_LEVEL_DELAY_FACTOR: float = 0.5   # 等级延迟系数
 ```
 
 **注意**：修改配置后需要重启应用才能生效。
