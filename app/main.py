@@ -113,7 +113,7 @@ app.add_middleware(RequestLoggingMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # 允许所有来源，生产环境应该限制
-    allow_credentials=True,
+    allow_credentials=False,  # 关闭凭据，项目使用Token认证不需要cookies
     allow_methods=["*"],
     allow_headers=["*"],
 )
