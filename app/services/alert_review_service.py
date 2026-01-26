@@ -400,7 +400,7 @@ class AlertReviewService:
             # 1. 更新预警状态为误报
             old_status = alert.status
             alert.status = AlertStatus.FALSE_ALARM
-            alert.processed_at = datetime.utcnow()
+            alert.processed_at = datetime.now()
             alert.processed_by = "AI复判系统"
             alert.processing_notes = f"AI自动复判标记为误报：{review_summary}"
             
@@ -432,8 +432,8 @@ class AlertReviewService:
                 operator_name="AI复判系统",
                 operator_role="自动复判",
                 notes=review_summary,
-                is_automated=True,  # 标记为自动化操作
-                created_at=datetime.utcnow()
+                is_automated=True  # 标记为自动化操作
+                # created_at 和 updated_at 由模型默认值自动生成
             )
             db.add(processing_record)
             

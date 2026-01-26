@@ -1185,8 +1185,8 @@ def update_alert_status(
             operator_department=operator_dept,  # 使用当前登录用户的部门
             notes=alert_update.processing_notes,
             priority_level=0,
-            is_automated=False,
-            created_at=datetime.now()
+            is_automated=False
+            # created_at 和 updated_at 由模型默认值自动生成
         )
         
         logger.info(f"📝 创建处理记录: action_type={action_type}, operator={operator_name}, dept={operator_dept}")
@@ -1333,8 +1333,8 @@ def batch_update_alert_status(
                     operator_department=operator_dept,  # 使用当前登录用户的部门
                     notes=processing_notes,
                     priority_level=0,
-                    is_automated=False,
-                    created_at=datetime.now()
+                    is_automated=False
+                    # created_at 和 updated_at 由模型默认值自动生成
                 )
                 
                 # 更新JSON字段
@@ -1564,7 +1564,7 @@ async def mark_alert_as_false_alarm(
         # 更新预警状态为误报
         old_status = alert.status
         alert.status = AlertStatus.FALSE_ALARM
-        alert.processed_at = datetime.utcnow()
+        alert.processed_at = datetime.now()
         alert.processed_by = reviewer_name
         alert.processing_notes = f"标记为误报：{review_notes}"
         
@@ -1593,8 +1593,8 @@ async def mark_alert_as_false_alarm(
             to_status=AlertStatus.FALSE_ALARM,
             operator_name=reviewer_name,
             operator_role="复判人员",
-            notes=review_notes,
-            created_at=datetime.utcnow()
+            notes=review_notes
+            # created_at 和 updated_at 由模型默认值自动生成
         )
         db.add(processing_record)
         
@@ -1672,7 +1672,7 @@ async def batch_mark_alerts_as_false_alarm(
             # 更新预警状态为误报
             old_status = alert.status
             alert.status = AlertStatus.FALSE_ALARM
-            alert.processed_at = datetime.utcnow()
+            alert.processed_at = datetime.now()
             alert.processed_by = reviewer_name
             alert.processing_notes = f"批量标记为误报：{review_notes}"
             
@@ -1698,8 +1698,8 @@ async def batch_mark_alerts_as_false_alarm(
                 to_status=AlertStatus.FALSE_ALARM,
                 operator_name=reviewer_name,
                 operator_role="复判人员",
-                notes=review_notes,
-                created_at=datetime.utcnow()
+                notes=review_notes
+                # created_at 和 updated_at 由模型默认值自动生成
             )
             db.add(processing_record)
             

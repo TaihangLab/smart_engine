@@ -231,7 +231,7 @@ class AlertArchiveLinkDAO:
                     "error": "档案不存在"
                 }
             
-            current_time = datetime.utcnow()
+            current_time = datetime.now()
             
             for alert_id in alert_ids:
                 try:
@@ -369,10 +369,10 @@ class AlertArchiveLinkDAO:
             # 标记为非活跃状态（软删除）
             link.is_active = False
             link.archived_status = 2  # 移除归档
-            link.updated_at = datetime.utcnow()
+            link.updated_at = datetime.now()
             link.extra_data = link.extra_data or {}
             link.extra_data["unlinked_by"] = unlinked_by
-            link.extra_data["unlinked_at"] = datetime.utcnow().isoformat()
+            link.extra_data["unlinked_at"] = datetime.now().isoformat()
             
             self.db.commit()
             
@@ -418,7 +418,7 @@ class AlertArchiveLinkDAO:
                 }
             
             processed_count = 0
-            current_time = datetime.utcnow()
+            current_time = datetime.now()
             
             # 批量更新关联记录状态
             for link in links:
@@ -602,7 +602,7 @@ class AlertArchiveLinkDAO:
                 archive.level2_alerts = stats.level2_alerts or 0
                 archive.level3_alerts = stats.level3_alerts or 0
                 archive.level4_alerts = stats.level4_alerts or 0
-                archive.updated_at = datetime.utcnow()
+                archive.updated_at = datetime.now()
                 
                 self.db.commit()
                 logger.info(f"更新档案{archive_id}统计信息成功")

@@ -180,7 +180,7 @@ class ReviewRecordDAO:
             if review_notes is not None:
                 review_record.review_notes = review_notes
             
-            review_record.updated_at = datetime.utcnow()
+            review_record.updated_at = datetime.now()
             
             self.db.commit()
             self.db.refresh(review_record)
@@ -246,7 +246,7 @@ class ReviewRecordDAO:
             auto_reviews = self.db.query(ReviewRecord).filter(ReviewRecord.review_type == "auto").count()
             
             # 今日复判数量
-            today = datetime.utcnow().date()
+            today = datetime.now().date()
             today_reviews = self.db.query(ReviewRecord).filter(
                 func.date(ReviewRecord.created_at) == today
             ).count()

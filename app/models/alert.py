@@ -123,9 +123,9 @@ class Alert(Base):
     processing_notes = Column(String(1000), nullable=True, comment="处理备注")
     process = Column(JSON, nullable=True, comment="处理流程信息，JSON格式存储")
     
-    # 基础时间戳
-    created_at = Column(DateTime, default=datetime.utcnow, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
+    # 基础时间戳 - 使用本地时间，确保时区一致性
+    created_at = Column(DateTime, default=datetime.now, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
     
     # 关联关系
     processing_records = relationship("AlertProcessingRecord", back_populates="alert", cascade="all, delete-orphan")
@@ -343,9 +343,9 @@ class AlertProcessingRecord(Base):
     # 额外信息
     extra_data = Column(JSON, comment="扩展信息：设备信息、位置信息等")
     
-    # 时间戳
-    created_at = Column(DateTime, default=datetime.utcnow, index=True, comment="创建时间")
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, comment="更新时间")
+    # 时间戳 - 使用本地时间，确保时区一致性
+    created_at = Column(DateTime, default=datetime.now, index=True, comment="创建时间")
+    updated_at = Column(DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间")
     
     # 关联关系
     alert = relationship("Alert", back_populates="processing_records")
