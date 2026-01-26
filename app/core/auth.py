@@ -81,6 +81,15 @@ def extract_token_from_request(request: Request) -> Optional[str]:
         # 尝试小写
         auth_header = request.headers.get(settings.AUTH_HEADER_NAME.lower())
     
+    # TODO: 测试阶段临时代码，正式环境需删除
+    # 如果没有token，使用默认测试token
+    if not auth_header:
+        logger.debug("未找到Token，使用默认测试Token")
+        auth_header = "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJsb2dpblR5cGUiOiJsb2dpbiIsImxvZ2luSWQiOiJzeXNfdXNlcjoxOTgyNzE0MTA5NjgwNDk2NjQxIiwicm5TdHIiOiJ0TVo1YjBUZnFvdlVBVkNvcHVqUWdOM0xpRTBRcnQ3MSIsImNsaWVudGlkIjoiMDJiYjljZmU4ZDc4NDRlY2FlOGRiZTYyYjFiYTk3MWEiLCJ0ZW5hbnRJZCI6IjAwMDAwMCIsInVzZXJJZCI6MTk4MjcxNDEwOTY4MDQ5NjY0MSwidXNlck5hbWUiOiJ6dHNNYW5hZ2VyIiwiZGVwdElkIjoxOTgyNzEzNjYzNDE5MTMzOTUzLCJkZXB0TmFtZSI6IiIsImRlcHRDYXRlZ29yeSI6IiJ9.3sVts7xt7-kbKZQ-1z37qqjuwGlAlBm8ugnUvs6CHfE"
+    
+    # 原处理逻辑（已注释，正式环境恢复）：
+    # return auth_header
+    
     return auth_header
 
 
