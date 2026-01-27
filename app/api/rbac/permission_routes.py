@@ -327,4 +327,123 @@ async def get_user_permissions(
         )
 
 
+# ===========================================
+# 权限辅助API（与前端对齐）
+# ===========================================
+
+from pydantic import BaseModel, Field
+
+class PermissionCodeValidationRequest(BaseModel):
+    """权限码验证请求"""
+    code: str = Field(..., description="权限码")
+    exclude_id: Optional[int] = Field(None, description="排除的权限ID（编辑时使用）")
+
+class PermissionCodeValidationResponse(BaseModel):
+    """权限码验证响应"""
+    exists: bool = Field(..., description="是否已存在")
+    code: str = Field(..., description="权限码")
+
+
+class PermissionStatusUpdateRequest(BaseModel):
+    """权限状态更新请求"""
+    status: int = Field(..., description="状态 0启用 1禁用", ge=0, le=1)
+
+
+@permission_router.get("/permissions/validate-code", response_model=UnifiedResponse, summary="验证权限码唯一性")
+async def validate_permission_code(
+    code: str = Query(..., description="权限码"),
+    exclude_id: Optional[int] = Query(None, description="排除的权限ID（编辑时使用）"),
+    db: Session = Depends(get_db)
+):
+    """验证权限码是否已存在"""
+    try:
+        # 检查权限码是否已存在
+        existing_permission = RbacService.get_permission_by_code(db, code)
+        exists = existing_permission is not None
+
+        # 如果提供了exclude_id，且现有权限的ID与之相同，则认为不存在（编辑自己）
+        if exists and exclude_id is not None and existing_permission.id == exclude_id:
+            exists = False
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="验证成功",
+            data=PermissionCodeValidationResponse(
+                exists=exists,
+                code=code
+            )
+        )
+    except Exception as e:
+        logger.error(f"验证权限码失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="验证权限码失败",
+            data=None
+        )
+
+
+@permission_router.patch("/permissions/{id}/status", response_model=UnifiedResponse, summary="更新权限状态")
+async def update_permission_status(
+    id: int,
+    status_update: PermissionStatusUpdateRequest,
+    db: Session = Depends(get_db)
+):
+    """更新权限的启用/禁用状态"""
+    try:
+        # 构建更新数据
+        update_data = {"status": status_update.status}
+
+        updated_permission = RbacService.update_permission_by_id(db, id, update_data)
+        if not updated_permission:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="权限不存在",
+                data=None
+            )
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="更新权限状态成功",
+            data=PermissionResponse.model_validate(updated_permission)
+        )
+    except Exception as e:
+        logger.error(f"更新权限状态失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="更新权限状态失败",
+            data=None
+        )
+
+
+@permission_router.get("/permissions/{id}/roles", response_model=UnifiedResponse, summary="获取拥有指定权限的角色列表")
+async def get_roles_by_permission_id(
+    id: int,
+    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    db: Session = Depends(get_db)
+):
+    """获取拥有指定权限的角色列表（通过权限ID）"""
+    try:
+        from app.api.rbac.role_routes import RoleListResponse
+
+        roles = RbacService.get_roles_by_permission_by_id(db, id, tenant_id)
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取权限角色列表成功",
+            data=[RoleListResponse.model_validate(role) for role in roles]
+        )
+    except Exception as e:
+        logger.error(f"获取权限角色列表失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取权限角色列表失败",
+            data=None
+        )
+
+
 __all__ = ["permission_router"]

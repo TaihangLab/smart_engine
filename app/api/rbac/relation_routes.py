@@ -232,8 +232,8 @@ async def get_role_permissions_list(
     """获取角色权限关系列表，支持按角色ID或权限ID过滤"""
     try:
         if role_id:
-            # 获取指定角色的所有权限
-            permissions = RbacService.get_role_permissions(db, role_id, tenant_id)
+            # 获取指定角色的所有权限 - 使用 get_role_permissions_by_id (需要 role_id)
+            permissions = RbacService.get_role_permissions_by_id(db, role_id, tenant_id)
             role = RbacService.get_role_by_id(db, role_id)
             if not role:
                 return UnifiedResponse(

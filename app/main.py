@@ -125,15 +125,20 @@ class AuthMiddleware(BaseHTTPMiddleware):
 
 app.add_middleware(AuthMiddleware)
 
+# CORS 配置（在中间件之前定义）
+ALLOWED_ORIGINS = ["http://localhost:8080", "http://localhost:4000", "http://127.0.0.1:4000"]
+
 # 添加 CORS 头中间件（确保所有响应都包含 CORS 头，包括错误响应）
 class CORSSecurityHeadersMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         response = await call_next(request)
         # 确保所有响应都包含 CORS 头
-        response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
+        origin = request.headers.get("origin", "")
+        if origin in ALLOWED_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
         response.headers["Access-Control-Allow-Credentials"] = "true"
         response.headers["Access-Control-Allow-Methods"] = "GET, POST, PUT, DELETE, OPTIONS, PATCH"
-        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With, Accept, clientid"
         response.headers["Access-Control-Expose-Headers"] = "Content-Length, Content-Range"
         return response
 
@@ -153,9 +158,20 @@ from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from app.models.rbac import UnifiedResponse
 
+# CORS 配置
+ALLOWED_ORIGINS = ["http://localhost:8080", "http://localhost:4000", "http://127.0.0.1:4000"]
+
+def set_cors_headers(response: JSONResponse, origin: str):
+    """设置 CORS 响应头"""
+    if origin in ALLOWED_ORIGINS:
+        response.headers["Access-Control-Allow-Origin"] = origin
+    response.headers["Access-Control-Allow-Credentials"] = "true"
+    return response
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     """全局异常处理器 - 统一处理所有未捕获的异常"""
+    origin = request.headers.get("origin", "")
 
     # 检查是否是HTTPException（预期的业务异常，不打印堆栈）
     if isinstance(exc, HTTPException):
@@ -188,10 +204,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             status_code=exc.status_code,
             content=response_data.model_dump()
         )
-        # 添加 CORS 头
-        response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        return response
+        return set_cors_headers(response, origin)
 
     # 检查是否是ValueError（通常是我们自定义的业务错误）
     if isinstance(exc, ValueError):
@@ -205,10 +218,7 @@ async def global_exception_handler(request: Request, exc: Exception):
             status_code=403,
             content=response_data.model_dump()
         )
-        # 添加 CORS 头
-        response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
-        response.headers["Access-Control-Allow-Credentials"] = "true"
-        return response
+        return set_cors_headers(response, origin)
 
     # 其他未捕获的异常
     response_data = UnifiedResponse(
@@ -221,10 +231,7 @@ async def global_exception_handler(request: Request, exc: Exception):
         status_code=500,
         content=response_data.model_dump()
     )
-    # 添加 CORS 头
-    response.headers["Access-Control-Allow-Origin"] = "http://localhost:8080"
-    response.headers["Access-Control-Allow-Credentials"] = "true"
-    return response
+    return set_cors_headers(response, origin)
 
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
