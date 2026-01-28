@@ -128,13 +128,13 @@ class Settings(BaseSettings):
     RABBITMQ_MESSAGE_TTL: int = Field(default=86400000, description="主队列消息TTL（毫秒）- 24小时")
     RABBITMQ_MAX_RETRIES: int = Field(default=3, description="消息最大重试次数")
 
-    # 复判队列配置
+    # 复判队列配置 - 优化消费性能
     RABBITMQ_REVIEW_EXCHANGE: str = Field(default="alert_review_exchange", description="复判交换机名称")
     RABBITMQ_REVIEW_QUEUE: str = Field(default="alert_review_queue", description="复判队列名称")
     RABBITMQ_REVIEW_ROUTING_KEY: str = Field(default="review", description="复判路由键")
     RABBITMQ_REVIEW_MAX_RETRIES: int = Field(default=3, description="复判最大重试次数")
-    RABBITMQ_REVIEW_RETRY_DELAY: int = Field(default=5000, description="复判重试延迟（毫秒）")
-    RABBITMQ_REVIEW_PREFETCH_COUNT: int = Field(default=5, description="复判消费者预取数量")
+    RABBITMQ_REVIEW_RETRY_DELAY: int = Field(default=3000, description="复判重试延迟（毫秒）")
+    RABBITMQ_REVIEW_PREFETCH_COUNT: int = Field(default=10, description="复判消费者预取数量")
     
     # 报警补偿服务配置 - 🆕 状态驱动补偿机制
     ALERT_COMPENSATION_INTERVAL: int = Field(default=30, description="补偿检查间隔（秒）")
@@ -315,23 +315,23 @@ class Settings(BaseSettings):
     DB_AUTOCOMMIT: bool = Field(default=False, description="自动提交事务")
     DB_AUTOFLUSH: bool = Field(default=False, description="自动刷新会话")
 
-    # 🧵 线程池高性能配置  
+    # 🧵 线程池高性能配置 - 提升消息处理能力
     # ===================
-    AI_TASK_EXECUTOR_POOL_SIZE: int = Field(default=20, description="AI任务执行线程池大小")
-    ALERT_GENERATION_POOL_SIZE: int = Field(default=15, description="预警生成线程池大小")
-    MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=10, description="消息处理线程池大小")
-    IMAGE_PROCESSING_POOL_SIZE: int = Field(default=8, description="图像处理线程池大小")
+    AI_TASK_EXECUTOR_POOL_SIZE: int = Field(default=25, description="AI任务执行线程池大小")
+    ALERT_GENERATION_POOL_SIZE: int = Field(default=20, description="预警生成线程池大小")
+    MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=15, description="消息处理线程池大小")
+    IMAGE_PROCESSING_POOL_SIZE: int = Field(default=10, description="图像处理线程池大小")
 
-    # 🚀 RabbitMQ连接池优化配置
+    # 🚀 RabbitMQ连接池优化配置 - 高吞吐量实时预警
     # =========================
-    RABBITMQ_CONNECTION_POOL_SIZE: int = Field(default=20, description="RabbitMQ连接池大小")
-    RABBITMQ_CHANNEL_POOL_SIZE: int = Field(default=50, description="RabbitMQ通道池大小")
+    RABBITMQ_CONNECTION_POOL_SIZE: int = Field(default=25, description="RabbitMQ连接池大小")
+    RABBITMQ_CHANNEL_POOL_SIZE: int = Field(default=60, description="RabbitMQ通道池大小")
     RABBITMQ_CONNECTION_HEARTBEAT: int = Field(default=600, description="心跳间隔（秒）")
     RABBITMQ_CONNECTION_BLOCKED_TIMEOUT: int = Field(default=300, description="连接阻塞超时（秒）")
     RABBITMQ_PUBLISH_CONFIRM: bool = Field(default=True, description="启用发布确认机制")
-    RABBITMQ_PREFETCH_COUNT: int = Field(default=20, description="消费者预取消息数量")
-    RABBITMQ_BATCH_SIZE: int = Field(default=10, description="批量处理消息数量")
-    RABBITMQ_BATCH_TIMEOUT: float = Field(default=2.0, description="批量处理超时时间（秒）")
+    RABBITMQ_PREFETCH_COUNT: int = Field(default=50, description="消费者预取消息数量 - 提高消费吞吐量")
+    RABBITMQ_BATCH_SIZE: int = Field(default=15, description="批量处理消息数量")
+    RABBITMQ_BATCH_TIMEOUT: float = Field(default=1.5, description="批量处理超时时间（秒）")
 
     # 🎪 通知渠道配置
     # ==============

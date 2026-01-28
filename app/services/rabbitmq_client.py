@@ -465,8 +465,8 @@ class RabbitMQClient:
                             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
                             logger.error(f"💀 消息超过重试次数，进入死信队列")
                 
-                # 设置QoS
-                self.channel.basic_qos(prefetch_count=1)
+                # 设置QoS - 使用配置的预取数量，提高消费吞吐量
+                self.channel.basic_qos(prefetch_count=settings.RABBITMQ_PREFETCH_COUNT)
                 
                 # 开始消费
                 self.channel.basic_consume(
