@@ -29,38 +29,35 @@ def verify_token(token: str) -> Optional[dict]:
 
 def decode_jwt_token_without_verify(token: str) -> Optional[dict]:
     """
-    不验证签名直接解码JWT Token
-    适用于内网环境，信任上游认证服务（如Java后端已完成认证）
-    
+    解码Base64编码的JSON Token
+
+    ⚠️ 注意：此系统只支持Base64编码的JSON token格式，不支持JWT token
+
     Args:
-        token: JWT Token字符串，可以包含"Bearer "前缀
-        
+        token: Token字符串，可以包含"Bearer "前缀
+              格式: "Bearer eyJ1c2VySWQiOiAiMCJ9..." 或直接 "eyJ1c2VySWQiOiAiMCJ9..."
+
     Returns:
         解码后的payload字典，解析失败返回None
-        
-    Example:
-        >>> token = "Bearer eyJ0eXAiOiJKV1QiLCJhbGc..."
-        >>> payload = decode_jwt_token_without_verify(token)
-        >>> print(payload.get("userId"))
     """
+    import json
+    import base64
+
+    # 移除"Bearer "前缀（如果存在）
+    if token.startswith("Bearer "):
+        token = token[7:]
+    elif token.startswith("bearer "):
+        token = token[7:]
+
+    # 解析Base64编码的JSON
     try:
-        # 移除"Bearer "前缀（如果存在）
-        if token.startswith("Bearer "):
-            token = token[7:]
-        elif token.startswith("bearer "):
-            token = token[7:]
-        
-        # 使用jose库的get_unverified_claims方法，不验证签名
-        payload = jwt.get_unverified_claims(token)
-        
-        logger.debug(f"成功解析JWT Token，用户ID: {payload.get('userId')}, 用户名: {payload.get('userName')}")
+        decoded_bytes = base64.b64decode(token.encode('utf-8'))
+        decoded_str = decoded_bytes.decode('utf-8')
+        payload = json.loads(decoded_str)
+        logger.debug(f"成功解析Base64 Token，用户ID: {payload.get('userId')}, 用户名: {payload.get('userName')}")
         return payload
-        
-    except jwt.JWTError as e:
-        logger.debug(f"JWT Token解析失败: {str(e)}")
-        return None
     except Exception as e:
-        logger.error(f"JWT Token解析异常: {str(e)}", exc_info=True)
+        logger.error(f"Base64 Token解析失败: {str(e)}")
         return None
 
 
@@ -135,24 +132,30 @@ async def get_current_user(request: Request):
     """
     获取当前用户信息（依赖注入）
     Token缺失或解析失败时抛出401异常
-    
+
     适用场景：接口必须登录才能访问
-    
+
     使用方式：
         @router.get("/some-api")
         async def some_api(user: UserInfo = Depends(get_current_user)):
             # 此处user一定不为None
             print(f"当前用户: {user.userName}")
-    
+
     Returns:
         UserInfo对象
-        
+
     Raises:
         HTTPException: 401未授权
     """
     from app.models.user import UserInfo
-    
-    # 提取Token
+
+    # 优先使用 request.state.current_user（由认证中间件设置）
+    if hasattr(request.state, 'current_user') and request.state.current_user:
+        logger.debug(f"使用 request.state.current_user: {request.state.current_user}")
+        return request.state.current_user
+
+    # 如果中间件未设置，尝试从 Token 解析（兼容性处理）
+    logger.debug("request.state.current_user 未设置，尝试从 Token 解析")
     token = extract_token_from_request(request)
     
     if not token:

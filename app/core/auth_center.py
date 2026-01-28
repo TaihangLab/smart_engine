@@ -22,7 +22,6 @@ logger = logging.getLogger(__name__)
 # 白名单client_id列表
 WHITELISTED_CLIENT_IDS = [
     "02bb9cfe8d7844ecae8dbe62b1ba971a",
-    "default_client_id",
     # 可以在这里添加更多的白名单client_id
 ]
 
@@ -634,7 +633,7 @@ async def auth_middleware(request: Request, call_next):
         return response
 
     # 定义不需要鉴权的路径（如登录、健康检查等）
-    public_paths = ["/health", "/docs", "/openapi.json", "/api/v1/login", "/login"]
+    public_paths = ["/health", "/docs", "/openapi.json", "/api/v1/auth/login"]
 
     if request.url.path in public_paths:
         # 对于公共路径，直接继续处理

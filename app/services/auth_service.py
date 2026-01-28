@@ -181,14 +181,22 @@ class AuthenticationService:
         Returns:
             新登录响应对象
         """
-        # 生成普通访问令牌
+        # 生成普通访问令牌（使用 Base64 编码的 JSON，与 adminToken 格式一致）
+        # 注意：必须使用 camelCase 命名以匹配 authenticate_request 的要求
         user_data = {
-            "user_id": user.id,
-            "username": user.user_name,
-            "tenant_id": user.tenant_id,
-            "nick_name": user.nick_name
+            "userId": str(user.id),
+            "userName": user.user_name,
+            "tenantId": user.tenant_id,
+            "nickName": user.nick_name,
+            "deptId": user.dept_id if user.dept_id else 0,
+            "clientid": "02bb9cfe8d7844ecae8dbe62b1ba971a"  # 固定值，与白名单匹配
         }
-        token = create_access_token(data=user_data)
+
+        # 将数据转换为JSON字符串
+        json_str = json.dumps(user_data, ensure_ascii=False)
+
+        # 对JSON字符串进行Base64编码（与 adminToken 格式一致）
+        token = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
 
         # 计算过期时间
         expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # 转换为秒
