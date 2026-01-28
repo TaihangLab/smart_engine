@@ -51,10 +51,9 @@ from app.utils.message_id_generator import (
     benchmark_id_generation, MessageIdType
 )
 
-# 创建路由器
+# 创建路由器 "💎 企业级补偿机制"
 router = APIRouter(
     prefix="/compensation",
-    tags=["💎 企业级补偿机制"],
     responses={
         404: {"description": "资源未找到"},
         500: {"description": "服务器内部错误"}

@@ -238,7 +238,8 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 
 # 单独挂载 chat_assistant 路由到 /api 前缀（与前端调用路径一致）
 from app.api import chat_assistant
-app.include_router(chat_assistant.router, prefix="/api/chat", tags=["chat_assistant"])
+# chat_assistant
+app.include_router(chat_assistant.router, prefix="/api/chat")
 
 # 配置静态文件
 try:

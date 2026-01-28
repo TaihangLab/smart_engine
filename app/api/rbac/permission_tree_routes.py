@@ -21,7 +21,7 @@ from typing import List, Dict, Any
 logger = logging.getLogger(__name__)
 
 # 创建权限树管理路由器
-permission_tree_router = APIRouter(tags=["权限树管理"])
+permission_tree_router = APIRouter()
 
 # ===========================================
 # 权限树管理API

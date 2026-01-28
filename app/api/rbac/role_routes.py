@@ -22,7 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 创建角色管理路由器
-role_router = APIRouter(tags=["角色管理"])
+role_router = APIRouter()
 
 # ===========================================
 # 角色管理API

@@ -22,7 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 创建权限管理路由器
-permission_router = APIRouter(tags=["权限管理"])
+permission_router = APIRouter()
 
 # ===========================================
 # 权限管理API

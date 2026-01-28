@@ -22,7 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 创建关系管理路由器
-relation_router = APIRouter(tags=["关系管理"])
+relation_router = APIRouter()
 
 # ===========================================
 # 用户角色关联管理API

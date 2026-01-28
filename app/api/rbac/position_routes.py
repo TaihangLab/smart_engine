@@ -22,7 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 创建岗位管理路由器
-position_router = APIRouter(tags=["岗位管理"])
+position_router = APIRouter()
 
 # ===========================================
 # 岗位管理API

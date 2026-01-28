@@ -22,7 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 创建租户管理路由器
-tenant_router = APIRouter(tags=["租户管理"])
+tenant_router = APIRouter()
 
 # ===========================================
 # 租户管理API

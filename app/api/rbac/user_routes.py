@@ -23,7 +23,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 创建用户管理路由器
-user_router = APIRouter(tags=["用户管理"])
+user_router = APIRouter()
 
 # ===========================================
 # 用户管理API

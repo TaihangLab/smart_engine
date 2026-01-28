@@ -22,7 +22,7 @@ import logging
 logger = logging.getLogger(__name__)
 
 # 创建部门管理路由器
-dept_router = APIRouter(tags=["部门管理"])
+dept_router = APIRouter()
 
 # ===========================================
 # 部门管理API

@@ -21,7 +21,7 @@ from app.core.config import settings
 logger = logging.getLogger(__name__)
 
 # 创建认证路由器
-auth_router = APIRouter(prefix="/auth", tags=["认证"])
+auth_router = APIRouter(prefix="/auth")
 
 # 登录接口
 @auth_router.post("/login", response_model=UnifiedResponse, summary="用户登录")
