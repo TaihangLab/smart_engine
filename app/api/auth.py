@@ -374,4 +374,321 @@ async def get_current_user_info(
         )
 
 
+@auth_router.get("/info", response_model=UnifiedResponse, summary="获取当前用户权限信息")
+async def get_current_user_info_simple(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    获取当前登录用户的权限信息
+    包含用户基本信息、角色列表、权限码列表、菜单树（根据用户权限过滤）、租户列表
+    """
+    try:
+        # 获取当前用户信息
+        from app.core.auth import get_current_user
+        current_user = await get_current_user(request)
+
+        # 获取用户详细信息
+        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        if not user:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="用户不存在",
+                data=None
+            )
+
+        # 获取用户角色（返回完整的角色对象列表）
+        from app.services.rbac.relation_service import RelationService
+        from app.models.rbac import SysRole
+        role_objects: list[SysRole] = RelationService.get_user_roles_by_id(db, user.id, user.tenant_id)
+
+        # 构建角色信息列表（使用蛇形命名）
+        roles = [
+            {
+                "id": role.id,
+                "role_name": role.role_name,
+                "role_code": role.role_code,
+                "data_scope": role.data_scope,
+                "status": role.status
+            }
+            for role in role_objects
+        ]
+
+        # 获取用户权限列表（返回完整的权限对象列表）
+        from app.services.rbac.rbac_base_service import BaseRbacService
+        permission_objects = BaseRbacService.get_user_permissions(
+            db, user.user_name, user.tenant_id
+        )
+        permission_codes = [p.permission_code for p in permission_objects] if permission_objects else []
+
+        # 构建权限信息列表（使用蛇形命名）
+        permissions = [
+            {
+                "id": p.id,
+                "permission_name": p.permission_name,
+                "permission_code": p.permission_code,
+                "permission_type": p.permission_type,
+                "url": p.url,
+                "method": p.method
+            }
+            for p in permission_objects
+        ] if permission_objects else []
+
+        # 获取完整权限树（菜单树）
+        from app.services.rbac_service import RbacService
+        full_permission_tree = RbacService.get_permission_tree(db)
+
+        # 根据用户权限过滤菜单树
+        filtered_menu_tree = _filter_menu_tree_by_permissions(full_permission_tree, permission_codes)
+
+        # 获取租户列表
+        from app.services.rbac.tenant_service import TenantService
+        from app.models.rbac import SysTenant
+        tenant_objects: list[SysTenant] = TenantService.get_all_tenants(db, skip=0, limit=100)
+
+        # 构建租户信息列表（使用蛇形命名）
+        tenants = [
+            {
+                "id": t.id,
+                "tenant_name": t.tenant_name,
+                "company_name": t.company_name,
+                "company_code": t.company_code,
+                "contact_person": t.contact_person,
+                "contact_phone": t.contact_phone,
+                "package": t.package,
+                "status": t.status,
+                "user_count": t.user_count,
+                "domain": t.domain,
+                "address": t.address,
+                "expire_time": t.expire_time.isoformat() if t.expire_time else None,
+                "create_time": t.create_time.isoformat() if t.create_time else None,
+                "update_time": t.update_time.isoformat() if t.update_time else None
+            }
+            for t in tenant_objects
+        ] if tenant_objects else []
+
+        # 构建用户信息响应（使用蛇形命名）
+        user_info = {
+            "user_id": user.id,
+            "user_name": user.user_name,
+            "nick_name": user.nick_name,
+            "tenant_id": user.tenant_id,
+            "dept_id": user.dept_id,
+            "phone": user.phone,
+            "email": user.email,
+            "gender": user.gender,
+            "status": user.status,
+            "avatar": user.avatar,
+            "signature": user.signature,
+            "roles": roles,           # 角色列表（包含详细信息）
+            "permissions": permissions,  # 权限列表（包含详细信息）
+            "permission_codes": permission_codes,  # 权限码列表（字符串数组，用于权限判断）
+            "tenants": tenants,        # 租户列表
+            "menu_tree": filtered_menu_tree,
+            "create_time": user.create_time.isoformat() if user.create_time else None,
+            "update_time": user.update_time.isoformat() if user.update_time else None
+        }
+
+        logger.info(
+            f"获取用户权限信息成功: {user.user_name} (ID: {user.id}), "
+            f"角色数: {len(roles)}, 权限数: {len(permission_codes)}, 租户数: {len(tenants)}"
+        )
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取用户信息成功",
+            data=user_info
+        )
+
+    except Exception as e:
+        logger.error(f"获取用户权限信息失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取用户信息失败",
+            data=None
+        )
+
+
+@auth_router.get("/permissions", response_model=UnifiedResponse, summary="获取当前用户权限码列表")
+async def get_user_permissions(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    获取当前登录用户的权限码列表
+    返回用户的所有权限码（permission_code数组），用于前端权限判断
+    """
+    try:
+        # 获取当前用户信息
+        from app.core.auth import get_current_user
+        current_user = await get_current_user(request)
+
+        # 获取用户详细信息
+        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        if not user:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="用户不存在",
+                data=None
+            )
+
+        # 获取用户权限列表
+        from app.services.rbac.rbac_base_service import BaseRbacService
+        permission_objects = BaseRbacService.get_user_permissions(
+            db, user.user_name, user.tenant_id
+        )
+
+        # 提取权限码
+        permission_codes = [p.permission_code for p in permission_objects] if permission_objects else []
+
+        logger.info(
+            f"获取用户权限码成功: {user.user_name} (ID: {user.id}), "
+            f"权限数: {len(permission_codes)}"
+        )
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取权限码成功",
+            data={
+                "user_id": user.id,
+                "user_name": user.user_name,
+                "permission_codes": permission_codes
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"获取用户权限码失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取权限码失败",
+            data=None
+        )
+
+
+@auth_router.get("/menu", response_model=UnifiedResponse, summary="获取当前用户菜单树")
+async def get_user_menu_tree(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    获取当前登录用户的菜单树结构
+    根据用户权限过滤后的菜单树，用于前端导航和路由生成
+    """
+    try:
+        # 获取当前用户信息
+        from app.core.auth import get_current_user
+        current_user = await get_current_user(request)
+
+        # 获取用户详细信息
+        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        if not user:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="用户不存在",
+                data=None
+            )
+
+        # 获取用户权限列表
+        from app.services.rbac.rbac_base_service import BaseRbacService
+        permission_objects = BaseRbacService.get_user_permissions(
+            db, user.user_name, user.tenant_id
+        )
+        permission_codes = [p.permission_code for p in permission_objects] if permission_objects else []
+
+        # 获取完整权限树（菜单树）
+        from app.services.rbac_service import RbacService
+        full_permission_tree = RbacService.get_permission_tree(db)
+
+        # 根据用户权限过滤菜单树
+        filtered_menu_tree = _filter_menu_tree_by_permissions(full_permission_tree, permission_codes)
+
+        logger.info(
+            f"获取用户菜单树成功: {user.user_name} (ID: {user.id}), "
+            f"权限数: {len(permission_codes)}, 菜单节点数: {len(_count_tree_nodes(filtered_menu_tree))}"
+        )
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取菜单树成功",
+            data={
+                "user_id": user.id,
+                "user_name": user.user_name,
+                "menu_tree": filtered_menu_tree
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"获取用户菜单树失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取菜单树失败",
+            data=None
+        )
+
+
+def _count_tree_nodes(tree: list) -> int:
+    """
+    统计树形结构的节点数量
+
+    Args:
+        tree: 树形结构
+
+    Returns:
+        节点总数
+    """
+    count = 0
+    for node in tree:
+        count += 1
+        if 'children' in node and node['children']:
+            count += _count_tree_nodes(node['children'])
+    return count
+
+
+def _filter_menu_tree_by_permissions(tree: list, permission_codes: list) -> list:
+    """
+    根据用户权限码过滤菜单树
+
+    Args:
+        tree: 完整的权限树
+        permission_codes: 用户的权限码列表
+
+    Returns:
+        过滤后的菜单树
+    """
+    if not tree:
+        return []
+
+    filtered_tree = []
+    for node in tree:
+        # 检查节点是否需要权限码
+        node_permission_code = node.get('permission_code')
+
+        # 如果节点不需要权限，或者用户有该权限，则保留节点
+        if not node_permission_code or node_permission_code in permission_codes:
+            filtered_node = node.copy()
+
+            # 递归处理子节点
+            if 'children' in node and node['children']:
+                filtered_node['children'] = _filter_menu_tree_by_permissions(
+                    node['children'],
+                    permission_codes
+                )
+            elif node.get('has_children'):
+                # 如果节点有子节点但未加载，保留 has_children 标记
+                filtered_node['has_children'] = True
+
+            filtered_tree.append(filtered_node)
+
+    return filtered_tree
+
+
 __all__ = ["auth_router"]

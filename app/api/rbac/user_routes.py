@@ -727,8 +727,8 @@ async def reset_user_password(
 
 @user_router.post("/users/batch-delete", response_model=UnifiedResponse, summary="批量删除用户")
 async def batch_delete_users_api(
-    delete_request: BatchDeleteUserRequest,
     http_request: Request,
+    delete_request: BatchDeleteUserRequest,
     tenant_id: Optional[int] = Query(None, description="租户编码（可选，用于验证权限）"),
     db: Session = Depends(get_db)
 ):

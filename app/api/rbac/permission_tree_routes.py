@@ -7,7 +7,7 @@ RBAC权限树管理API
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.rbac import (
@@ -87,11 +87,16 @@ async def get_permission_node(
 
 @permission_tree_router.post("/permission-nodes", response_model=UnifiedResponse, summary="创建权限节点")
 async def create_permission_node(
+    request: Request,
     permission: PermissionNodeResponse,
     db: Session = Depends(get_db)
 ):
     """创建权限节点"""
     try:
+        # 获取当前用户信息
+        from app.utils.auth_helper import get_user_name_from_request
+        creator = get_user_name_from_request(request)
+
         # 注：权限表无租户字段，跳过租户验证
         # 检查权限编码是否已存在
         existing_permission = RbacService.get_permission_by_code(db, permission.permission_code)
@@ -103,7 +108,7 @@ async def create_permission_node(
                 data=None
             )
 
-        permission_obj = RbacService.create_permission(db, permission.model_dump())
+        permission_obj = RbacService.create_permission(db, permission.model_dump(), creator=creator)
         return UnifiedResponse(
             success=True,
             code=200,
@@ -130,12 +135,17 @@ async def create_permission_node(
 @permission_tree_router.put("/permission-nodes/{id}", response_model=UnifiedResponse, summary="更新权限节点")
 async def update_permission_node(
     id: int,
+    request: Request,
     permission_update: PermissionNodeResponse,
     tenant_id: Optional[int] = Query(None, description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """更新权限节点信息"""
     try:
+        # 获取当前用户信息
+        from app.utils.auth_helper import get_user_name_from_request
+        updater = get_user_name_from_request(request)
+
         # 需要先根据ID获取权限
         permission = RbacService.get_permission_by_id(db, id)
         if not permission:
@@ -159,7 +169,7 @@ async def update_permission_node(
                 )
 
         # 使用权限ID调用更新方法
-        updated_permission = RbacService.update_permission_by_id(db, permission.id, update_data)
+        updated_permission = RbacService.update_permission_by_id(db, permission.id, update_data, updater=updater)
         if not updated_permission:
             return UnifiedResponse(
                 success=False,
@@ -186,12 +196,17 @@ async def update_permission_node(
 @permission_tree_router.patch("/permission-nodes/{id}/status", response_model=UnifiedResponse, summary="更新权限节点状态")
 async def update_permission_node_status(
     id: int,
+    request: Request,
     status: int = Query(..., description="状态: 0(启用)、1(禁用)", ge=0, le=1),
     tenant_id: Optional[int] = Query(None, description="租户编码"),
     db: Session = Depends(get_db)
 ):
     """启用/禁用权限节点"""
     try:
+        # 获取当前用户信息
+        from app.utils.auth_helper import get_user_name_from_request
+        updater = get_user_name_from_request(request)
+
         # 需要先根据ID获取权限
         permission = RbacService.get_permission_by_id(db, id)
         if not permission:
@@ -204,7 +219,7 @@ async def update_permission_node_status(
 
         # 更新权限状态
         update_data = {"status": status}
-        updated_permission = RbacService.update_permission_by_id(db, permission.id, update_data)
+        updated_permission = RbacService.update_permission_by_id(db, permission.id, update_data, updater=updater)
         if not updated_permission:
             return UnifiedResponse(
                 success=False,

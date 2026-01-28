@@ -84,7 +84,7 @@ class RbacService:
 
     # 权限相关方法
     get_permission_by_code = PermissionService.get_permission_by_code
-    get_permission_by_url_and_method = PermissionService.get_permission_by_url_and_method
+    get_permission_by_path_and_method = PermissionService.get_permission_by_path_and_method
     get_permission_by_id = PermissionService.get_permission_by_id
     create_permission = PermissionService.create_permission
     update_permission = PermissionService.update_permission
@@ -96,6 +96,7 @@ class RbacService:
     get_permissions_advanced_search = PermissionService.get_permissions_advanced_search
     get_permission_count_advanced_search = PermissionService.get_permission_count_advanced_search
     get_permission_tree = PermissionService.get_permission_tree
+    get_permission_children = PermissionService.get_permission_children
 
     # 租户相关方法
     get_tenant_by_company_code = TenantService.get_tenant_by_company_code

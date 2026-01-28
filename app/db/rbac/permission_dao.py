@@ -25,10 +25,10 @@ class PermissionDao:
         ).first()
 
     @staticmethod
-    def get_permission_by_url_and_method(db: Session, url: str, method: str):
-        """根据URL和方法获取权限"""
+    def get_permission_by_path_and_method(db: Session, path: str, method: str):
+        """根据路径和方法获取权限"""
         return db.query(SysPermission).filter(
-            SysPermission.url == url,
+            SysPermission.path == path,
             SysPermission.method == method,
             SysPermission.is_deleted == False,
             SysPermission.status == 0
@@ -48,23 +48,8 @@ class PermissionDao:
     @staticmethod
     def create_permission(db: Session, permission_data: dict):
         """创建权限"""
-        # 如果没有提供ID，则生成新的ID
-        if 'id' not in permission_data:
-            # 从tenant_id生成租户ID用于ID生成器
-            tenant_id = permission_data.get('tenant_id', 'default')
-            # 简单的哈希算法生成租户ID，确保在允许范围内
-            tenant_id = sum(ord(c) for c in tenant_id) % 16384  # 限制在0-16383范围内
-
-            # 生成新的权限ID
-            from app.utils.id_generator import generate_id
-            permission_id = generate_id(tenant_id, "permission")  # tenant_id不再直接编码到ID中，但可用于其他用途
-
-            # 验证生成的ID是否在合理范围内
-            # MySQL BIGINT范围是 -9223372036854775808 到 9223372036854775807
-            if permission_id > 9223372036854775807:
-                raise ValueError(f"Generated ID {permission_id} exceeds BIGINT range")
-
-            permission_data['id'] = permission_id
+        # 移除ID字段，使用数据库自增主键
+        permission_data.pop('id', None)
 
         # 确保所有字段都存在，对于新字段如果没有提供则设置为默认值
         permission = SysPermission(**permission_data)

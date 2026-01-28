@@ -626,6 +626,13 @@ async def auth_middleware(request: Request, call_next):
        - 在：复制权限并放行 ✅
        - 不在：返回403 ❌
     """
+    # 豁免 CORS preflight 请求（OPTIONS 方法）
+    # 浏览器发送跨域请求前会先发送 OPTIONS 请求检查是否允许
+    # 这种请求不应该被认证逻辑拦截
+    if request.method == "OPTIONS":
+        response = await call_next(request)
+        return response
+
     # 定义不需要鉴权的路径（如登录、健康检查等）
     public_paths = ["/health", "/docs", "/openapi.json", "/api/v1/login", "/login"]
 

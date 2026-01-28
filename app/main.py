@@ -236,6 +236,10 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
+# 单独挂载 chat_assistant 路由到 /api 前缀（与前端调用路径一致）
+from app.api import chat_assistant
+app.include_router(chat_assistant.router, prefix="/api/chat", tags=["chat_assistant"])
+
 # 配置静态文件
 try:
     app.mount("/static", StaticFiles(directory="static"), name="static")

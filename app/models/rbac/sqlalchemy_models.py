@@ -106,20 +106,22 @@ class SysPermission(Base):
     """权限表，支持树形结构"""
     __tablename__ = "sys_permission"
 
-    id = Column(BigInteger, primary_key=True, comment="权限ID，52位合成ID")
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="权限ID，自增主键")
     permission_name = Column(String(64), nullable=False, comment="权限名称")
     permission_code = Column(String(64), unique=True, comment="权限代码（可选，用于业务标识）")
 
     # 权限树形结构相关字段
     parent_id = Column(BigInteger, nullable=True, comment="父权限ID")  # 允许NULL以支持根节点
-    path = Column(String(255), nullable=False, comment="Materialized Path")
-    depth = Column(Integer, nullable=False, comment="深度")
 
     # 权限类型：folder(文件夹)、menu(页面)、button(按钮)
     permission_type = Column(String(20), default="menu", comment="权限类型: folder(文件夹)、menu(页面)、button(按钮)")
 
-    # 菜单相关字段
-    url = Column(String(256), comment="访问URL")
+    # 路径字段（统一存储）
+    # folder/menu: 路由路径，如 /system/user
+    # button: API 路径，如 /api/v1/rbac/users
+    path = Column(String(500), comment="路径（路由路径或API路径）")
+
+    # 菜单相关字段（仅 folder/menu 使用）
     component = Column(String(500), comment="Vue组件路径")
     layout = Column(Boolean, default=True, comment="是否使用Layout")
     visible = Column(Boolean, default=True, comment="菜单是否显示")
@@ -127,34 +129,11 @@ class SysPermission(Base):
     sort_order = Column(Integer, default=0, comment="显示顺序")
     open_new_tab = Column(Boolean, default=False, comment="新窗口打开")
     keep_alive = Column(Boolean, default=True, comment="页面缓存")
-    route_params = Column(Text, comment="路由参数")
 
-    # 按钮相关字段
-    api_path = Column(String(500), comment="API路径")
-    methods = Column(Text, comment="HTTP方法")
-    category = Column(String(20), comment="操作分类: READ/WRITE/DELETE/SPECIAL")
-
-    @hybrid_property
-    def methods_list(self):
-        """获取methods作为列表（向后兼容）"""
-        if self.methods:
-            return [str(self.methods)]
-        return []
-
-    @methods_list.setter
-    def methods_list(self, value):
-        """设置methods列表"""
-        if isinstance(value, str):
-            self.methods = value
-        else:
-            self.methods = str(value) if value else None
-    resource = Column(String(50), comment="资源标识")
-    path_params = Column(Text, comment="路径参数定义")
-    body_schema = Column(Text, comment="请求体验证")
-    path_match = Column(Text, comment="前端匹配配置")
+    # HTTP 方法（仅 button 类型使用）
+    method = Column(String(16), comment="HTTP方法: GET/POST/PUT/DELETE/PATCH")
 
     # 通用字段
-    method = Column(String(32), comment="请求方法")
     status = Column(Integer, default=0, comment="状态: 0(启用)、1(禁用)")
     remark = Column(String(500), comment="备注")
     is_deleted = Column(Boolean, default=False, nullable=False, comment="逻辑删除标记")
@@ -181,7 +160,7 @@ class SysRolePermission(Base):
     """角色权限关联表"""
     __tablename__ = "sys_role_permission"
 
-    id = Column(BigInteger, primary_key=True, comment="关联ID，52位合成ID")
+    id = Column(BigInteger, primary_key=True, autoincrement=True, comment="关联ID，自增主键")
     role_id = Column(BigInteger, nullable=False, comment="角色ID")
     permission_id = Column(BigInteger, nullable=False, comment="权限ID")
 

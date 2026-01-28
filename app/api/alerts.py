@@ -366,6 +366,75 @@ async def get_alert_statistics(
         logger.error(f"获取报警统计失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取报警统计失败: {str(e)}")
 
+@router.get("/latest-images", description="获取最新预警图片（用于大屏展示）")
+async def get_latest_alert_images(
+    limit: int = Query(10, ge=1, le=50, description="返回数量限制"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取最新预警图片列表
+
+    返回最新的预警记录，包含图片URL、预警信息等，
+    主要用于大屏可视化中心的预警图片轮播展示。
+
+    级别映射：
+    - urgent: 一级（紧急）
+    - high: 二级（重要）
+    - medium: 三级（普通）
+    - low: 四级（提示）
+    """
+    try:
+        logger.info(f"收到获取最新预警图片请求，限制数量: {limit}")
+
+        # 级别映射
+        level_map = {
+            4: ("urgent", "一级"),
+            3: ("high", "二级"),
+            2: ("medium", "三级"),
+            1: ("low", "四级")
+        }
+
+        # 查询最新有图片的预警记录
+        query = db.query(Alert).filter(
+            Alert.minio_frame_object_name.isnot(None),
+            Alert.minio_frame_object_name != ""
+        ).order_by(desc(Alert.alert_time)).limit(limit)
+
+        alerts = query.all()
+
+        # 构建返回数据
+        result = []
+        for alert in alerts:
+            # 获取级别信息
+            level_code, level_text = level_map.get(alert.alert_level, (1, "四级"))
+
+            # 使用AlertResponse模型自动生成minio_frame_url
+            alert_response = AlertResponse.model_validate(alert)
+
+            result.append({
+                "id": alert.alert_id,
+                "image": alert_response.minio_frame_url,  # 自动生成的MinIO预签名URL
+                "event": alert.alert_name,
+                "time": alert.alert_time.strftime("%Y-%m-%d %H:%M") if alert.alert_time else "",
+                "alert_time": alert.alert_time.strftime("%Y-%m-%d %H:%M:%S") if alert.alert_time else "",
+                "level": level_code,
+                "levelText": level_text,
+                "location": alert.location or "",
+                "camera_name": alert.camera_name or ""
+            })
+
+        logger.info(f"成功获取最新预警图片 {len(result)} 条")
+
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": result
+        }
+
+    except Exception as e:
+        logger.error(f"获取最新预警图片失败: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"获取最新预警图片失败: {str(e)}")
+
 @router.get("/connected")
 def get_connected_clients():
     """

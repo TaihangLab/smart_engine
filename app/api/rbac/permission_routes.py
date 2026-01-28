@@ -6,8 +6,8 @@ RBAC权限管理API
 处理权限相关的增删改查操作
 """
 
-from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from typing import Optional, Dict, Any
+from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.rbac import (
@@ -34,11 +34,41 @@ async def get_permission_tree(
     tenant_id: Optional[int] = Query(None, description="租户ID"),
     permission_name: str = Query(None, description="权限名称过滤条件（模糊查询）"),
     permission_code: str = Query(None, description="权限编码过滤条件（模糊查询）"),
+    lazy_load: bool = Query(False, description="是否懒加载（只加载根节点，点击展开时再加载子节点），默认False返回完整树"),
+    parent_id: Optional[int] = Query(None, description="父节点ID（用于懒加载子节点）"),
     db: Session = Depends(get_db)
 ):
-    """获取权限树结构，支持按名称和编码模糊查询"""
+    """
+    获取权限树结构，支持按名称和编码模糊查询
+
+    默认模式（lazy_load=False）：
+    - 全量查询所有权限数据，在内存中构建完整的树结构，前端直接使用
+
+    懒加载模式（lazy_load=True）：
+    - 首次请求：lazy_load=True，不传 parent_id，返回根节点列表
+    - 展开子节点：lazy_load=True，传入 parent_id，返回该节点的直接子节点
+    """
     try:
-        permission_tree = RbacService.get_permission_tree(db, permission_name, permission_code)
+        from app.services.rbac.permission_service import PermissionService
+
+        # 使用完整树模式作为默认行为
+        if not lazy_load:
+            # 全量查询后在内存中构建完整的树结构
+            permission_tree = PermissionService.get_permission_tree_full(
+                db,
+                permission_name=permission_name,
+                permission_code=permission_code
+            )
+        else:
+            # 懒加载模式
+            permission_tree = PermissionService.get_permission_tree(
+                db,
+                permission_name=permission_name,
+                permission_code=permission_code,
+                lazy_load=True,
+                parent_id=parent_id
+            )
+
         if not permission_tree:
             # 空列表也是有效的响应
             return UnifiedResponse(
@@ -47,6 +77,7 @@ async def get_permission_tree(
                 message="获取权限树成功",
                 data=[]
             )
+
         return UnifiedResponse(
             success=True,
             code=200,
@@ -59,6 +90,49 @@ async def get_permission_tree(
             success=False,
             code=500,
             message="获取权限树失败",
+            data=None
+        )
+
+
+@permission_router.get("/permissions/{parent_id}/children", response_model=UnifiedResponse, summary="获取权限子节点")
+async def get_permission_children(
+    parent_id: int,
+    permission_name: str = Query(None, description="权限名称过滤条件（模糊查询）"),
+    permission_code: str = Query(None, description="权限编码过滤条件（模糊查询）"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取指定父节点的直接子节点（用于懒加载展开）
+    
+    这是懒加载模式的核心端点，当前端点击展开某个节点时，
+    传入该节点的ID作为 parent_id，返回其直接子节点列表
+    """
+    try:
+        children = RbacService.get_permission_children(
+            db,
+            parent_id,
+            permission_name,
+            permission_code
+        )
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message=f"获取权限子节点成功，共 {len(children)} 个",
+            data=children
+        )
+    except ValueError as e:
+        return UnifiedResponse(
+            success=False,
+            code=404,
+            message=str(e),
+            data=None
+        )
+    except Exception as e:
+        logger.error(f"获取权限子节点失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取权限子节点失败",
             data=None
         )
 
@@ -78,11 +152,12 @@ async def get_permission(
                 message="权限不存在",
                 data=None
             )
+        response_data = PermissionResponse.model_validate(permission)
         return UnifiedResponse(
             success=True,
             code=200,
             message="获取权限详情成功",
-            data=PermissionResponse.model_validate(permission)
+            data=response_data
         )
     except Exception as e:
         logger.error(f"获取权限详情失败: {str(e)}", exc_info=True)
@@ -152,11 +227,16 @@ async def get_permissions(
 
 @permission_router.post("/permissions", response_model=UnifiedResponse, summary="创建权限")
 async def create_permission(
+    request: Request,
     permission: PermissionCreate,
     db: Session = Depends(get_db)
 ):
     """创建新权限"""
     try:
+        # 获取当前用户信息
+        from app.utils.auth_helper import get_user_name_from_request
+        creator = get_user_name_from_request(request)
+
         # 检查权限编码是否已存在
         existing_permission = RbacService.get_permission_by_code(db, permission.permission_code)
         if existing_permission:
@@ -167,12 +247,13 @@ async def create_permission(
                 data=None
             )
 
-        permission_obj = RbacService.create_permission(db, permission.model_dump())
+        permission_obj = RbacService.create_permission(db, permission.model_dump(), creator=creator)
+        response_data = PermissionResponse.model_validate(permission_obj)
         return UnifiedResponse(
             success=True,
             code=200,
             message="创建权限成功",
-            data=PermissionResponse.model_validate(permission_obj)
+            data=response_data
         )
     except ValueError as e:
         return UnifiedResponse(
@@ -194,12 +275,17 @@ async def create_permission(
 @permission_router.put("/permissions/{id}", response_model=UnifiedResponse, summary="更新权限")
 async def update_permission(
     id: int,
+    request: Request,
     permission_update: PermissionUpdate,
     db: Session = Depends(get_db)
 ):
     """更新权限信息"""
     try:
-        updated_permission = RbacService.update_permission_by_id(db, id, permission_update.model_dump(exclude_unset=True))
+        # 获取当前用户信息
+        from app.utils.auth_helper import get_user_name_from_request
+        updater = get_user_name_from_request(request)
+
+        updated_permission = RbacService.update_permission_by_id(db, id, permission_update.model_dump(exclude_unset=True), updater=updater)
         if not updated_permission:
             return UnifiedResponse(
                 success=False,
@@ -207,11 +293,12 @@ async def update_permission(
                 message="权限不存在",
                 data=None
             )
+        response_data = PermissionResponse.model_validate(updated_permission)
         return UnifiedResponse(
             success=True,
             code=200,
             message="更新权限成功",
-            data=PermissionResponse.model_validate(updated_permission)
+            data=response_data
         )
     except Exception as e:
         logger.error(f"更新权限失败: {str(e)}", exc_info=True)

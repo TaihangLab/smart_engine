@@ -38,19 +38,8 @@ class RolePermissionDao:
         if existing:
             return existing  # 已存在，返回现有记录
 
-        # 从tenant_id生成租户ID用于ID生成器
-        tenant_hash = sum(ord(c) for c in str(tenant_id)) % 16384  # 限制在0-16383范围内
-        # 生成新的关联ID
-        from app.utils.id_generator import generate_id
-        assoc_id = generate_id(tenant_hash, "role_permission")
-
-        # 验证生成的ID是否在合理范围内
-        # MySQL BIGINT范围是 -9223372036854775808 到 9223372036854775807
-        if assoc_id > 9223372036854775807:
-            raise ValueError(f"Generated ID {assoc_id} exceeds BIGINT range")
-
+        # 使用自增主键，不指定ID
         role_permission = SysRolePermission(
-            id=assoc_id,
             role_id=role.id,
             permission_id=permission.id
         )
@@ -132,20 +121,9 @@ class RolePermissionDao:
             if existing:
                 return False  # 已存在，不重复分配
 
-            # 从tenant_id生成租户ID用于ID生成器
-            tenant_hash = sum(ord(c) for c in str(tenant_id)) % 16384  # 限制在0-16383范围内
-            # 生成新的关联ID
-            from app.utils.id_generator import generate_id
-            assoc_id = generate_id(tenant_hash, "role_permission")
-
-            # 验证生成的ID是否在合理范围内
-            # MySQL BIGINT范围是 -9223372036854775808 到 9223372036854775807
-            if assoc_id > 9223372036854775807:
-                raise ValueError(f"Generated ID {assoc_id} exceeds BIGINT range")
-
+            # 使用自增主键，不指定ID
             # 创建新的角色权限关联
             role_permission = SysRolePermission(
-                id=assoc_id,
                 role_id=role_id,
                 permission_id=permission_id
             )
