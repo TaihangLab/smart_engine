@@ -44,3 +44,6 @@ psutil==7.0.0
 # transformers==4.57.1
 # torch==2.9.1
 # torchvision==0.24.1
+aiofiles==25.1.0
+# SFTP模型上传（用于跨机器部署场景）
+paramiko>=3.4.0

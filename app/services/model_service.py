@@ -6,8 +6,11 @@ from sqlalchemy.orm import Session
 from app.db.model_dao import ModelDAO
 from app.services.triton_client import triton_client
 from app.db.session import SessionLocal
+from app.core.config import settings
 import logging
 import json
+import os
+import shutil
 
 logger = logging.getLogger(__name__)
 
@@ -394,7 +397,7 @@ class ModelService:
     @staticmethod
     def delete_model(model_id: int, db: Session) -> Dict[str, Any]:
         """
-        删除模型
+        删除模型（完整删除：卸载Triton + 删除文件 + 删除数据库记录）
         
         Args:
             model_id: 模型ID
@@ -409,6 +412,8 @@ class ModelService:
         model = ModelDAO.get_model_by_id(model_id, db)
         if not model:
             return {"success": False, "reason": f"模型不存在: ID={model_id}"}
+        
+        model_name = model.name
             
         # 检查模型是否被技能使用
         is_used, skill_names = ModelService.check_model_used_by_skills(model_id, db)
@@ -417,7 +422,6 @@ class ModelService:
             return {"success": False, "reason": f"模型正在被以下技能使用，无法删除: {', '.join(skill_names)}"}
         
         # 检查模型是否有相关技能类
-        model_name = ModelDAO.get_model_by_id(model_id, db).name
         skill_classes = ModelService.get_model_skill_classes(model_name, db)
 
         if skill_classes.get("skill_class_count",0) > 0:
@@ -426,12 +430,147 @@ class ModelService:
             logger.warning(reason)
             return {"success": False, "reason": reason}
         
-        # 删除模型
+        # ==================== 1. 从Triton卸载模型 ====================
+        try:
+            if triton_client.is_model_ready(model_name):
+                logger.info(f"从Triton卸载模型: {model_name}")
+                triton_client.unload_model(model_name)
+        except Exception as e:
+            logger.warning(f"从Triton卸载模型失败（继续删除）: {str(e)}")
+        
+        # ==================== 2. 根据上传模式删除文件 ====================
+        upload_mode = settings.TRITON_UPLOAD_MODE
+        model_repository = settings.TRITON_MODEL_REPOSITORY
+        model_dir = os.path.join(model_repository, model_name) if upload_mode == "local" else f"{model_repository}/{model_name}"
+        
+        file_delete_result = {"success": True, "message": ""}
+        
+        if upload_mode == "local":
+            # Local模式：删除本地目录
+            file_delete_result = ModelService._delete_model_local(model_dir)
+        elif upload_mode == "sftp":
+            # SFTP模式：删除远程目录
+            file_delete_result = ModelService._delete_model_sftp(model_dir)
+        elif upload_mode == "memory":
+            # Memory模式：无需删除文件（本来就没持久化）
+            file_delete_result = {"success": True, "message": "内存模式无需删除文件"}
+        else:
+            logger.warning(f"未知的上传模式: {upload_mode}")
+        
+        if not file_delete_result["success"]:
+            logger.warning(f"删除模型文件失败（继续删除数据库记录）: {file_delete_result['message']}")
+        else:
+            logger.info(f"模型文件删除成功: {file_delete_result['message']}")
+        
+        # ==================== 3. 删除数据库记录 ====================
         result = ModelDAO.delete_model(model_id, db)
         if result:
-            return {"success": True, "reason": "模型删除成功"}
+            return {
+                "success": True, 
+                "reason": "模型删除成功",
+                "detail": {
+                    "triton_unloaded": True,
+                    "files_deleted": file_delete_result["success"],
+                    "files_message": file_delete_result["message"],
+                    "db_deleted": True
+                }
+            }
         else:
-            return {"success": False, "reason": "模型删除失败，请检查数据库操作"}
+            return {"success": False, "reason": "数据库删除失败"}
+    
+    @staticmethod
+    def _delete_model_local(model_dir: str) -> Dict[str, Any]:
+        """
+        删除本地模型目录
+        
+        Args:
+            model_dir: 模型目录路径
+            
+        Returns:
+            Dict[str, Any]: 删除结果
+        """
+        try:
+            if os.path.exists(model_dir):
+                shutil.rmtree(model_dir)
+                logger.info(f"[Local] 已删除本地目录: {model_dir}")
+                return {"success": True, "message": f"已删除本地目录: {model_dir}"}
+            else:
+                logger.info(f"[Local] 目录不存在，跳过删除: {model_dir}")
+                return {"success": True, "message": f"目录不存在: {model_dir}"}
+        except Exception as e:
+            logger.error(f"[Local] 删除本地目录失败: {str(e)}", exc_info=True)
+            return {"success": False, "message": f"删除本地目录失败: {str(e)}"}
+    
+    @staticmethod
+    def _delete_model_sftp(model_dir: str) -> Dict[str, Any]:
+        """
+        通过SFTP删除远程模型目录
+        
+        Args:
+            model_dir: 远程模型目录路径
+            
+        Returns:
+            Dict[str, Any]: 删除结果
+        """
+        import paramiko
+        
+        ssh = None
+        sftp = None
+        try:
+            # 建立SSH连接
+            ssh = paramiko.SSHClient()
+            ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            
+            # 优先使用密钥认证
+            if settings.TRITON_SSH_KEY_PATH and os.path.exists(settings.TRITON_SSH_KEY_PATH):
+                ssh.connect(
+                    hostname=settings.TRITON_SSH_HOST,
+                    port=settings.TRITON_SSH_PORT,
+                    username=settings.TRITON_SSH_USER,
+                    key_filename=settings.TRITON_SSH_KEY_PATH
+                )
+            else:
+                ssh.connect(
+                    hostname=settings.TRITON_SSH_HOST,
+                    port=settings.TRITON_SSH_PORT,
+                    username=settings.TRITON_SSH_USER,
+                    password=settings.TRITON_SSH_PASSWORD
+                )
+            
+            sftp = ssh.open_sftp()
+            
+            # 递归删除远程目录
+            def rmtree_remote(remote_path):
+                """递归删除远程目录"""
+                try:
+                    for item in sftp.listdir_attr(remote_path):
+                        item_path = f"{remote_path}/{item.filename}"
+                        if item.st_mode & 0o40000:  # 是目录
+                            rmtree_remote(item_path)
+                        else:
+                            sftp.remove(item_path)
+                    sftp.rmdir(remote_path)
+                except FileNotFoundError:
+                    pass  # 目录不存在，忽略
+            
+            # 检查目录是否存在
+            try:
+                sftp.stat(model_dir)
+                rmtree_remote(model_dir)
+                logger.info(f"[SFTP] 已删除远程目录: {model_dir}")
+                return {"success": True, "message": f"已删除远程目录: {model_dir}"}
+            except FileNotFoundError:
+                logger.info(f"[SFTP] 远程目录不存在，跳过删除: {model_dir}")
+                return {"success": True, "message": f"远程目录不存在: {model_dir}"}
+                
+        except Exception as e:
+            logger.error(f"[SFTP] 删除远程目录失败: {str(e)}", exc_info=True)
+            return {"success": False, "message": f"删除远程目录失败: {str(e)}"}
+        finally:
+            if sftp:
+                sftp.close()
+            if ssh:
+                ssh.close()
     
     @staticmethod
     def load_model_to_triton(model_id: int, db: Session) -> Dict[str, Any]:

@@ -481,34 +481,55 @@ def reload_skills(db: Session = Depends(get_db)):
     return result
 
 @router.post("/upload", response_model=Dict[str, Any])
-async def upload_skill_file(
-    file: UploadFile = File(...),
+async def upload_skill_files(
+    main_file: UploadFile = File(..., description="主技能文件，必须是.py文件"),
+    dependency_files: List[UploadFile] = File(default=[], description="依赖文件列表，可以是.py或其他配置文件"),
     db: Session = Depends(get_db)
 ):
     """
-    上传技能文件到插件目录
+    上传技能文件和依赖文件到插件目录
+    
+    支持上传一个主技能文件(.py)和多个依赖文件（.py或其他配置文件）。
+    所有文件都会被保存到 app/plugins/skills 目录下。
+    上传成功后会自动执行技能热加载。
     
     Args:
-        file: 上传的技能文件，必须是.py文件
+        main_file: 主技能文件，必须是.py文件
+        dependency_files: 依赖文件列表，可以是.py或其他配置文件
         db: 数据库会话
         
     Returns:
-        上传结果
+        上传结果，包含上传的文件列表和热加载结果
     """
-    logger.info(f"接收到技能文件上传请求: {file.filename}")
+    logger.info(f"接收到技能文件上传请求: 主文件={main_file.filename}, 依赖文件数量={len(dependency_files)}")
     
-    # 验证文件类型
-    if not file.filename.endswith('.py'):
+    # 验证主文件类型
+    if not main_file.filename.endswith('.py'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="只支持上传Python文件(.py)"
+            detail="主技能文件必须是Python文件(.py)"
         )
     
-    # 读取文件内容
-    file_content = await file.read()
+    # 读取主文件内容
+    main_file_content = await main_file.read()
+    
+    # 处理依赖文件
+    dep_files_data = []
+    for dep_file in dependency_files:
+        if dep_file.filename:  # 跳过空文件
+            dep_content = await dep_file.read()
+            dep_files_data.append({
+                "filename": dep_file.filename,
+                "content": dep_content
+            })
+            logger.info(f"读取依赖文件: {dep_file.filename}, 大小: {len(dep_content)} bytes")
     
     # 上传文件
-    result = skill_manager.upload_skill_file(file.filename, file_content)
+    result = skill_manager.upload_skill_files(
+        main_file_name=main_file.filename,
+        main_file_content=main_file_content,
+        dependency_files=dep_files_data
+    )
     
     # 检查上传结果
     if not result.get("success", False):
@@ -526,5 +547,7 @@ async def upload_skill_file(
         **result,
         "reload_result": reload_result
     }
+    
+    logger.info(f"技能文件上传完成: {result.get('message')}")
     
     return combined_result

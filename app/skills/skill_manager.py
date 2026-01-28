@@ -480,44 +480,74 @@ class SkillManager:
                 "message": f"热加载技能失败: {str(e)}"
             }
     
-    def upload_skill_file(self, file_path: str, file_content: bytes) -> Dict[str, Any]:
+    def upload_skill_files(self, main_file_name: str, main_file_content: bytes, 
+                           dependency_files: List[Dict[str, Any]] = None) -> Dict[str, Any]:
         """
-        上传技能文件到插件目录
+        上传技能文件和依赖文件到插件目录
         
         Args:
-            file_path: 文件名（不含路径）
-            file_content: 文件内容
+            main_file_name: 主技能文件名（必须是.py文件）
+            main_file_content: 主技能文件内容
+            dependency_files: 依赖文件列表，每个元素为 {"filename": str, "content": bytes}
             
         Returns:
             Dict[str, Any]: 上传结果
         """
         try:
-            # 确保文件名是Python文件
-            if not file_path.endswith('.py'):
+            # 验证主技能文件
+            if not main_file_name.endswith('.py'):
                 return {
                     "success": False,
-                    "message": "只支持上传Python文件(.py)"
+                    "message": "主技能文件必须是Python文件(.py)"
                 }
             
             # 确保插件目录存在
             if not os.path.exists(SKILL_PLUGINS_DIR):
                 os.makedirs(SKILL_PLUGINS_DIR, exist_ok=True)
-                
-            # 构建完整的文件路径
-            full_path = os.path.join(SKILL_PLUGINS_DIR, os.path.basename(file_path))
             
-            # 写入文件
-            with open(full_path, 'wb') as f:
-                f.write(file_content)
+            uploaded_files = []
             
-            logger.info(f"技能文件上传成功: {full_path}")
+            # 上传主技能文件
+            main_file_path = os.path.join(SKILL_PLUGINS_DIR, os.path.basename(main_file_name))
+            with open(main_file_path, 'wb') as f:
+                f.write(main_file_content)
+            uploaded_files.append({
+                "filename": os.path.basename(main_file_name),
+                "path": main_file_path,
+                "type": "main"
+            })
+            logger.info(f"主技能文件上传成功: {main_file_path}")
             
-            # 返回结果
+            # 上传依赖文件
+            if dependency_files:
+                for dep_file in dependency_files:
+                    dep_filename = dep_file.get("filename", "")
+                    dep_content = dep_file.get("content", b"")
+                    
+                    if not dep_filename:
+                        continue
+                    
+                    # 构建依赖文件路径
+                    dep_file_path = os.path.join(SKILL_PLUGINS_DIR, os.path.basename(dep_filename))
+                    
+                    # 写入依赖文件
+                    with open(dep_file_path, 'wb') as f:
+                        f.write(dep_content)
+                    
+                    uploaded_files.append({
+                        "filename": os.path.basename(dep_filename),
+                        "path": dep_file_path,
+                        "type": "dependency"
+                    })
+                    logger.info(f"依赖文件上传成功: {dep_file_path}")
+            
             return {
                 "success": True,
-                "message": "技能文件上传成功",
-                "file_path": full_path
+                "message": f"成功上传 {len(uploaded_files)} 个文件",
+                "uploaded_files": uploaded_files,
+                "main_file_path": main_file_path
             }
+            
         except Exception as e:
             logger.exception(f"上传技能文件失败: {e}")
             return {

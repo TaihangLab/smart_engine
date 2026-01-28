@@ -26,10 +26,47 @@ class Settings(BaseSettings):
     MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=5, description="消息处理线程池大小")
     IMAGE_PROCESSING_POOL_SIZE: int = Field(default=8, description="图像处理线程池大小")
     
-    # Triton服务器配置
-    TRITON_URL: str = Field(default="172.18.1.1:8201", description="Triton服务器地址")
-    TRITON_MODEL_REPOSITORY: str = Field(default="/models", description="Triton模型仓库路径")
+    # ==================== Triton服务器配置 ====================
+    TRITON_URL: str = Field(default="172.18.1.1:8201", description="Triton服务器gRPC地址")
     TRITON_TIMEOUT: int = Field(default=30, description="Triton连接超时时间（秒）")
+    
+    # Triton 模型仓库路径
+    # - local模式: 后端可直接写入的本地路径，且Triton能访问（同一机器或共享目录）
+    # - sftp模式: 远程Triton服务器上的模型仓库路径
+    # - memory模式: 不使用此路径（模型直接加载到内存）
+    TRITON_MODEL_REPOSITORY: str = Field(default="/home/user/AI-platform/Deploy-models-using-Triton/yolo11_TensorRT", description="Triton模型仓库路径")
+    
+    # ==================== Triton 模型上传模式配置 ====================
+    # 三种模式说明：
+    # - local:  本地模式，直接写入本地目录（后端和Triton在同一台机器，或共享存储）
+    # - sftp:   SFTP模式，通过SSH上传到远程服务器（后端Windows/Triton远程Linux）
+    # - memory: 内存模式，通过gRPC直接加载到Triton内存（⚠️ 不持久化，Triton重启后丢失）
+    #
+    # .env 配置示例：
+    # ┌─────────────────────────────────────────────────────────────────────────┐
+    # │ Local模式（后端和Triton同机器）:                                         │
+    # │   TRITON_UPLOAD_MODE=local                                              │
+    # │   TRITON_MODEL_REPOSITORY=/home/user/triton_models                      │
+    # ├─────────────────────────────────────────────────────────────────────────┤
+    # │ SFTP模式（后端Windows，Triton远程Linux）:                                │
+    # │   TRITON_UPLOAD_MODE=sftp                                               │
+    # │   TRITON_MODEL_REPOSITORY=/home/taihang/triton_models                   │
+    # │   TRITON_SSH_HOST=192.168.1.100                                         │
+    # │   TRITON_SSH_PORT=22                                                    │
+    # │   TRITON_SSH_USER=taihang                                               │
+    # │   TRITON_SSH_PASSWORD=your_password                                     │
+    # ├─────────────────────────────────────────────────────────────────────────┤
+    # │ Memory模式（不持久化，仅测试用）:                                         │
+    # │   TRITON_UPLOAD_MODE=memory                                             │
+    # └─────────────────────────────────────────────────────────────────────────┘
+    TRITON_UPLOAD_MODE: str = Field(default="sftp", description="模型上传模式: local/sftp/memory")
+    
+    # SFTP 远程上传配置（仅 TRITON_UPLOAD_MODE=sftp 时需要配置）
+    TRITON_SSH_HOST: str = Field(default="172.18.1.1", description="Triton服务器SSH地址")
+    TRITON_SSH_PORT: int = Field(default=22, description="Triton服务器SSH端口")
+    TRITON_SSH_USER: str = Field(default="user", description="Triton服务器SSH用户名")
+    TRITON_SSH_PASSWORD: str = Field(default="User@1234", description="Triton服务器SSH密码（与密钥二选一）")
+    TRITON_SSH_KEY_PATH: str = Field(default="", description="SSH私钥路径（优先于密码，更安全）")
 
     # 项目路径配置
     BASE_DIR: Path = Path(__file__).resolve().parent.parent.parent
