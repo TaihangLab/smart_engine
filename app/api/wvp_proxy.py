@@ -45,7 +45,9 @@ async def wvp_proxy(request: Request, path: str):
         headers_to_exclude = {
             'host', 'content-length', 'connection', 'upgrade-insecure-requests',
             'sec-fetch-site', 'sec-fetch-mode', 'sec-fetch-user', 'sec-fetch-dest',
-            'accept-encoding'  # 让httpx自动处理编码
+            'accept-encoding',  # 让httpx自动处理编码
+            # 排除CORS相关头，避免WVP拒绝跨域请求
+            'origin', 'referer'
         }
         forwarded_headers = {k: v for k, v in headers.items() if k.lower() not in headers_to_exclude}
         
