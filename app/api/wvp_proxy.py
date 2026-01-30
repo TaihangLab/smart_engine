@@ -59,17 +59,22 @@ async def wvp_proxy(request: Request, path: str):
         if 'access-token' in wvp_client.session.headers:
             forwarded_headers['access-token'] = wvp_client.session.headers['access-token']
         
+        # 获取WVP登录时的cookies（WVP可能使用token+cookie双重认证）
+        wvp_cookies = dict(wvp_client.session.cookies) if wvp_client.session.cookies else {}
+        
         # 生产环境减少日志输出以提升性能
         if settings.DEBUG:
             logger.info(f"代理WVP请求: {request.method} {wvp_url}")
             logger.debug(f"查询参数: {query_params}")
             logger.debug(f"转发头: {forwarded_headers}")
+            logger.debug(f"WVP cookies数量: {len(wvp_cookies)}, cookies: {list(wvp_cookies.keys())}")
         
         # 使用httpx异步客户端转发请求，优化性能配置
         async with httpx.AsyncClient(
             timeout=10.0,  # 降低超时时间
             limits=httpx.Limits(max_keepalive_connections=50, max_connections=100),  # 连接池优化
-            http2=True  # 启用HTTP/2支持
+            http2=True,  # 启用HTTP/2支持
+            cookies=wvp_cookies  # 传递WVP登录时的cookies
         ) as client:
             response = await client.request(
                 method=request.method,
@@ -84,26 +89,40 @@ async def wvp_proxy(request: Request, path: str):
             if settings.DEBUG:
                 logger.info(f"WVP响应状态: {response.status_code}")
             
-            # 处理认证失败的情况
-            if response.status_code == 401:
-                logger.warning("WVP返回401，尝试重新登录")
-                try:
-                    # 重新登录
-                    wvp_client._login()
-                    
-                    # 更新认证头
-                    if 'access-token' in wvp_client.session.headers:
-                        forwarded_headers['access-token'] = wvp_client.session.headers['access-token']
-                    
-                    # 重新发送请求
-                    response = await client.request(
+            # 定义重试函数（使用新的cookies和token）
+            async def retry_with_new_auth():
+                """重新登录并使用新认证信息重试请求"""
+                wvp_client._login()
+                
+                # 更新认证头
+                new_headers = forwarded_headers.copy()
+                if 'access-token' in wvp_client.session.headers:
+                    new_headers['access-token'] = wvp_client.session.headers['access-token']
+                
+                # 获取新的cookies
+                new_cookies = dict(wvp_client.session.cookies) if wvp_client.session.cookies else {}
+                
+                # 使用新的client发送请求（确保使用新的cookies）
+                async with httpx.AsyncClient(
+                    timeout=10.0,
+                    limits=httpx.Limits(max_keepalive_connections=50, max_connections=100),
+                    http2=True,
+                    cookies=new_cookies
+                ) as new_client:
+                    return await new_client.request(
                         method=request.method,
                         url=wvp_url,
                         params=query_params,
                         content=body,
-                        headers=forwarded_headers,
+                        headers=new_headers,
                         follow_redirects=True
                     )
+            
+            # 处理认证失败的情况（401或403）
+            if response.status_code in [401, 403]:
+                logger.warning(f"WVP返回{response.status_code}，尝试重新登录")
+                try:
+                    response = await retry_with_new_auth()
                     logger.info(f"重新登录后WVP响应状态: {response.status_code}")
                 except Exception as e:
                     logger.error(f"重新登录失败: {str(e)}")
@@ -112,21 +131,10 @@ async def wvp_proxy(request: Request, path: str):
             try:
                 if response.headers.get('content-type', '').startswith('application/json'):
                     response_data = response.json()
-                    if isinstance(response_data, dict) and response_data.get('code') == 401:
-                        logger.warning("WVP响应内容包含401错误码，尝试重新登录")
+                    if isinstance(response_data, dict) and response_data.get('code') in [401, 403]:
+                        logger.warning(f"WVP响应内容包含{response_data.get('code')}错误码，尝试重新登录")
                         try:
-                            wvp_client._login()
-                            if 'access-token' in wvp_client.session.headers:
-                                forwarded_headers['access-token'] = wvp_client.session.headers['access-token']
-                            
-                            response = await client.request(
-                                method=request.method,
-                                url=wvp_url,
-                                params=query_params,
-                                content=body,
-                                headers=forwarded_headers,
-                                follow_redirects=True
-                            )
+                            response = await retry_with_new_auth()
                             logger.info(f"重新登录后WVP响应状态: {response.status_code}")
                         except Exception as e:
                             logger.error(f"重新登录失败: {str(e)}")
