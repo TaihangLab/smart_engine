@@ -63,15 +63,7 @@ class BaseRbacService:
             tenant_id: 租户编码
 
         Returns:
-            权限列表，每个权限包含url和method字段
+            权限对象列表
         """
         permissions = RbacDao.get_user_permissions(db, user_name, tenant_id)
-        return [
-            {
-                "url": perm.url,
-                "method": perm.method,
-                "permission_name": perm.permission_name,
-                "permission_code": perm.permission_code
-            }
-            for perm in permissions
-        ]
+        return permissions

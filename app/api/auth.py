@@ -20,8 +20,8 @@ from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
-# 创建认证路由器
-auth_router = APIRouter(prefix="/auth")
+# 创建认证路由器（不设置 prefix，在 __init__.py 中统一设置）
+auth_router = APIRouter()
 
 # 登录接口
 @auth_router.post("/login", response_model=UnifiedResponse, summary="用户登录")
@@ -415,32 +415,12 @@ async def get_current_user_info_simple(
             for role in role_objects
         ]
 
-        # 获取用户权限列表（返回完整的权限对象列表）
+        # 获取用户权限码列表
         from app.services.rbac.rbac_base_service import BaseRbacService
-        permission_objects = BaseRbacService.get_user_permissions(
+        permission_objects = BaseRbacService.get_user_permission_list(
             db, user.user_name, user.tenant_id
         )
         permission_codes = [p.permission_code for p in permission_objects] if permission_objects else []
-
-        # 构建权限信息列表（使用蛇形命名）
-        permissions = [
-            {
-                "id": p.id,
-                "permission_name": p.permission_name,
-                "permission_code": p.permission_code,
-                "permission_type": p.permission_type,
-                "url": p.url,
-                "method": p.method
-            }
-            for p in permission_objects
-        ] if permission_objects else []
-
-        # 获取完整权限树（菜单树）
-        from app.services.rbac_service import RbacService
-        full_permission_tree = RbacService.get_permission_tree(db)
-
-        # 根据用户权限过滤菜单树
-        filtered_menu_tree = _filter_menu_tree_by_permissions(full_permission_tree, permission_codes)
 
         # 获取租户列表
         from app.services.rbac.tenant_service import TenantService
@@ -482,10 +462,8 @@ async def get_current_user_info_simple(
             "avatar": user.avatar,
             "signature": user.signature,
             "roles": roles,           # 角色列表（包含详细信息）
-            "permissions": permissions,  # 权限列表（包含详细信息）
             "permission_codes": permission_codes,  # 权限码列表（字符串数组，用于权限判断）
             "tenants": tenants,        # 租户列表
-            "menu_tree": filtered_menu_tree,
             "create_time": user.create_time.isoformat() if user.create_time else None,
             "update_time": user.update_time.isoformat() if user.update_time else None
         }
@@ -537,8 +515,8 @@ async def get_user_permissions(
             )
 
         # 获取用户权限列表
-        from app.services.rbac.rbac_base_service import BaseRbacService
-        permission_objects = BaseRbacService.get_user_permissions(
+        from app.db.rbac import RbacDao
+        permission_objects = RbacDao.get_user_permissions(
             db, user.user_name, user.tenant_id
         )
 
@@ -578,7 +556,8 @@ async def get_user_menu_tree(
 ):
     """
     获取当前登录用户的菜单树结构
-    根据用户权限过滤后的菜单树，用于前端导航和路由生成
+    返回用户权限组下的全部菜单（folder 和 menu 类型，排除 button）
+    parent_id 为 null 的作为根节点
     """
     try:
         # 获取当前用户信息
@@ -595,23 +574,99 @@ async def get_user_menu_tree(
                 data=None
             )
 
-        # 获取用户权限列表
-        from app.services.rbac.rbac_base_service import BaseRbacService
-        permission_objects = BaseRbacService.get_user_permissions(
+        # 获取用户权限列表（包括所有类型的权限）
+        from app.db.rbac import RbacDao
+        from app.models.rbac import SysPermission
+        permission_objects = RbacDao.get_user_permissions(
             db, user.user_name, user.tenant_id
         )
-        permission_codes = [p.permission_code for p in permission_objects] if permission_objects else []
+        permission_codes = {p.permission_code for p in permission_objects} if permission_objects else set()
 
-        # 获取完整权限树（菜单树）
-        from app.services.rbac_service import RbacService
-        full_permission_tree = RbacService.get_permission_tree(db)
+        # 获取所有的 folder 和 menu 类型权限（完整树形结构）
+        all_menu_permissions = db.query(SysPermission).filter(
+            SysPermission.is_deleted == False,
+            SysPermission.permission_type.in_(["folder", "menu"])
+        ).order_by(SysPermission.sort_order, SysPermission.id).all()
 
-        # 根据用户权限过滤菜单树
-        filtered_menu_tree = _filter_menu_tree_by_permissions(full_permission_tree, permission_codes)
+        # 构建菜单字典和获取用户有权访问的菜单权限码
+        menu_dict = {}
+        accessible_menu_codes = set()
+
+        for perm in all_menu_permissions:
+            # 检查用户是否有权限访问此菜单
+            # 如果菜单的 permission_code 在用户的权限列表中，则用户可以访问
+            if perm.permission_code in permission_codes:
+                accessible_menu_codes.add(perm.permission_code)
+
+            # 构建菜单节点
+            menu_dict[perm.id] = {
+                "id": perm.id,
+                "permission_name": perm.permission_name,
+                "permission_code": perm.permission_code,
+                "permission_type": perm.permission_type,
+                "parent_id": perm.parent_id,
+                "path": perm.path,
+                "component": perm.component,
+                "layout": perm.layout,
+                "visible": perm.visible,
+                "icon": perm.icon,
+                "sort_order": perm.sort_order,
+                "open_new_tab": perm.open_new_tab,
+                "keep_alive": perm.keep_alive,
+                "status": perm.status,
+                "children": []
+            }
+
+        # 构建树形结构：只保留用户有权访问的菜单
+        root_menus = []
+        for menu_id, menu_node in menu_dict.items():
+            # 判断用户是否有权访问此菜单
+            has_access = menu_node["permission_code"] in accessible_menu_codes
+
+            # 检查子节点中是否有用户有权访问的菜单
+            has_accessible_child = False
+            for other_menu in menu_dict.values():
+                if other_menu["parent_id"] == menu_id:
+                    if other_menu["permission_code"] in accessible_menu_codes:
+                        has_accessible_child = True
+                        break
+
+            # 只有用户有权访问，或者有可访问子节点的菜单才保留
+            if not has_access and not has_accessible_child:
+                continue
+
+            # 建立父子关系
+            if menu_node["parent_id"] is None:
+                # 根节点
+                root_menus.append(menu_node)
+            elif menu_node["parent_id"] in menu_dict:
+                # 添加到父节点的 children
+                parent = menu_dict[menu_node["parent_id"]]
+                # 只添加用户有权访问的子节点，或父节点本身也有权访问
+                if has_access or menu_node["permission_code"] in accessible_menu_codes:
+                    parent["children"].append(menu_node)
+
+        # 递归清理空 children 并排序
+        def clean_and_sort_tree(tree: list) -> list:
+            """清理空的 children 列表并按 sort_order 排序"""
+            result = []
+            for node in tree:
+                if node["children"]:
+                    node["children"] = clean_and_sort_tree(node["children"])
+                    # 如果有子节点，保留；否则移除空列表
+                    if not node["children"]:
+                        del node["children"]
+                result.append(node)
+            # 按 sort_order 排序
+            result.sort(key=lambda x: x["sort_order"])
+            return result
+
+        filtered_menu_tree = clean_and_sort_tree(root_menus)
 
         logger.info(
             f"获取用户菜单树成功: {user.user_name} (ID: {user.id}), "
-            f"权限数: {len(permission_codes)}, 菜单节点数: {len(_count_tree_nodes(filtered_menu_tree))}"
+            f"用户权限数: {len(permission_codes)}, 可访问菜单数: {len(accessible_menu_codes)}, "
+            f"返回菜单节点数: {_count_tree_nodes(filtered_menu_tree)}"
         )
 
         return UnifiedResponse(
@@ -635,6 +690,40 @@ async def get_user_menu_tree(
         )
 
 
+def _filter_menu_tree_by_permissions(tree: list, permission_codes: set) -> list:
+    """
+    根据用户权限码过滤菜单树
+
+    Args:
+        tree: 完整的菜单树
+        permission_codes: 用户拥有的权限码集合
+
+    Returns:
+        过滤后的菜单树
+    """
+    if not tree:
+        return []
+
+    filtered_tree = []
+    for node in tree:
+        # 获取当前节点的权限码
+        node_permission_code = node.get('permission_code')
+
+        # 处理子节点
+        if 'children' in node and node['children']:
+            filtered_children = _filter_menu_tree_by_permissions(node['children'], permission_codes)
+            # 如果有子节点被保留，或者当前节点本身有权限，则保留该节点
+            if filtered_children or (node_permission_code and node_permission_code in permission_codes):
+                new_node = node.copy()
+                new_node['children'] = filtered_children
+                filtered_tree.append(new_node)
+        # 没有子节点的情况，直接检查权限码
+        elif node_permission_code and node_permission_code in permission_codes:
+            filtered_tree.append(node)
+
+    return filtered_tree
+
+
 def _count_tree_nodes(tree: list) -> int:
     """
     统计树形结构的节点数量
@@ -651,44 +740,6 @@ def _count_tree_nodes(tree: list) -> int:
         if 'children' in node and node['children']:
             count += _count_tree_nodes(node['children'])
     return count
-
-
-def _filter_menu_tree_by_permissions(tree: list, permission_codes: list) -> list:
-    """
-    根据用户权限码过滤菜单树
-
-    Args:
-        tree: 完整的权限树
-        permission_codes: 用户的权限码列表
-
-    Returns:
-        过滤后的菜单树
-    """
-    if not tree:
-        return []
-
-    filtered_tree = []
-    for node in tree:
-        # 检查节点是否需要权限码
-        node_permission_code = node.get('permission_code')
-
-        # 如果节点不需要权限，或者用户有该权限，则保留节点
-        if not node_permission_code or node_permission_code in permission_codes:
-            filtered_node = node.copy()
-
-            # 递归处理子节点
-            if 'children' in node and node['children']:
-                filtered_node['children'] = _filter_menu_tree_by_permissions(
-                    node['children'],
-                    permission_codes
-                )
-            elif node.get('has_children'):
-                # 如果节点有子节点但未加载，保留 has_children 标记
-                filtered_node['has_children'] = True
-
-            filtered_tree.append(filtered_node)
-
-    return filtered_tree
 
 
 __all__ = ["auth_router"]

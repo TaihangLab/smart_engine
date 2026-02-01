@@ -353,12 +353,12 @@ def _build_user_state(db, user, role: Optional[Any], dept_id: int, dept_name: st
 
             # 构建 API 权限列表（每个权限记录对应一个路径+方法）
             for perm in role_perms:
-                if perm.api_path and perm.method:
-                    api_permissions.append(ApiPermission(path=perm.api_path, method=perm.method))
+                if perm.path and perm.method:
+                    api_permissions.append(ApiPermission(path=perm.path, method=perm.method))
 
-                # 收集 URL 路径（用于前端路由权限）
-                if perm.url:
-                    url_paths.add(perm.url)
+                # 收集 URL 路径（用于前端路由权限）- 使用 path 字段
+                if perm.path:
+                    url_paths.add(perm.path)
 
     # 获取用户当前的部门和子部门
     current_dept = RbacService.get_dept_by_id(db, dept_id)
@@ -633,7 +633,7 @@ async def auth_middleware(request: Request, call_next):
         return response
 
     # 定义不需要鉴权的路径（如登录、健康检查等）
-    public_paths = ["/health", "/docs", "/openapi.json", "/api/v1/auth/login"]
+    public_paths = ["/health", "/docs", "/openapi.json", "/api/v1/login"]
 
     if request.url.path in public_paths:
         # 对于公共路径，直接继续处理
@@ -749,26 +749,26 @@ async def auth_middleware(request: Request, call_next):
             template_path_allowed = False
 
             for perm in template_perms:
-                if not perm.api_path or not perm.method:
+                if not perm.path or not perm.method:
                     continue
 
                 # 精确匹配
-                if request_path == perm.api_path and request_method == perm.method:
+                if request_path == perm.path and request_method == perm.method:
                     template_path_allowed = True
-                    logger.debug(f"[鉴权步骤2] ✅ 租户0精确匹配: {perm.api_path} [{perm.method}]")
+                    logger.debug(f"[鉴权步骤2] ✅ 租户0精确匹配: {perm.path} [{perm.method}]")
                     break
                 # 前缀匹配（通配符 *）
-                elif perm.api_path.endswith('*'):
-                    prefix = perm.api_path[:-1]
+                elif perm.path.endswith('*'):
+                    prefix = perm.path[:-1]
                     if request_path.startswith(prefix) and request_method == perm.method:
                         template_path_allowed = True
-                        logger.debug(f"[鉴权步骤2] ✅ 租户0前缀匹配: {perm.api_path} [{perm.method}]")
+                        logger.debug(f"[鉴权步骤2] ✅ 租户0前缀匹配: {perm.path} [{perm.method}]")
                         break
                 # 路径参数匹配（支持 {id}、{tenantId} 等格式）
-                elif '{' in perm.api_path and '}' in perm.api_path:
-                    if _match_path_with_params(perm.api_path, request_path) and request_method == perm.method:
+                elif '{' in perm.path and '}' in perm.path:
+                    if _match_path_with_params(perm.path, request_path) and request_method == perm.method:
                         template_path_allowed = True
-                        logger.debug(f"[鉴权步骤2] ✅ 租户0路径参数匹配: {perm.api_path} [{perm.method}] => {request_path}")
+                        logger.debug(f"[鉴权步骤2] ✅ 租户0路径参数匹配: {perm.path} [{perm.method}] => {request_path}")
                         break
 
             if template_path_allowed:
@@ -782,7 +782,7 @@ async def auth_middleware(request: Request, call_next):
                 # ========== 都不在，拒绝访问 ❌ ==========
                 # 打印当前用户权限详情（用于调试）
                 perm_list = [f"{p.path}[{p.method}]" for p in api_permissions]
-                template_perm_list = [f"{p.api_path}[{p.method}]" for p in template_perms if p.api_path and p.method]
+                template_perm_list = [f"{p.path}[{p.method}]" for p in template_perms if p.path and p.method]
 
                 logger.warning(f"""[鉴权结果] ❌ 403 拒绝访问
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━

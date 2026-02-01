@@ -15,7 +15,8 @@ api_router.include_router(alerts.router, prefix="/alerts", tags=["alerts"])
 api_router.include_router(ai_tasks.router, prefix="/ai-tasks", tags=["ai-tasks"])
 api_router.include_router(monitor.router, prefix="/ai/monitor", tags=["ai_monitor"])
 api_router.include_router(task_management.router, prefix="/task-management", tags=["task_management"])
-api_router.include_router(system.router, prefix="/system", tags=["system"])
+# system路由使用前端调用的路径 /api/v1/server/system/*
+api_router.include_router(system.router, prefix="/server/system", tags=["system"])
 api_router.include_router(llm_skills.router, prefix="/llm-skills", tags=["llm_skills"])
 api_router.include_router(llm_skill_review.router, prefix="/llm-skill-review", tags=["llm_skill_review"])
 api_router.include_router(task_review.router, prefix="", tags=["task_review"])
@@ -27,7 +28,8 @@ api_router.include_router(local_videos.router, prefix="/local-videos", tags=["lo
 api_router.include_router(realtime_monitor.router, prefix="/realtime-monitor", tags=["realtime_monitor"])
 api_router.include_router(realtime_detection.router, prefix="/realtime-detection", tags=["realtime_detection"])
 api_router.include_router(rbac.router, prefix="/rbac", tags=["rbac"])
-api_router.include_router(auth.auth_router, tags=["auth"])
+# auth_router 本身已经有 prefix="/auth"，这里设置 prefix="" 覆盖它
+api_router.include_router(auth.auth_router, prefix="", tags=["auth"])
 
 # 设置前端路由处理（已移到 main.py 中）
 # frontend_routes.setup_frontend_routing(api_router)
