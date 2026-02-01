@@ -121,7 +121,31 @@ app.add_middleware(RequestLoggingMiddleware)
 from starlette.middleware.base import BaseHTTPMiddleware
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
-        return await auth_middleware(request, call_next)
+        try:
+            return await auth_middleware(request, call_next)
+        except HTTPException as exc:
+            # 业务异常（401/403等）直接返回响应，避免打印堆栈
+            from app.models.rbac import UnifiedResponse
+            from fastapi.responses import JSONResponse
+            
+            logger.info(f"[鉴权拦截] {exc.status_code}: {exc.detail}")
+            
+            response_data = UnifiedResponse(
+                success=False,
+                code=exc.status_code,
+                message=exc.detail,
+                data=None
+            )
+            response = JSONResponse(
+                status_code=exc.status_code,
+                content=response_data.model_dump()
+            )
+            # 添加 CORS 头
+            origin = request.headers.get("origin", "")
+            if origin in ALLOWED_ORIGINS:
+                response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+            return response
 
 app.add_middleware(AuthMiddleware)
 

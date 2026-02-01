@@ -527,40 +527,50 @@ async def authenticate_request(request: Request) -> Optional[UserInfo]:
     auth_header = request.headers.get(settings.AUTH_HEADER_NAME, '')
     client_id = request.headers.get('clientid', '')
 
-    # 验证client_id是否在白名单中
-    if not validate_client_id(client_id):
-        logger.warning(f"Client ID不在白名单中: {client_id}")
+    # 1. 检查 Authorization header 是否存在
+    if not auth_header:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Client ID未授权"
+            detail="未提供认证凭据：缺少 Authorization 请求头"
+        )
+
+    # 验证client_id是否在白名单中
+    if not validate_client_id(client_id):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=f"客户端未授权：Client ID '{client_id}' 不在白名单中"
         )
 
     # 提取Bearer token
     if not auth_header.startswith("Bearer "):
-        logger.warning("Authorization header格式不正确")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authorization header格式不正确"
+            detail="认证格式错误：Authorization 应为 'Bearer <token>' 格式"
         )
 
     token = auth_header[7:]  # 移除"Bearer "前缀
 
+    # 检查 token 是否为空
+    if not token or token.strip() == "":
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="认证凭据为空：Token 不能为空"
+        )
+
     # 解析token
     user_info = parse_token(token)
     if not user_info:
-        logger.warning("Token解析失败")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Token无效"
+            detail="认证失败：Token 无效或已过期"
         )
 
     # 验证解析出的clientid与请求头中的clientid是否一致
     token_client_id = user_info.get('clientid')
     if token_client_id is not None and token_client_id != client_id:
-        logger.warning(f"Token中的clientid与请求头中的不匹配: {token_client_id} != {client_id}")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Client ID不匹配"
+            detail=f"客户端不匹配：Token 中的 Client ID ({token_client_id}) 与请求头不一致"
         )
 
     # 获取数据库会话
@@ -570,18 +580,16 @@ async def authenticate_request(request: Request) -> Optional[UserInfo]:
     try:
         # 验证 token 中必需包含 tenantId
         if 'tenantId' not in user_info:
-            logger.error("Token 中缺少必需的 tenantId 字段")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token 中缺少必需的 tenantId 字段"
+                detail="认证凭据不完整：Token 中缺少 tenantId 字段"
             )
 
         # 验证 token 中必需包含 deptId
         if 'deptId' not in user_info:
-            logger.error("Token 中缺少必需的 deptId 字段")
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Token 中缺少必需的 deptId 字段"
+                detail="认证凭据不完整：Token 中缺少 deptId 字段"
             )
 
         tenant_id_from_token = user_info['tenantId']
