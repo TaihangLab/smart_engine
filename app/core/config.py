@@ -496,12 +496,6 @@ class Settings(BaseSettings):
     ALERT_REDESIGN_BACKUP_LEGACY: bool = Field(default=True, description="是否备份原始表为alerts_legacy")
     ALERT_REDESIGN_AUTO_INIT: bool = Field(default=True, description="系统启动时自动初始化重构表结构")
 
-    # ================================================================
-    # 🤖 智能填充助手配置 (测试场景专用)
-    # ================================================================
-    SMART_FILL_ENABLED: bool = Field(default=False, description="是否启用智能填充助手（仅测试环境使用）")
-    SMART_FILL_MOCK_DATA_PATH: str = Field(default="config/smart_fill_mock.json", description="智能填充 Mock 数据文件路径")
-
     class Config:
         env_file = ".env"
         case_sensitive = True
