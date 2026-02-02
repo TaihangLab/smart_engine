@@ -490,14 +490,14 @@ class Settings(BaseSettings):
     )
     # Nacos 2.x 认证配置
     NACOS_USERNAME: str = Field(default="nacos", description="Nacos用户名")
-    NACOS_PASSWORD: str = Field(default="nacos", description="Nacos密码")
+    NACOS_PASSWORD: str = Field(default="6JRBSEpE", description="Nacos密码")
     NACOS_AUTH_ENABLE: bool = Field(default=True, description="是否启用Nacos认证")
     NACOS_AUTH_TOKEN: str = Field(
         default="SecretKey012345678901234567890123456789012345678901234567",
         description="Nacos认证Token（Nacos 2.x必需）"
     )
     NACOS_AUTH_IDENTITY_KEY: str = Field(default="nacos", description="Nacos身份标识Key")
-    NACOS_AUTH_IDENTITY_VALUE: str = Field(default="nacos", description="Nacos身份标识Value")
+    NACOS_AUTH_IDENTITY_VALUE: str = Field(default="6JRBSEpE", description="Nacos身份标识Value")
     NACOS_HEARTBEAT_INTERVAL: int = Field(default=5, description="心跳间隔（秒）")
 
     # 预警复判队列配置
