@@ -1284,8 +1284,9 @@ class AITaskExecutor:
                 if camera_location:  # 检查是否为None或空字符串
                     location = camera_location
             
-            # 直接从alert_data中获取预警信息
-            alert_info_data = alert_data.get("alert_info", {})
+            # 从safety_metrics中获取预警信息（alert_info在safety_metrics下面）
+            safety_metrics = alert_data.get("safety_metrics", {})
+            alert_info_data = safety_metrics.get("alert_info", {})
             alert_info = {
                 "name": alert_info_data.get("alert_name", "系统预警"),
                 "type": alert_info_data.get("alert_type", "安全生产预警"),
