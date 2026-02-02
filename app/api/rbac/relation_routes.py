@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.rbac import (
-    UserRoleAssign, RolePermissionAssign,
+    UserRoleAssign, RolePermissionAssign, BatchRolePermissionAssignById,
     UserRoleResponse, RolePermissionResponse,
     UnifiedResponse
 )
@@ -479,25 +479,30 @@ async def remove_permission_from_role_by_codes(
 
 @relation_router.post("/batch-role-permissions-by-id", response_model=UnifiedResponse, summary="批量为角色分配权限（通过ID）")
 async def batch_assign_permissions_to_role_by_id(
-    request: Request,
-    role_id: int = Query(..., description="角色ID"),
-    permission_ids: List[int] = Query(..., description="权限ID列表"),
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    assignment: BatchRolePermissionAssignById,
     db: Session = Depends(get_db)
 ):
     """批量为角色分配权限（通过ID）"""
     try:
-        # 从用户态获取并验证租户ID
-        from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
+        # 根据 role_id 获取角色信息（包含 tenant_id）
+        role = RbacService.get_role_by_id(db, assignment.role_id)
+        if not role:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message=f"角色不存在，ID: {assignment.role_id}",
+                data=None
+            )
+
+        tenant_id = role.tenant_id
 
         success_count = 0
-        for permission_id in permission_ids:
+        for permission_id in assignment.permission_ids:
             success = RbacService.assign_permission_to_role_by_id(
                 db,
-                role_id,
+                assignment.role_id,
                 permission_id,
-                validated_tenant_id
+                tenant_id
             )
             if success:
                 success_count += 1
@@ -505,8 +510,8 @@ async def batch_assign_permissions_to_role_by_id(
         return UnifiedResponse(
             success=True,
             code=200,
-            message=f"批量权限分配完成，成功分配 {success_count}/{len(permission_ids)} 个权限",
-            data={"success_count": success_count, "total_count": len(permission_ids)}
+            message=f"批量权限分配完成，成功分配 {success_count}/{len(assignment.permission_ids)} 个权限",
+            data={"success_count": success_count, "total_count": len(assignment.permission_ids)}
         )
     except Exception as e:
         logger.error(f"批量为角色分配权限失败: {str(e)}", exc_info=True)

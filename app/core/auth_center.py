@@ -641,7 +641,7 @@ async def auth_middleware(request: Request, call_next):
         return response
 
     # 定义不需要鉴权的路径（如登录、健康检查等）
-    public_paths = ["/health", "/docs", "/openapi.json", "/api/v1/login"]
+    public_paths = ["/health", "/docs", "/openapi.json", "/api/v1/login", "/api/v1/server/system/resources"]
 
     if request.url.path in public_paths:
         # 对于公共路径，直接继续处理

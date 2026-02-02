@@ -201,4 +201,214 @@ def get_camera_frame_reader_stats(camera_id: int):
         return {
             "success": False,
             "error": str(e)
+        }
+
+
+@router.get("/dashboard/summary")
+def get_dashboard_summary(db: Session = Depends(get_db)):
+    """
+    大屏数据总览接口 - 统一返回所有大屏所需数据
+
+    返回格式:
+    {
+        "code": 0,
+        "message": "success",
+        "data": {
+            "alerts": {
+                "total_alerts": 100,          # 总预警数
+                "today_alerts": 10,            # 今日新增
+                "pending_alerts": 20,          # 待处理数
+                "processing_alerts": 5,        # 处理中数
+                "resolved_today": 8            # 今日已处理
+            },
+            "devices": {
+                "total_cameras": 50,           # 总摄像头数
+                "online_cameras": 45,           # 在线摄像头数
+                "offline_cameras": 5,           # 离线摄像头数
+                "video_streams": 30,           # 活跃视频流数
+                "capture_services": 25         # 抓图服务数
+            },
+            "system": {
+                "running_tasks": 28,           # 运行中的任务数
+                "scheduler_running": true,     # 调度器状态
+                "active_connections": 45       # 活跃连接数
+            },
+            "timestamp": "2024-01-01T12:00:00"  # 数据时间戳
+        }
+    }
+    """
+    try:
+        logger.info("获取大屏数据总览")
+
+        # 1. 获取预警统计
+        alert_stats = alert_service.get_summary_stats(db=db)
+
+        # 2. 获取设备统计
+        total_cameras = 0
+        online_cameras = 0
+
+        try:
+            all_cameras = wvp_client.get_channel_list(count=1000)
+            if all_cameras:
+                if isinstance(all_cameras, dict):
+                    total_cameras = all_cameras.get("total", 0)
+                elif isinstance(all_cameras, list):
+                    total_cameras = len(all_cameras)
+
+            online_cameras_list = wvp_client.get_channel_list(count=1000, online=True)
+            if online_cameras_list:
+                if isinstance(online_cameras_list, dict):
+                    online_cameras = online_cameras_list.get("total", 0)
+                elif isinstance(online_cameras_list, list):
+                    online_cameras = len(online_cameras_list)
+        except Exception as e:
+            logger.warning(f"获取WVP摄像头列表失败: {str(e)}")
+
+        # 3. 获取系统运行状态
+        running_tasks = 0
+        scheduler_running = False
+        video_streams = 0
+
+        try:
+            if task_executor:
+                running_tasks = len(task_executor.get_active_tasks())
+                scheduler_running = task_executor.scheduler.running
+                video_streams = running_tasks
+        except Exception as e:
+            logger.warning(f"获取任务执行器状态失败: {str(e)}")
+
+        # 4. 获取抓图服务数量
+        capture_services = 0
+        try:
+            stats = frame_reader_manager.get_all_stats()
+            capture_services = len(stats)
+        except Exception as e:
+            logger.warning(f"获取帧读取器统计失败: {str(e)}")
+
+        # 5. 获取活跃连接数
+        active_connections = online_cameras
+
+        # 6. 组装返回数据
+        return {
+            "success": True,
+            "code": 200,
+            "message": "获取大屏数据总览成功",
+            "data": {
+                "alerts": {
+                    "total_alerts": alert_stats.get("total_alerts", 0),
+                    "today_alerts": alert_stats.get("today_alerts", 0),
+                    "pending_alerts": alert_stats.get("pending_alerts", 0),
+                    "processing_alerts": alert_stats.get("processing_alerts", 0),
+                    "resolved_today": alert_stats.get("resolved_today", 0)
+                },
+                "devices": {
+                    "total_cameras": total_cameras,
+                    "online_cameras": online_cameras,
+                    "offline_cameras": max(0, total_cameras - online_cameras),
+                    "video_streams": video_streams,
+                    "capture_services": capture_services
+                },
+                "system": {
+                    "running_tasks": running_tasks,
+                    "scheduler_running": scheduler_running,
+                    "active_connections": active_connections
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"获取大屏数据总览失败: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "code": 500,
+            "message": f"获取大屏数据总览失败: {str(e)}",
+            "data": None
+        }
+
+
+@router.get("/devices/summary")
+def get_device_statistics():
+    """
+    获取设备连接统计信息（适配前端大屏展示）
+    
+    返回格式:
+    {
+        "code": 0,
+        "data": {
+            "total_connections": 100,     # 总连接数
+            "video_streams": 50,          # 视频流数量
+            "capture_services": 30,       # 抓图服务数量
+            "nvr_calls": 15,              # NVR调用数量
+            "other_connections": 5        # 其他连接数
+        }
+    }
+    """
+    try:
+        # 从WVP客户端获取摄像头连接信息
+        total_cameras = 0
+        online_cameras = 0
+        
+        try:
+            all_cameras = wvp_client.get_channel_list(count=1000)
+            # 修复：WVP返回格式是 {"total": 0, "list": []}
+            # 应该使用 total 字段或 list 的长度
+            if all_cameras:
+                if isinstance(all_cameras, dict):
+                    total_cameras = all_cameras.get("total", 0)
+                elif isinstance(all_cameras, list):
+                    total_cameras = len(all_cameras)
+
+            online_cameras_list = wvp_client.get_channel_list(count=1000, online=True)
+            if online_cameras_list:
+                if isinstance(online_cameras_list, dict):
+                    online_cameras = online_cameras_list.get("total", 0)
+                elif isinstance(online_cameras_list, list):
+                    online_cameras = len(online_cameras_list)
+        except Exception as e:
+            logger.warning(f"获取WVP摄像头列表失败: {str(e)}")
+        
+        # 从AI任务执行器获取活跃视频流数量
+        video_streams = 0
+        try:
+            if task_executor:
+                video_streams = len(task_executor.get_active_tasks())
+        except Exception as e:
+            logger.warning(f"获取活跃任务数失败: {str(e)}")
+        
+        # 从帧读取器管理器获取抓图服务数量
+        capture_services = 0
+        try:
+            stats = frame_reader_manager.get_all_stats()
+            capture_services = len(stats)
+        except Exception as e:
+            logger.warning(f"获取帧读取器统计失败: {str(e)}")
+        
+        # NVR调用数量 - 简化为在线摄像头数的一部分
+        nvr_calls = online_cameras
+        
+        # 其他连接数 = 总数 - 已分类的连接
+        total_connections = total_cameras + video_streams + capture_services
+        other_connections = max(0, total_connections - video_streams - capture_services - nvr_calls)
+        
+        return {
+            "success": True,
+            "code": 200,
+            "message": "获取设备统计信息成功",
+            "data": {
+                "total_connections": total_connections,
+                "video_streams": video_streams,
+                "capture_services": capture_services,
+                "nvr_calls": nvr_calls,
+                "other_connections": other_connections
+            }
+        }
+
+    except Exception as e:
+        logger.error(f"获取设备统计信息失败: {str(e)}", exc_info=True)
+        return {
+            "success": False,
+            "code": 500,
+            "message": f"获取设备统计信息失败: {str(e)}",
+            "data": None
         } 

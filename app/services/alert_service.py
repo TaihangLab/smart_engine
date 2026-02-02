@@ -699,6 +699,322 @@ class AlertService:
             }
         }
 
+
+    # ========== 预警统计API服务方法 ==========
+    
+    def get_summary_stats(
+        self,
+        db: Session,
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None
+    ) -> Dict[str, Any]:
+        """获取预警统计摘要
+
+        默认统计全部历史数据（适配大屏展示）
+        传入日期参数时按时间范围统计
+        """
+        from sqlalchemy import func
+
+        # 修复：默认统计全部历史数据，而非最近7天
+        # 这样可以确保大屏显示正确的数据总数
+        if not end_date:
+            end_date = datetime.now()
+        if not start_date:
+            # 不再默认使用7天，而是使用一个很早的日期
+            # 这样可以统计全部历史数据
+            start_date = datetime(2020, 1, 1)
+
+        # 总预警数（如果未指定日期，则统计全部）
+        if start_date == datetime(2020, 1, 1):
+            # 统计全部数据，不添加时间过滤
+            total_alerts = db.query(func.count(Alert.alert_id)).scalar()
+        else:
+            # 按指定时间范围统计
+            total_alerts = (
+                db.query(func.count(Alert.alert_id))
+                .filter(Alert.alert_time >= start_date)
+                .filter(Alert.alert_time <= end_date)
+                .scalar()
+            )
+        
+        # 今日新增
+        today = datetime.now().date()
+        today_start = datetime.combine(today, datetime.min.time())
+        today_alerts = (
+            db.query(func.count(Alert.alert_id))
+            .filter(Alert.alert_time >= today_start)
+            .scalar()
+        )
+        
+        # 待处理数
+        pending_alerts = (
+            db.query(func.count(Alert.alert_id))
+            .filter(Alert.status == AlertStatus.PENDING)
+            .scalar()
+        )
+        
+        # 处理中数
+        processing_alerts = (
+            db.query(func.count(Alert.alert_id))
+            .filter(Alert.status == AlertStatus.PROCESSING)
+            .scalar()
+        )
+        
+        # 今日已处理
+        resolved_today = (
+            db.query(func.count(Alert.alert_id))
+            .filter(Alert.status == AlertStatus.RESOLVED)
+            .filter(Alert.processed_at >= today_start)
+            .scalar()
+        )
+        
+        # 设备统计（从WVP平台获取）
+        try:
+            from app.services.wvp_service import wvp_service
+            all_cameras = wvp_service.get_channel_list()
+            total_cameras = len(all_cameras) if all_cameras else 0
+            
+            online_cameras_list = wvp_service.get_channel_list(online=True)
+            online_cameras = len(online_cameras_list) if online_cameras_list else 0
+        except Exception as e:
+            logger.warning(f"获取设备统计失败: {str(e)}")
+            total_cameras = 0
+            online_cameras = 0
+        
+        return {
+            "total_alerts": total_alerts or 0,
+            "today_alerts": today_alerts or 0,
+            "pending_alerts": pending_alerts or 0,
+            "processing_alerts": processing_alerts or 0,
+            "resolved_today": resolved_today or 0,
+            "total_cameras": total_cameras,
+            "online_cameras": online_cameras,
+            "offline_cameras": total_cameras - online_cameras,
+            "time_range": {
+                "start_date": start_date.isoformat(),
+                "end_date": end_date.isoformat()
+            }
+        }
+
+    def get_type_stats(
+        self,
+        db: Session,
+        start_date: datetime,
+        end_date: datetime,
+        top_n: int = 10
+    ) -> List[Dict[str, Any]]:
+        """获取预警类型统计
+        
+        返回格式:
+        [
+            {"name": "类型1", "count": 100},
+            {"name": "类型2", "count": 50}
+        ]
+        """
+        from sqlalchemy import func
+
+        type_stats = (
+            db.query(Alert.alert_type, func.count(Alert.alert_id).label('count'))
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .group_by(Alert.alert_type)
+            .order_by(func.count(Alert.alert_id).desc())
+            .limit(top_n)
+            .all()
+        )
+
+        return [
+            {
+                "name": alert_type,
+                "count": count
+            }
+            for alert_type, count in type_stats
+        ]
+
+    def get_level_stats(
+        self,
+        db: Session,
+        start_date: datetime,
+        end_date: datetime
+    ) -> Dict[str, Any]:
+        """获取预警等级统计"""
+        from sqlalchemy import func
+
+        level_stats = (
+            db.query(Alert.alert_level, func.count(Alert.alert_id).label('count'))
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .group_by(Alert.alert_level)
+            .all()
+        )
+
+        total = sum(count for _, count in level_stats)
+
+        # 等级颜色映射
+        level_colors = {
+            1: "#52c41a",  # 绿色 - 一般
+            2: "#faad14",  # 橙色 - 重要
+            3: "#ff4d4f",  # 红色 - 紧急
+            4: "#722ed1",  # 紫色 - 特急
+        }
+
+        level_names = {
+            1: "一般",
+            2: "重要",
+            3: "紧急",
+            4: "特急"
+        }
+
+        return [
+            {
+                "level": level,
+                "level_name": level_names.get(level, f"等级{level}"),
+                "count": count,
+                "percentage": round(count / total * 100, 2) if total > 0 else 0,
+                "color": level_colors.get(level, "#d9d9d9")
+            }
+            for level, count in level_stats
+        ]
+
+    def get_location_stats(
+        self,
+        db: Session,
+        start_date: datetime,
+        end_date: datetime,
+        top_n: int = 10
+    ) -> List[Dict[str, Any]]:
+        """获取位置统计
+        
+        返回格式:
+        [
+            {"name": "位置1", "count": 100},
+            {"name": "位置2", "count": 50}
+        ]
+        """
+        from sqlalchemy import func
+
+        # 按位置分组统计，优先使用location字段，如果为空则使用camera_name
+        location_stats = (
+            db.query(
+                func.coalesce(Alert.location, Alert.camera_name, func.concat('摄像头', Alert.camera_id)).label('location_name'),
+                func.count(Alert.alert_id).label('count')
+            )
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .group_by('location_name')
+            .order_by(func.count(Alert.alert_id).desc())
+            .limit(top_n)
+            .all()
+        )
+
+        return [
+            {
+                "name": location_name,
+                "count": count
+            }
+            for location_name, count in location_stats
+        ]
+
+    def get_processing_status_stats(
+        self,
+        db: Session,
+        start_date: datetime,
+        end_date: datetime
+    ) -> Dict[str, Any]:
+        """获取处理状态统计"""
+        from sqlalchemy import func
+
+        status_stats = (
+            db.query(Alert.status, func.count(Alert.alert_id).label('count'))
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .group_by(Alert.status)
+            .all()
+        )
+
+        total = sum(count for _, count in status_stats)
+
+        # 状态映射
+        status_mapping = {
+            1: {"name": "待处理", "color": "#faad14"},
+            2: {"name": "处理中", "color": "#1890ff"},
+            3: {"name": "已处理", "color": "#52c41a"},
+            4: {"name": "已忽略", "color": "#d9d9d9"},
+        }
+
+        return [
+            {
+                "status": status,
+                "status_name": status_mapping.get(status, {}).get("name", f"状态{status}"),
+                "count": count,
+                "percentage": round(count / total * 100, 2) if total > 0 else 0,
+                "color": status_mapping.get(status, {}).get("color", "#d9d9d9")
+            }
+            for status, count in status_stats
+        ]
+
+
+    def get_trend_stats(
+        self,
+        db: Session,
+        start_date: datetime,
+        end_date: datetime,
+        granularity: str = "day"
+    ) -> Dict[str, Any]:
+        """获取预警趋势数据
+        
+        返回格式:
+        {
+            "time_labels": ["2024-01-01", "2024-01-02", ...],
+            "trend_data": [10, 20, 30, ...]
+        }
+        """
+        from sqlalchemy import func
+        from datetime import timedelta
+        
+        # 根据时间粒度确定分组格式
+        if granularity == "hour":
+            # 按小时分组
+            date_format = "%Y-%m-%d %H:00"
+            date_trunc = func.date_format(Alert.alert_time, "%Y-%m-%d %H:00")
+            delta = timedelta(hours=1)
+        elif granularity == "week":
+            # 按周分组
+            date_format = "%Y-%u"
+            date_trunc = func.date_format(Alert.alert_time, "%Y-%u")
+            delta = timedelta(weeks=1)
+        elif granularity == "month":
+            # 按月分组
+            date_format = "%Y-%m"
+            date_trunc = func.date_format(Alert.alert_time, "%Y-%m")
+            delta = timedelta(days=30)
+        else:  # default: day
+            # 按天分组
+            date_format = "%Y-%m-%d"
+            date_trunc = func.date_format(Alert.alert_time, "%Y-%m-%d")
+            delta = timedelta(days=1)
+        
+        # 查询趋势数据
+        trend_stats = (
+            db.query(
+                date_trunc.label('time_label'),
+                func.count(Alert.alert_id).label('count')
+            )
+            .filter(Alert.alert_time >= start_date)
+            .filter(Alert.alert_time <= end_date)
+            .group_by(date_trunc)
+            .order_by(date_trunc)
+            .all()
+        )
+        
+        time_labels = [stat.time_label for stat in trend_stats]
+        trend_data = [stat.count for stat in trend_stats]
+        
+        return {
+            "time_labels": time_labels,
+            "trend_data": trend_data
+        }
+
     async def _direct_broadcast(self, alert_data: Dict[str, Any]) -> None:
         """🚀 高性能直接广播到所有客户端"""
         alert_id = alert_data.get('id', 'unknown')

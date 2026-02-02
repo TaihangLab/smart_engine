@@ -2,7 +2,7 @@
 API包，提供REST API接口
 """
 from fastapi import APIRouter
-from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, task_review, chat_assistant, wvp_proxy, alert_archives, review_records, local_videos, realtime_monitor, realtime_detection, rbac, auth
+from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, task_review, chat_assistant, wvp_proxy, alert_archives, review_records, local_videos, realtime_monitor, realtime_detection, rbac, auth, weather
 
 # 导入前端路由处理模块
 from . import frontend_routes
@@ -30,6 +30,8 @@ api_router.include_router(realtime_detection.router, prefix="/realtime-detection
 api_router.include_router(rbac.router, prefix="/rbac", tags=["rbac"])
 # auth_router 本身已经有 prefix="/auth"，这里设置 prefix="" 覆盖它
 api_router.include_router(auth.auth_router, prefix="", tags=["auth"])
+# 天气服务路由
+api_router.include_router(weather.router, prefix="/weather", tags=["weather"])
 
 # 设置前端路由处理（已移到 main.py 中）
 # frontend_routes.setup_frontend_routing(api_router)

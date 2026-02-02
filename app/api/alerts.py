@@ -1,5 +1,5 @@
 from typing import List, Optional, Dict, Any
-from datetime import datetime
+from datetime import datetime, timedelta
 import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
 from fastapi.responses import StreamingResponse
@@ -96,7 +96,7 @@ async def alert_stream(request: Request):
         }
     )
 
-@router.get("/real-time", response_model=Dict[str, Any])  # 向后兼容的路由
+@router.get("/real-time")  # 向后兼容的路由
 async def get_realtime_alerts(
     db: Session = Depends(get_db),
     page: int = Query(1, ge=1, description="页码"),
@@ -248,54 +248,24 @@ async def get_realtime_alerts(
     
     # 将Alert对象转换为AlertResponse对象
     alert_responses = [AlertResponse.model_validate(alert) for alert in filtered_alerts]
-    
+
     logger.info(f"获取实时预警列表成功，返回 {len(alert_responses)} 条记录，总共 {total_count} 条")
-    
-    # 🎯 企业级响应数据结构
-    response_data = {
-        "alerts": alert_responses,
+
+    # 使用统一响应格式
+    return {
+        "success": True,
+        "code": 200,
+        "message": "获取预警列表成功",
+        "data": alert_responses,
         "pagination": {
             "total": total_count,
             "page": page,
-            "limit": limit, 
+            "page_size": limit,
             "pages": pages,
             "has_next": page < pages,
             "has_prev": page > 1
-        },
-        "filters_applied": {
-            "camera_id": camera_id,
-            "camera_name": camera_name,
-            "alert_type": alert_type,
-            "alert_level": alert_level,
-            "alert_name": alert_name,
-            "task_id": task_id,
-            "location": location,
-            "status": status,
-            "skill_class_id": skill_class_id,
-            "alert_id": alert_id,
-            "date_range": {
-                "start_date": start_date,
-                "end_date": end_date,
-                "start_time": start_time,
-                "end_time": end_time
-            }
-        },
-        "summary": {
-            "returned_count": len(alert_responses),
-            "total_count": total_count,
-            "page_info": f"第 {page} 页，共 {pages} 页"
         }
     }
-    
-         # 提供完整的响应数据结构
-    response_data.update({
-        "total": total_count,
-        "page": page,
-        "limit": limit,
-        "pages": pages
-    })
-    
-    return response_data
 
 @router.get("/sse/status", description="获取SSE连接状态")
 def get_sse_status():
@@ -333,13 +303,36 @@ def get_sse_status():
 @router.get("/statistics", description="获取报警统计信息")
 async def get_alert_statistics(
     db: Session = Depends(get_db),
-    days: int = Query(7, ge=1, le=365, description="统计天数"),
+    days: int = Query(30, ge=1, le=3650, description="统计天数，设为3650可统计约10年数据"),
+    all_time: bool = Query(False, description="是否统计全部历史数据（忽略时间范围）")
 ):
     """
     获取报警统计信息
+
+    参数:
+    - days: 统计最近N天的数据（默认30天，最大3650天约10年）
+    - all_time: 为true时统计全部历史数据，忽略days参数
+
+    返回:
+    - 预警总数
+    - 各状态数量
+    - 预警类型排名
+    - 预警等级分布
+    - 按天统计
+    - 设备预警数量 Top 10
     """
     try:
-        logger.info(f"收到获取报警统计请求，统计天数: {days}")
+        logger.info(f"收到获取报警统计请求，统计天数: {days}, 全部历史: {all_time}")
+
+        # 计算时间范围
+        from datetime import datetime, timedelta
+        end_date = datetime.now()
+
+        if all_time:
+            # 统计全部历史数据，使用一个极早的起始时间
+            start_date = datetime(2000, 1, 1)
+        else:
+            start_date = end_date - timedelta(days=days)
         
         # 计算时间范围
         from datetime import datetime, timedelta
@@ -413,10 +406,9 @@ async def get_latest_alert_images(
 
             result.append({
                 "id": alert.alert_id,
-                "image": alert_response.minio_frame_url,  # 自动生成的MinIO预签名URL
-                "event": alert.alert_name,
-                "time": alert.alert_time.strftime("%Y-%m-%d %H:%M") if alert.alert_time else "",
-                "alert_time": alert.alert_time.strftime("%Y-%m-%d %H:%M:%S") if alert.alert_time else "",
+                "image_url": alert_response.minio_frame_url,
+                "alert_type": alert.alert_name,
+                "alert_time": alert.alert_time.strftime("%Y-%m-%d %H:%M") if alert.alert_time else "",
                 "level": level_code,
                 "levelText": level_text,
                 "location": alert.location or "",
@@ -434,6 +426,318 @@ async def get_latest_alert_images(
     except Exception as e:
         logger.error(f"获取最新预警图片失败: {str(e)}")
         raise HTTPException(status_code=500, detail=f"获取最新预警图片失败: {str(e)}")
+
+
+
+# ========== 预警统计API端点 ==========
+
+@router.get("/statistics/summary", summary="获取预警统计摘要")
+async def get_summary_statistics(
+    start_date: Optional[str] = Query(None, description="开始日期 (YYYY-MM-DD)"),
+    end_date: Optional[str] = Query(None, description="结束日期 (YYYY-MM-DD)"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取预警统计摘要
+    
+    返回信息包括：
+    - total_alerts: 总预警数
+    - today_alerts: 今日新增
+    - pending_alerts: 待处理数
+    - processing_alerts: 处理中数
+    - resolved_today: 今日已处理
+    - total_cameras: 总设备数
+    - online_cameras: 在线设备数
+    - offline_cameras: 离线设备数
+    """
+    try:
+        logger.info(f"收到获取预警统计摘要请求: start_date={start_date}, end_date={end_date}")
+        
+        # 解析日期参数
+        parsed_start_date = None
+        parsed_end_date = None
+        
+        if start_date:
+            try:
+                parsed_start_date = datetime.strptime(start_date, "%Y-%m-%d")
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"开始日期格式错误: {start_date}")
+        
+        if end_date:
+            try:
+                parsed_end_date = datetime.strptime(end_date, "%Y-%m-%d")
+                parsed_end_date = parsed_end_date.replace(hour=23, minute=59, second=59)
+            except ValueError:
+                raise HTTPException(status_code=400, detail=f"结束日期格式错误: {end_date}")
+        
+        # 获取统计数据
+        stats = alert_service.get_summary_stats(
+            db=db,
+            start_date=parsed_start_date,
+            end_date=parsed_end_date
+        )
+        
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": stats
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取预警统计摘要失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取预警统计摘要失败: {str(e)}")
+
+
+@router.get("/statistics/trend", summary="获取预警趋势数据")
+async def get_trend_statistics(
+    time_range: str = Query("7d", description="时间范围: 24h/7d/30d"),
+    granularity: str = Query("day", description="时间粒度: hour/day/week/month"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取预警趋势数据
+
+    支持的时间范围：
+    - 24h / day: 最近24小时
+    - 7d / week: 最近7天
+    - 30d / month: 最近30天
+
+    支持的时间粒度：
+    - hour: 按小时统计
+    - day: 按天统计
+    - week: 按周统计
+    - month: 按月统计
+    """
+    try:
+        logger.info(f"收到获取预警趋势请求: time_range={time_range}, granularity={granularity}")
+
+        # 解析时间范围
+        end_date = datetime.now()
+        range_mapping = {
+            "24h": timedelta(hours=24),
+            "day": timedelta(hours=24),
+            "7d": timedelta(days=7),
+            "week": timedelta(days=7),
+            "30d": timedelta(days=30),
+            "month": timedelta(days=30)
+        }
+
+        delta = range_mapping.get(time_range, timedelta(days=7))
+        start_date = end_date - delta
+        
+        # 获取趋势数据
+        stats = alert_service.get_trend_stats(
+            db=db,
+            start_date=start_date,
+            end_date=end_date,
+            granularity=granularity
+        )
+        
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": stats
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取预警趋势失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取预警趋势失败: {str(e)}")
+
+
+@router.get("/statistics/by-type", summary="获取预警类型统计")
+async def get_type_statistics(
+    range: str = Query("7d", description="时间范围: 24h/7d/30d"),
+    top_n: int = Query(10, ge=1, le=50, description="返回前N个类型"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取预警类型统计
+
+    返回各预警类型的数量和占比
+    """
+    try:
+        logger.info(f"收到获取预警类型统计请求: range={range}, top_n={top_n}")
+
+        # 解析时间范围
+        end_date = datetime.now()
+        range_mapping = {
+            "24h": timedelta(hours=24),
+            "day": timedelta(hours=24),
+            "7d": timedelta(days=7),
+            "week": timedelta(days=7),
+            "30d": timedelta(days=30),
+            "month": timedelta(days=30)
+        }
+
+        delta = range_mapping.get(range, timedelta(days=7))
+        start_date = end_date - delta
+        
+        # 获取类型统计
+        stats = alert_service.get_type_stats(
+            db=db,
+            start_date=start_date,
+            end_date=end_date,
+            top_n=top_n
+        )
+        
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": stats
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取预警类型统计失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取预警类型统计失败: {str(e)}")
+
+
+@router.get("/statistics/level", summary="获取预警等级统计")
+async def get_level_statistics(
+    range: str = Query("7d", description="时间范围: 24h/7d/30d"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取预警等级统计
+
+    返回各预警等级的数量、占比和颜色
+    """
+    try:
+        logger.info(f"收到获取预警等级统计请求: range={range}")
+
+        # 解析时间范围
+        end_date = datetime.now()
+        range_mapping = {
+            "24h": timedelta(hours=24),
+            "day": timedelta(hours=24),
+            "7d": timedelta(days=7),
+            "week": timedelta(days=7),
+            "30d": timedelta(days=30),
+            "month": timedelta(days=30)
+        }
+
+        delta = range_mapping.get(range, timedelta(days=7))
+        start_date = end_date - delta
+        
+        # 获取等级统计
+        stats = alert_service.get_level_stats(
+            db=db,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": stats
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取预警等级统计失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取预警等级统计失败: {str(e)}")
+
+
+@router.get("/statistics/location", summary="获取位置统计")
+async def get_location_statistics(
+    range: str = Query("7d", description="时间范围: 24h/7d/30d"),
+    top_n: int = Query(10, ge=1, le=50, description="返回前N个位置"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取按位置（摄像头）统计的预警数据
+
+    返回各摄像头的预警数量和占比
+    """
+    try:
+        logger.info(f"收到获取位置统计请求: range={range}, top_n={top_n}")
+
+        # 解析时间范围
+        end_date = datetime.now()
+        range_mapping = {
+            "24h": timedelta(hours=24),
+            "day": timedelta(hours=24),
+            "7d": timedelta(days=7),
+            "week": timedelta(days=7),
+            "30d": timedelta(days=30),
+            "month": timedelta(days=30)
+        }
+
+        delta = range_mapping.get(range, timedelta(days=7))
+        start_date = end_date - delta
+        
+        # 获取位置统计
+        stats = alert_service.get_location_stats(
+            db=db,
+            start_date=start_date,
+            end_date=end_date,
+            top_n=top_n
+        )
+        
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": stats
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取位置统计失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取位置统计失败: {str(e)}")
+
+
+@router.get("/statistics/processing-status", summary="获取处理状态统计")
+async def get_processing_status_statistics(
+    range: str = Query("7d", description="时间范围: 24h/7d/30d"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取处理状态统计
+
+    返回各处理状态的预警数量和占比
+    """
+    try:
+        logger.info(f"收到获取处理状态统计请求: range={range}")
+
+        # 解析时间范围
+        end_date = datetime.now()
+        range_mapping = {
+            "24h": timedelta(hours=24),
+            "day": timedelta(hours=24),
+            "7d": timedelta(days=7),
+            "week": timedelta(days=7),
+            "30d": timedelta(days=30),
+            "month": timedelta(days=30)
+        }
+
+        delta = range_mapping.get(range, timedelta(days=7))
+        start_date = end_date - delta
+        
+        # 获取处理状态统计
+        stats = alert_service.get_processing_status_stats(
+            db=db,
+            start_date=start_date,
+            end_date=end_date
+        )
+        
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": stats
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取处理状态统计失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取处理状态统计失败: {str(e)}")
 
 @router.get("/connected")
 def get_connected_clients():
@@ -2107,3 +2411,66 @@ async def get_user_context_demo(request: Request):
             }
         }
     }
+
+
+@router.get("/forward-statistics", summary="获取报警转发统计")
+async def get_alert_forward_statistics(
+    time_range: str = Query("7d", description="时间范围: 7d/30d"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取报警转发统计（Mock数据版本）
+    
+    返回格式:
+    {
+        "code": 0,
+        "msg": "success",
+        "data": {
+            "forward_counts": [10, 20, 15, ...],  # 每日转发数量
+            "date_labels": ["2024-01-01", "2024-01-02", ...],  # 日期标签
+            "total_forwards": 1000  # 总转发数
+        }
+    }
+    """
+    try:
+        from datetime import timedelta
+        import random
+        
+        logger.info(f"收到获取报警转发统计请求: time_range={time_range}")
+        
+        # 解析时间范围
+        end_date = datetime.now()
+        if time_range == "30d":
+            days = 30
+        elif time_range == "7d":
+            days = 7
+        else:
+            days = 7
+        
+        start_date = end_date - timedelta(days=days)
+        
+        # 生成Mock数据
+        forward_counts = []
+        date_labels = []
+        
+        for i in range(days):
+            date = start_date + timedelta(days=i)
+            date_labels.append(date.strftime("%Y-%m-%d"))
+            # 随机生成转发数量 (50-200之间)
+            forward_counts.append(random.randint(50, 200))
+        
+        total_forwards = sum(forward_counts)
+        
+        return {
+            "code": 0,
+            "msg": "success",
+            "data": {
+                "forward_counts": forward_counts,
+                "date_labels": date_labels,
+                "total_forwards": total_forwards
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"获取报警转发统计失败: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=f"获取报警转发统计失败: {str(e)}")

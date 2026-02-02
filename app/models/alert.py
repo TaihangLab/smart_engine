@@ -5,7 +5,7 @@
 2. alert_processing_records - 预警处理记录表  
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, Float, JSON, BigInteger, Integer, Text, ForeignKey, Index, Boolean
 from sqlalchemy.orm import relationship
@@ -20,7 +20,7 @@ except ImportError:
     # 其他数据库环境下使用Integer
     StatusType = Integer
     logger_available = False
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from enum import IntEnum
 
 from app.db.base import Base
@@ -399,8 +399,16 @@ class AlertCreateRequest(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
-    result: Optional[List[Dict[str, Any]]] = None
+    # 电子围栏：支持坐标列表 [[x,y],...] 或围栏配置对象
+    electronic_fence: Optional[Union[List[List[int]], Dict[str, Any]]] = Field(
+        default=None,
+        description="电子围栏坐标或配置"
+    )
+    # AI检测结果
+    result: Optional[List[Dict[str, Any]]] = Field(
+        default=None,
+        description="AI检测结果列表"
+    )
     minio_frame_object_name: str
     minio_video_object_name: str
     skill_class_id: Optional[int] = None
@@ -447,7 +455,7 @@ class AlertDetailResponse(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_url: Optional[str] = ""
     minio_video_url: Optional[str] = ""
@@ -479,7 +487,7 @@ class AlertCreate(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_object_name: str
     minio_video_object_name: str
@@ -531,7 +539,7 @@ class AlertResponse(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_url: Optional[str] = ""
     minio_video_url: Optional[str] = ""
@@ -570,7 +578,7 @@ class AlertCreate(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_object_name: str
     minio_video_object_name: str
@@ -622,7 +630,7 @@ class AlertResponse(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_url: Optional[str] = ""
     minio_video_url: Optional[str] = ""
@@ -673,7 +681,7 @@ class AlertCreate(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_object_name: str
     minio_video_object_name: str
@@ -725,7 +733,7 @@ class AlertResponse(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_url: Optional[str] = ""
     minio_video_url: Optional[str] = ""
@@ -777,7 +785,7 @@ class AlertCreate(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_object_name: str
     minio_video_object_name: str
@@ -829,7 +837,7 @@ class AlertResponse(BaseModel):
     camera_id: int
     camera_name: str
     task_id: int
-    electronic_fence: Optional[Dict[str, Any]] = None
+    electronic_fence: Optional[Any] = None
     result: Optional[List[Dict[str, Any]]] = None
     minio_frame_url: Optional[str] = ""
     minio_video_url: Optional[str] = ""
@@ -852,28 +860,41 @@ class AlertResponse(BaseModel):
 
     def model_post_init(self, __context):
         """模型实例化后自动生成URL"""
+        
+        # 处理图片 URL
         if self.minio_frame_object_name:
-            try:
-                from app.services.minio_client import minio_client
-                from app.core.config import settings
-                self.minio_frame_url = minio_client.get_presigned_url(
-                    bucket_name=settings.MINIO_BUCKET,
-                    prefix=f"{settings.MINIO_ALERT_IMAGE_PREFIX}{self.task_id}/",
-                    object_name=self.minio_frame_object_name,
-                    expires=3600  # 1小时有效期
-                )
-            except Exception:
-                self.minio_frame_url = ""
+            # 如果已经是完整的 HTTP URL，直接使用
+            if self.minio_frame_object_name.startswith("http://") or self.minio_frame_object_name.startswith("https://"):
+                self.minio_frame_url = self.minio_frame_object_name
+            else:
+                # 否则通过 MinIO 生成预签名 URL
+                try:
+                    from app.services.minio_client import minio_client
+                    from app.core.config import settings
+                    self.minio_frame_url = minio_client.get_presigned_url(
+                        bucket_name=settings.MINIO_BUCKET,
+                        prefix=f"{settings.MINIO_ALERT_IMAGE_PREFIX}{self.task_id}/",
+                        object_name=self.minio_frame_object_name,
+                        expires=3600  # 1小时有效期
+                    )
+                except Exception:
+                    self.minio_frame_url = ""
 
+        # 处理视频 URL
         if self.minio_video_object_name:
-            try:
-                from app.services.minio_client import minio_client
-                from app.core.config import settings
-                self.minio_video_url = minio_client.get_presigned_url(
-                    bucket_name=settings.MINIO_BUCKET,
-                    prefix=f"{settings.MINIO_ALERT_VIDEO_PREFIX}{self.task_id}/",
-                    object_name=self.minio_video_object_name,
-                    expires=3600  # 1小时有效期
-                )
-            except Exception:
-                self.minio_video_url = ""
+            # 如果已经是完整的 HTTP URL，直接使用
+            if self.minio_video_object_name.startswith("http://") or self.minio_video_object_name.startswith("https://"):
+                self.minio_video_url = self.minio_video_object_name
+            else:
+                # 否则通过 MinIO 生成预签名 URL
+                try:
+                    from app.services.minio_client import minio_client
+                    from app.core.config import settings
+                    self.minio_video_url = minio_client.get_presigned_url(
+                        bucket_name=settings.MINIO_BUCKET,
+                        prefix=f"{settings.MINIO_ALERT_VIDEO_PREFIX}{self.task_id}/",
+                        object_name=self.minio_video_object_name,
+                        expires=3600  # 1小时有效期
+                    )
+                except Exception:
+                    self.minio_video_url = ""
