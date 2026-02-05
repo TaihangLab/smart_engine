@@ -498,9 +498,9 @@ class AlertCreate(BaseModel):
     process: Optional[Dict[str, Any]] = None
 
     # 预警合并元数据
-    is_merged: bool = False
-    alert_count: int = 1
-    alert_duration: float = 0.0
+    is_merged: Optional[bool] = False
+    alert_count: Optional[int] = 1
+    alert_duration: Optional[float] = 0.0
     first_alert_time: Optional[datetime] = None
     last_alert_time: Optional[datetime] = None
     alert_images: Optional[List[Dict[str, Any]]] = None
@@ -569,9 +569,9 @@ class AlertResponse(BaseModel):
     minio_video_object_name: Optional[str] = None
 
     # 预警合并元数据
-    is_merged: bool = False
-    alert_count: int = 1
-    alert_duration: float = 0.0
+    is_merged: Optional[bool] = False
+    alert_count: Optional[int] = 1
+    alert_duration: Optional[float] = 0.0
     first_alert_time: Optional[datetime] = None
     last_alert_time: Optional[datetime] = None
     alert_images: Optional[List[Dict[str, Any]]] = None
