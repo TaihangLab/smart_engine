@@ -737,12 +737,12 @@ class AlertService:
                 .scalar()
             )
         
-        # 今日新增
+        # 今日新增（使用DATE函数确保正确比较日期）
+        from sqlalchemy import extract
         today = datetime.now().date()
-        today_start = datetime.combine(today, datetime.min.time())
         today_alerts = (
             db.query(func.count(Alert.alert_id))
-            .filter(Alert.alert_time >= today_start)
+            .filter(func.date(Alert.alert_time) == today)
             .scalar()
         )
         
@@ -760,11 +760,11 @@ class AlertService:
             .scalar()
         )
         
-        # 今日已处理
+        # 今日已处理（使用DATE函数确保正确比较日期）
         resolved_today = (
             db.query(func.count(Alert.alert_id))
             .filter(Alert.status == AlertStatus.RESOLVED)
-            .filter(Alert.processed_at >= today_start)
+            .filter(func.date(Alert.processed_at) == today)
             .scalar()
         )
         

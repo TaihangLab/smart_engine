@@ -221,6 +221,12 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
                 "processing_alerts": 5,        # 处理中数
                 "resolved_today": 8            # 今日已处理
             },
+            "alert_levels": [                  # 预警等级占比
+                {"level": 1, "level_name": "一般", "count": 50, "percentage": 50, "color": "#52c41a"},
+                {"level": 2, "level_name": "重要", "count": 30, "percentage": 30, "color": "#faad14"},
+                {"level": 3, "level_name": "紧急", "count": 15, "percentage": 15, "color": "#ff4d4f"},
+                {"level": 4, "level_name": "特急", "count": 5, "percentage": 5, "color": "#722ed1"}
+            ],
             "devices": {
                 "total_cameras": 50,           # 总摄像头数
                 "online_cameras": 45,           # 在线摄像头数
@@ -243,7 +249,18 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
         # 1. 获取预警统计
         alert_stats = alert_service.get_summary_stats(db=db)
 
-        # 2. 获取设备统计
+        # 2. 获取预警等级统计（所有时间）
+        from datetime import timedelta
+        # 使用历史数据的起止时间，确保能获取到数据
+        end_date = datetime.now()
+        start_date = datetime(2020, 1, 1)  # 使用很早的日期来获取所有数据
+        level_stats = alert_service.get_level_stats(
+            db=db,
+            start_date=start_date,
+            end_date=end_date
+        )
+
+        # 3. 获取设备统计
         total_cameras = 0
         online_cameras = 0
 
@@ -264,7 +281,7 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
         except Exception as e:
             logger.warning(f"获取WVP摄像头列表失败: {str(e)}")
 
-        # 3. 获取系统运行状态
+        # 4. 获取系统运行状态
         running_tasks = 0
         scheduler_running = False
         video_streams = 0
@@ -277,7 +294,7 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
         except Exception as e:
             logger.warning(f"获取任务执行器状态失败: {str(e)}")
 
-        # 4. 获取抓图服务数量
+        # 5. 获取抓图服务数量
         capture_services = 0
         try:
             stats = frame_reader_manager.get_all_stats()
@@ -285,10 +302,10 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
         except Exception as e:
             logger.warning(f"获取帧读取器统计失败: {str(e)}")
 
-        # 5. 获取活跃连接数
+        # 6. 获取活跃连接数
         active_connections = online_cameras
 
-        # 6. 组装返回数据
+        # 7. 组装返回数据
         return {
             "success": True,
             "code": 200,
@@ -301,6 +318,7 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
                     "processing_alerts": alert_stats.get("processing_alerts", 0),
                     "resolved_today": alert_stats.get("resolved_today", 0)
                 },
+                "alert_levels": level_stats,
                 "devices": {
                     "total_cameras": total_cameras,
                     "online_cameras": online_cameras,
