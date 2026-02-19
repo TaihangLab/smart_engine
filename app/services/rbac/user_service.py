@@ -35,7 +35,7 @@ class UserService:
             raise ValueError("用户信息中缺少必需的 userId 字段")
 
         tenant_id = user_info.get("tenantId")
-        if not tenant_id:
+        if tenant_id is None:
             raise ValueError("用户信息中缺少必需的 tenantId 字段")
 
         display_name = user_info.get("userName", user_name)
@@ -135,9 +135,9 @@ class UserService:
         if existing_user:
             raise ValueError(f"用户 {user_data.get('user_name')} 在租户 {user_data.get('tenant_id')} 中已存在")
 
-        # 获取tenant_id，确保它是整数类型且必需
+        # 获取tenant_id
         tenant_id = user_data.get('tenant_id')
-        if not tenant_id:
+        if tenant_id is None:
             raise ValueError("用户信息中缺少必需的 tenant_id 字段")
 
         # 确保tenant_id是整数且在有效范围内
@@ -161,7 +161,9 @@ class UserService:
                     raise ValueError(f"tenant_id 字段值 '{tenant_id}' 无法转换为整数")
 
         # 验证tenant_id是否在有效范围内
-        if tenant_id < 0 or tenant_id > 16383:
+        if tenant_id < 0:
+            raise ValueError(f"tenant_id 值 {tenant_id} 必须是非负整数")
+        if tenant_id > 16383:
             raise ValueError(f"tenant_id 值 {tenant_id} 超出有效范围 (0-16383)")
 
         # 生成新的用户ID

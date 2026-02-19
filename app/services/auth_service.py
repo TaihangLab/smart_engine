@@ -170,7 +170,7 @@ class AuthenticationService:
     @staticmethod
     def create_new_login_response(user: SysUser, roles: List[str], permissions: List[str], admin_token: str) -> NewLoginResponse:
         """
-        创建新的登录响应（符合新API规范）
+        创建新的登录响应（使用 JWT token 格式）
 
         Args:
             user: 用户对象
@@ -181,22 +181,26 @@ class AuthenticationService:
         Returns:
             新登录响应对象
         """
-        # 生成普通访问令牌（使用 Base64 编码的 JSON，与 adminToken 格式一致）
-        # 注意：必须使用 camelCase 命名以匹配 authenticate_request 的要求
+        # 生成随机字符串（用于 rnStr 和 clientid）
+        import secrets
+        random_str = secrets.token_hex(16)
+
+        # 准备 JWT payload 数据（使用 camelCase 命名）
         user_data = {
+            "loginType": "login",
+            "loginId": f"sys_user:{user.id}",
+            "rnStr": random_str,
+            "clientid": "02bb9cfe8d7844ecae8dbe62b1ba971a",  # 固定值，与白名单匹配
+            "tenantId": str(user.tenant_id),
             "userId": str(user.id),
             "userName": user.user_name,
-            "tenantId": user.tenant_id,
-            "nickName": user.nick_name,
             "deptId": user.dept_id if user.dept_id else 0,
-            "clientid": "02bb9cfe8d7844ecae8dbe62b1ba971a"  # 固定值，与白名单匹配
+            "deptName": "",
+            "deptCategory": ""
         }
 
-        # 将数据转换为JSON字符串
-        json_str = json.dumps(user_data, ensure_ascii=False)
-
-        # 对JSON字符串进行Base64编码（与 adminToken 格式一致）
-        token = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
+        # 生成 JWT token
+        token = create_access_token(data=user_data)
 
         # 计算过期时间
         expires_in = settings.ACCESS_TOKEN_EXPIRE_MINUTES * 60  # 转换为秒
@@ -205,7 +209,7 @@ class AuthenticationService:
         user_info = UserInfo(
             userId=str(user.id),
             username=user.user_name,
-            tenantCode=str(user.tenant_id),  # 假设tenant_id就是tenantCode
+            tenantCode=str(user.tenant_id),
             roles=roles,
             permissions=permissions
         )
@@ -220,7 +224,7 @@ class AuthenticationService:
     @staticmethod
     def generate_admin_token(user: SysUser, roles: List[str], permissions: List[str]) -> str:
         """
-        生成管理员令牌（Base64编码的JSON信息）
+        生成管理员令牌（JWT 格式）
 
         Args:
             user: 用户对象
@@ -228,7 +232,7 @@ class AuthenticationService:
             permissions: 用户权限列表
 
         Returns:
-            Base64编码的管理员令牌
+            JWT 格式的管理员令牌
         """
         # 获取部门信息
         dept_name = ""
@@ -248,26 +252,28 @@ class AuthenticationService:
         company_name = f"Company-{user.tenant_id}"
         company_code = f"COMP-{user.tenant_id}"
 
-        # 构建管理员令牌数据（符合 token.md 规范）
+        # 生成随机字符串
+        import secrets
+        random_str = secrets.token_hex(16)
+
+        # 构建 JWT payload 数据（符合 token.md 规范，使用 camelCase）
         admin_data = {
+            "loginType": "login",
+            "loginId": f"sys_user:{user.id}",
+            "rnStr": random_str,
+            "clientid": "02bb9cfe8d7844ecae8dbe62b1ba971a",  # 固定值
+            "tenantId": str(user.tenant_id),
             "userId": str(user.id),
             "userName": user.user_name,
-            "tenantId": user.tenant_id,
-            "tenantName": tenant_name,
-            "companyName": company_name,
-            "companyCode": company_code,
             "deptId": user.dept_id if user.dept_id else 0,
             "deptName": dept_name if dept_name else f"Dept-{user.dept_id}",
-            "clientid": "02bb9cfe8d7844ecae8dbe62b1ba971a",  # 固定值
+            "deptCategory": "",
             "roles": roles,
             "permissions": permissions
         }
 
-        # 将数据转换为JSON字符串
-        json_str = json.dumps(admin_data, ensure_ascii=False)
-
-        # 对JSON字符串进行Base64编码
-        admin_token = base64.b64encode(json_str.encode('utf-8')).decode('utf-8')
+        # 生成 JWT token
+        admin_token = create_access_token(data=admin_data)
 
         return admin_token
     

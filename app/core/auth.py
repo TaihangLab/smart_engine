@@ -29,13 +29,14 @@ def verify_token(token: str) -> Optional[dict]:
 
 def decode_jwt_token_without_verify(token: str) -> Optional[dict]:
     """
-    解码Base64编码的JSON Token
-
-    ⚠️ 注意：此系统只支持Base64编码的JSON token格式，不支持JWT token
+    解码 Token，支持两种格式：
+    1. JWT token 格式（推荐）：header.payload.signature
+    2. Base64 编码的 JSON token（向后兼容）
 
     Args:
         token: Token字符串，可以包含"Bearer "前缀
-              格式: "Bearer eyJ1c2VySWQiOiAiMCJ9..." 或直接 "eyJ1c2VySWQiOiAiMCJ9..."
+              JWT格式: "Bearer eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiAiMCJ9..."
+              Base64格式: "Bearer eyJ1c2VySWQiOiAiMCJ9..." 或直接 "eyJ1c2VySWQiOiAiMCJ9..."
 
     Returns:
         解码后的payload字典，解析失败返回None
@@ -49,7 +50,25 @@ def decode_jwt_token_without_verify(token: str) -> Optional[dict]:
     elif token.startswith("bearer "):
         token = token[7:]
 
-    # 解析Base64编码的JSON
+    # 尝试解析 JWT token（标准格式：header.payload.signature）
+    if '.' in token:
+        parts = token.split('.')
+        if len(parts) == 3:
+            # JWT 格式
+            try:
+                # 只解析 payload 部分（中间部分），不验证签名
+                payload_b64 = parts[1]
+                # 添加必要的 base64 padding
+                payload_b64 += '=' * (4 - len(payload_b64) % 4)
+                decoded_bytes = base64.urlsafe_b64decode(payload_b64.encode('utf-8'))
+                decoded_str = decoded_bytes.decode('utf-8')
+                payload = json.loads(decoded_str)
+                logger.debug(f"成功解析JWT Token，用户ID: {payload.get('userId')}, 用户名: {payload.get('userName')}")
+                return payload
+            except Exception as e:
+                logger.debug(f"JWT Token解析失败: {str(e)}，尝试Base64格式")
+
+    # 尝试解析 Base64 编码的 JSON（向后兼容）
     try:
         decoded_bytes = base64.b64decode(token.encode('utf-8'))
         decoded_str = decoded_bytes.decode('utf-8')
@@ -57,7 +76,7 @@ def decode_jwt_token_without_verify(token: str) -> Optional[dict]:
         logger.debug(f"成功解析Base64 Token，用户ID: {payload.get('userId')}, 用户名: {payload.get('userName')}")
         return payload
     except Exception as e:
-        logger.error(f"Base64 Token解析失败: {str(e)}")
+        logger.error(f"Token解析失败（尝试了JWT和Base64格式）: {str(e)}")
         return None
 
 
