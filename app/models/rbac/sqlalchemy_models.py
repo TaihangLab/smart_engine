@@ -49,11 +49,15 @@ class SysUser(Base):
 
     id = Column(BigInteger, primary_key=True, comment="用户ID，52位合成ID")
     user_name = Column(String(64), nullable=False, comment="用户名")
-    tenant_id = Column(BigInteger, nullable=False, comment="租户ID")
+    tenant_id = Column(BigInteger, nullable=False, comment="租户ID（内部关联）")
+    external_user_id = Column(String(128), nullable=True, comment="外部系统用户ID（综管平台等）")
+    external_tenant_id = Column(String(128), nullable=True, comment="外部系统租户ID（原始字符串）")
 
-    # 联合唯一约束：user_name + tenant_id
+    # 联合唯一约束：user_name + tenant_id（本地用户判重）
+    # 联合唯一约束：external_user_id + tenant_id（外部用户判重）
     __table_args__ = (
         UniqueConstraint('user_name', 'tenant_id', name='_user_name_tenant_id_uc'),
+        UniqueConstraint('external_user_id', 'tenant_id', name='_external_user_id_tenant_id_uc'),
     )
     dept_id = Column(BigInteger, comment="部门id")
     position_id = Column(Integer, comment="岗位id")

@@ -338,15 +338,15 @@ class Settings(BaseSettings):
     # 🔐 JWT认证配置
     # ==============
     JWT_DECODE_WITHOUT_VERIFY: bool = Field(
-        default=True, 
+        default=True,
         description="JWT解码时不验证签名（适用于内网环境，信任上游认证服务）"
     )
     JWT_TOKEN_PREFIX: str = Field(
-        default="Bearer", 
+        default="Bearer",
         description="JWT Token前缀"
     )
     AUTH_HEADER_NAME: str = Field(
-        default="authorization", 
+        default="authorization",
         description="认证请求头名称（不区分大小写）"
     )
     # 保留原有的JWT配置（用于需要签名验证的场景）
@@ -361,6 +361,30 @@ class Settings(BaseSettings):
     ACCESS_TOKEN_EXPIRE_MINUTES: int = Field(
         default=30,
         description="访问令牌过期时间（分钟）"
+    )
+
+    # ========== 登录配置 ==========
+    ENABLE_EXTERNAL_LOGIN: bool = Field(
+        default=True,
+        description="是否启用外部登录（综管平台）"
+    )
+    ENABLE_LOCAL_LOGIN: bool = Field(
+        default=True,
+        description="是否启用本地登录"
+    )
+    EXTERNAL_LOGIN_URL: Optional[str] = Field(
+        default=None,
+        description="外部登录页面URL"
+    )
+
+    # ========== 超管配置 ==========
+    SUPER_ADMIN_USERS: List[str] = Field(
+        default=[],
+        description="超管用户名列表（本地用户）"
+    )
+    SUPER_ADMIN_EXTERNAL_IDS: List[str] = Field(
+        default=[],
+        description="超管外部用户ID列表（综管平台等）"
     )
 
     # RTSP推流配置

@@ -8,6 +8,7 @@ import logging
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from fastapi import Request, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
 from app.models.user import UserInfo
 from app.services.rbac_service import RbacService
 from app.db.session import get_db
@@ -94,14 +95,40 @@ def _extract_tenant_id_from_path(request: Request) -> Optional[int]:
 def validate_client_id(client_id: str) -> bool:
     """
     验证client_id是否在白名单中
-    
+
     Args:
         client_id: 要验证的client_id
-        
+
     Returns:
         验证通过返回True，否则返回False
     """
     return client_id in WHITELISTED_CLIENT_IDS
+
+
+def _is_super_admin_user(user_info: Dict[str, Any]) -> bool:
+    """
+    检查用户是否为超管
+
+    Args:
+        user_info: JWT token 解析后的用户信息
+
+    Returns:
+        True 如果是超管用户，否则 False
+    """
+    user_name = user_info.get('userName')
+    external_id = user_info.get('userId')
+
+    # 检查本地用户名
+    if user_name and user_name in settings.SUPER_ADMIN_USERS:
+        logger.info(f"检测到超管用户（用户名）: {user_name}")
+        return True
+
+    # 检查外部用户ID
+    if external_id and str(external_id) in settings.SUPER_ADMIN_EXTERNAL_IDS:
+        logger.info(f"检测到超管用户（外部ID）: {external_id}")
+        return True
+
+    return False
 
 
 def parse_token(token: str) -> Optional[Dict[str, Any]]:
@@ -150,20 +177,33 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
     from app.services.rbac.relation_service import RelationService
     from app.services.rbac.permission_copy_service import PermissionCopyService
     from app.models.rbac.rbac_constants import RoleConstants
+    from app.models.rbac.sqlalchemy_models import SysUser
 
-    # 提取必要字段 - 必须从请求中获取 tenantId
-    user_id = user_info.get('userId', '1')  # Token中的userId
-    user_name = user_info.get('userName', 'default_user')
+    # ========== 提取外部系统信息 ==========
+    external_user_id = user_info.get('userId', '')  # 外部系统的用户ID（综管平台等）
+    external_tenant_id = user_info.get('tenantId', '')  # 外部系统的租户ID（可能为字符串"000000"）
+    user_name = user_info.get('userName', f'user_{external_user_id}')
 
-    # tenantId 是必需的，如果没有则抛出异常
-    if 'tenantId' not in user_info:
-        raise ValueError("用户信息中缺少必需的 tenantId 字段")
-    tenant_id = user_info['tenantId']
-    # 转换为整数
-    if isinstance(tenant_id, str):
-        tenant_id = int(tenant_id)
+    # ========== 处理租户ID ==========
+    # 外部租户ID可能是字符串（如"000000"），需要转换为内部整数租户ID
+    if isinstance(external_tenant_id, str):
+        try:
+            internal_tenant_id = int(external_tenant_id)
+        except ValueError:
+            # 无法转换（如"000000"会被int()转为0），使用默认租户1
+            internal_tenant_id = 1
+            logger.warning(f"外部租户ID '{external_tenant_id}' 无法转换为整数，使用默认租户1")
+    else:
+        internal_tenant_id = int(external_tenant_id)
 
-    # deptId 是必需的，如果没有则创建默认部门
+    # 租户0是模板租户，不允许外部用户使用
+    if internal_tenant_id == 0:
+        internal_tenant_id = 1
+        logger.warning(f"外部租户ID为0（模板租户），改为使用默认租户1")
+
+    tenant_id = internal_tenant_id
+
+    # ========== 处理部门ID ==========
     if 'deptId' not in user_info or user_info['deptId'] is None:
         # 创建该租户的默认部门
         default_dept_id = tenant_id  # 使用租户ID作为默认部门ID
@@ -183,23 +223,48 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         dept_id = user_info['deptId']
         # 转换为整数
         if isinstance(dept_id, str):
-            dept_id = int(dept_id)
+            try:
+                dept_id = int(dept_id)
+            except ValueError:
+                dept_id = tenant_id  # 使用租户ID作为默认部门ID
 
         dept_name = user_info.get('deptName', f'Dept-{dept_id}')
 
-    # 检查用户是否已存在（根据 user_name + tenant_id 检查用户）
-    # 注意：外部系统的userId通常对应我们系统中的user_name字段
-    # 使用用户名而非ID进行查找是因为外部系统传递的userId实际上是我们的用户名标识
-    existing_user = RbacService.get_user_by_user_name_and_tenant_id(db, user_name, tenant_id)
+    # ========== 检查用户是否存在 ==========
+    # 优先使用 external_user_id 查找（支持外部系统用户ID判重）
+    existing_user = None
+
+    # 如果有外部用户ID，优先使用外部用户ID查找
+    if external_user_id:
+        existing_user = db.query(SysUser).filter(
+            SysUser.external_user_id == str(external_user_id),
+            SysUser.tenant_id == tenant_id
+        ).first()
+
+        if existing_user:
+            logger.info(f"通过 external_user_id '{external_user_id}' 找到已存在用户: {existing_user.user_name}")
+
+    # 如果通过外部用户ID没找到，尝试使用用户名查找（兼容本地用户）
+    if not existing_user:
+        existing_user = RbacService.get_user_by_user_name_and_tenant_id(db, user_name, tenant_id)
+        if existing_user:
+            logger.info(f"通过 user_name '{user_name}' 找到已存在用户")
 
     if existing_user:
         # 存在：获取用户
-        # 更新用户信息
+        # 更新用户信息（包括外部系统ID）
         update_data = {
             "nick_name": user_info.get('userName', existing_user.nick_name),
             "dept_id": dept_id,
             "tenant_id": tenant_id
         }
+
+        # 如果用户之前没有存储外部ID，现在存储
+        if external_user_id and not existing_user.external_user_id:
+            update_data['external_user_id'] = str(external_user_id)
+        if external_tenant_id and not existing_user.external_tenant_id:
+            update_data['external_tenant_id'] = str(external_tenant_id)
+
         updated_user = RbacService.update_user_by_id(db, existing_user.id, update_data)
 
         # 获取该用户所有的角色
@@ -213,8 +278,13 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
 
         logger.info(f"用户 {user_name} 已存在，获取其角色、部门和子部门信息")
 
-        # 检查并分配ROLE_ACCESS角色
-        role_code = RoleConstants.ROLE_ACCESS
+        # ========== 检查并分配角色（支持超管配置） ==========
+        # 检查是否为超管用户
+        if _is_super_admin_user(user_info):
+            role_code = RoleConstants.ROLE_ALL
+        else:
+            role_code = RoleConstants.ROLE_ACCESS
+
         role_exists = any(role.role_code == role_code for role in user_roles)
 
         if not role_exists:
@@ -260,7 +330,7 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         # 3. 确保角色存在（ROLE_ACCESS角色检查）
         ensure_role_exists(int(tenant_id), db)
 
-        # 4. 创建新用户
+        # 4. 创建新用户（包含外部系统ID）
         from app.utils.password_utils import hash_password
         user_data = {
             "tenant_id": tenant_id,
@@ -276,10 +346,21 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
             "password": hash_password("DefaultPass123!")  # 使用默认密码并进行哈希
         }
 
+        # 添加外部系统ID字段
+        if external_user_id:
+            user_data['external_user_id'] = str(external_user_id)
+        if external_tenant_id:
+            user_data['external_tenant_id'] = str(external_tenant_id)
+
         created_user = RbacService.create_user(db, user_data)
 
-        # 5. 为新用户分配ROLE_ACCESS角色
-        role_code = RoleConstants.ROLE_ACCESS
+        # 5. 为新用户分配角色（支持超管配置）
+        # 检查是否为超管用户
+        if _is_super_admin_user(user_info):
+            role_code = RoleConstants.ROLE_ALL
+        else:
+            role_code = RoleConstants.ROLE_ACCESS
+
         success = RelationService.assign_role_to_user(db, user_name, role_code, tenant_id)
         if success:
             logger.info(f"为新用户 {user_name} 分配了 {role_code} 角色")
@@ -468,6 +549,40 @@ def ensure_role_exists(tenant_id: int, db):
     logger.info(f"租户 {tenant_id} 的ROLE_ACCESS角色已确保存在并有权限")
 
 
+def _get_or_create_role_all(db: Session, tenant_id: int):
+    """
+    获取或创建 ROLE_ALL 超管角色
+
+    Args:
+        db: 数据库会话
+        tenant_id: 租户ID
+
+    Returns:
+        SysRole: 超管角色对象
+    """
+    from app.models.rbac.sqlalchemy_models import SysRole
+    from app.models.rbac.rbac_constants import RoleConstants
+
+    role = db.query(SysRole).filter(
+        SysRole.role_code == RoleConstants.ROLE_ALL,
+        SysRole.tenant_id == tenant_id
+    ).first()
+
+    if not role:
+        role = SysRole(
+            role_name="超管",
+            role_code=RoleConstants.ROLE_ALL,
+            tenant_id=tenant_id,
+            status=0
+        )
+        db.add(role)
+        db.commit()
+        db.refresh(role)
+        logger.info(f"创建超管角色: {role.role_name} (租户: {tenant_id})")
+
+    return role
+
+
 def ensure_dept_exists(dept_info: Dict[str, Any], db):
     """
     确保部门存在，如果不存在则创建
@@ -585,12 +700,30 @@ async def authenticate_request(request: Request) -> Optional[UserInfo]:
                 detail="认证凭据不完整：Token 中缺少 tenantId 字段"
             )
 
-        # 验证 token 中必需包含 deptId
-        if 'deptId' not in user_info:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="认证凭据不完整：Token 中缺少 deptId 字段"
-            )
+        # ========== 增强JWT字段容错处理 ==========
+        # 为空字段提供默认值，确保即使JWT中只有tenantId和userId也能正常认证
+
+        # 处理 deptId（可选，为空时使用默认值）
+        if 'deptId' not in user_info or user_info['deptId'] is None:
+            user_info['deptId'] = 0
+            logger.debug(f"JWT中缺少deptId，使用默认值0")
+
+        # 处理 deptName（可选）
+        if 'deptName' not in user_info or not user_info['deptName']:
+            tenant_id_val = user_info.get('tenantId', 0)
+            user_info['deptName'] = f"{tenant_id_val}_默认部门"
+            logger.debug(f"JWT中缺少deptName，使用默认值: {user_info['deptName']}")
+
+        # 处理 deptCategory（可选）
+        if 'deptCategory' not in user_info:
+            user_info['deptCategory'] = ""
+
+        # 处理 userName（必需但可能为空）
+        if 'userName' not in user_info or not user_info['userName']:
+            # 使用 userId 作为用户名
+            user_id_val = user_info.get('userId', 'unknown_user')
+            user_info['userName'] = f"user_{user_id_val}"
+            logger.debug(f"JWT中缺少userName，使用默认值: {user_info['userName']}")
 
         tenant_id_from_token = user_info['tenantId']
 

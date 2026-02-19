@@ -29,6 +29,12 @@ class TenantService:
     @staticmethod
     def create_tenant(db: Session, tenant_data: Dict[str, Any]) -> SysTenant:
         """创建租户"""
+        from app.models.rbac.rbac_constants import TenantConstants
+
+        # 检查是否尝试创建租户0（模板租户）
+        if 'id' in tenant_data and tenant_data['id'] == TenantConstants.TEMPLATE_TENANT_ID:
+            raise ValueError(f"租户ID为{TenantConstants.TEMPLATE_TENANT_ID}是系统保留的模板租户ID，不能使用")
+
         # 检查统一社会信用代码是否已存在
         company_code = tenant_data.get("company_code")
         if company_code:
@@ -59,6 +65,10 @@ class TenantService:
                     tenant_id_value = int(tenant_id_value)
                 except ValueError:
                     raise ValueError(f"无效的租户 ID: {tenant_id_value}")
+
+            # 再次检查转换后的ID是否为0
+            if tenant_id_value == TenantConstants.TEMPLATE_TENANT_ID:
+                raise ValueError(f"租户ID为{TenantConstants.TEMPLATE_TENANT_ID}是系统保留的模板租户ID，不能使用")
 
         # 只用SysTenant模型中实际存在的字段
         valid_fields = {

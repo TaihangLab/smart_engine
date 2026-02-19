@@ -35,6 +35,20 @@ async def login(
     通过用户名和密码验证用户身份，并返回访问令牌
     """
     try:
+        # ========== 检查登录模式 ==========
+        # 如果本地登录被禁用，跳转到外部登录页面
+        if not settings.ENABLE_LOCAL_LOGIN:
+            if settings.EXTERNAL_LOGIN_URL:
+                from fastapi.responses import RedirectResponse
+                logger.info(f"本地登录已禁用，跳转到外部登录页面: {settings.EXTERNAL_LOGIN_URL}")
+                return RedirectResponse(url=settings.EXTERNAL_LOGIN_URL)
+            return UnifiedResponse(
+                success=False,
+                code=403,
+                message="本地登录已禁用，请使用外部登录",
+                data=None
+            )
+
         # 获取客户端IP地址
         client_ip = request.client.host
 
