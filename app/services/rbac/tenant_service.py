@@ -67,8 +67,6 @@ class TenantService:
             "company_name": tenant_data.get("company_name"),
             "contact_person": tenant_data.get("contact_person", "联系人"),
             "contact_phone": tenant_data.get("contact_phone", "13800138000"),
-            "username": tenant_data.get("username", tenant_data.get("tenant_name", "admin")),
-            "password": tenant_data.get("password", "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"),
             "package": package,
             "expire_time": tenant_data.get("expire_time"),
             "user_count": tenant_data.get("user_count", 0),

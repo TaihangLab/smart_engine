@@ -23,7 +23,6 @@ class TenantBase(BaseModel):
     company_name: Optional[str] = Field(None, description="企业名称", max_length=128)
     contact_person: Optional[str] = Field(None, description="联系人", max_length=64)
     contact_phone: Optional[str] = Field(None, description="联系电话", max_length=32)
-    username: Optional[str] = Field(None, description="系统用户名", max_length=64)
     package: Optional[PackageType] = Field(PackageType.BASIC, description="租户套餐: basic(基础版)、standard(标准版)、premium(高级版)、enterprise(企业版)")
     expire_time: Optional[datetime] = Field(None, description="过期时间")
     user_count: Optional[int] = Field(0, description="用户数量")
@@ -41,7 +40,6 @@ class TenantBase(BaseModel):
 
 class TenantCreate(TenantBase):
     """创建租户请求模型"""
-    password: str = Field(..., description="系统用户密码", max_length=100)
 
     model_config = ConfigDict(
         populate_by_name=True
@@ -54,8 +52,6 @@ class TenantUpdate(BaseModel):
     company_name: Optional[str] = Field(None, description="企业名称", max_length=128)
     contact_person: Optional[str] = Field(None, description="联系人", max_length=64)
     contact_phone: Optional[str] = Field(None, description="联系电话", max_length=32)
-    username: Optional[str] = Field(None, description="系统用户名", max_length=64)
-    password: Optional[str] = Field(None, description="系统用户密码", max_length=100)
     package: Optional[PackageType] = Field(None, description="租户套餐: basic(基础版)、standard(标准版)、premium(高级版)、enterprise(企业版)")
     expire_time: Optional[datetime] = Field(None, description="过期时间")
     user_count: Optional[int] = Field(None, description="用户数量")
@@ -79,7 +75,6 @@ class TenantResponse(BaseModel):
     company_name: Optional[str] = None
     contact_person: Optional[str] = None
     contact_phone: Optional[str] = None
-    username: Optional[str] = None
     package: PackageType = PackageType.BASIC
     expire_time: Optional[date] = None
     user_count: int = 0

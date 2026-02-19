@@ -907,8 +907,6 @@ CREATE TABLE `sys_tenant` (
   `company_name` varchar(128) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '企业名称',
   `contact_person` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '联系人',
   `contact_phone` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '联系电话',
-  `username` varchar(64) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '系统用户名',
-  `password` varchar(100) COLLATE utf8mb4_unicode_ci NOT NULL COMMENT '系统用户密码',
   `package` varchar(32) COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'basic' COMMENT '租户套餐: basic(基础版)、standard(标准版)、premium(高级版)、enterprise(企业版)',
   `expire_time` date DEFAULT NULL COMMENT '过期时间',
   `user_count` int NOT NULL DEFAULT '0' COMMENT '用户数量',

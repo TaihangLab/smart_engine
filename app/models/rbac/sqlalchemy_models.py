@@ -23,8 +23,6 @@ class SysTenant(Base):
     company_name = Column(String(128), nullable=False, comment="企业名称")
     contact_person = Column(String(64), nullable=False, comment="联系人")
     contact_phone = Column(String(32), nullable=False, comment="联系电话")
-    username = Column(String(64), nullable=False, comment="系统用户名")
-    password = Column(String(100), nullable=False, comment="系统用户密码")
     package = Column(String(32), default="basic", nullable=False, comment="租户套餐: basic(基础版)、standard(标准版)、premium(高级版)、enterprise(企业版)")
     expire_time = Column(Date, comment="过期时间")
     user_count = Column(Integer, default=0, nullable=False, comment="用户数量")

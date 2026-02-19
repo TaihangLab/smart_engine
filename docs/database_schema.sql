@@ -15,8 +15,6 @@ CREATE TABLE IF NOT EXISTS sys_tenant (
     company_name VARCHAR(128) NOT NULL COMMENT '企业名称',
     contact_person VARCHAR(64) NOT NULL COMMENT '联系人',
     contact_phone VARCHAR(32) NOT NULL COMMENT '联系电话',
-    username VARCHAR(64) NOT NULL COMMENT '系统用户名',
-    password VARCHAR(100) NOT NULL COMMENT '系统用户密码',
     package VARCHAR(32) DEFAULT 'basic' NOT NULL COMMENT '租户套餐: basic(基础版)、standard(标准版)、premium(高级版)、enterprise(企业版)',
     expire_time DATE COMMENT '过期时间',
     user_count INT DEFAULT 0 NOT NULL COMMENT '用户数量',
@@ -175,8 +173,8 @@ CREATE TABLE IF NOT EXISTS sys_position (
 -- 插入默认租户
 -- 注意：由于ID现在是合成ID，我们需要先插入一条记录，然后在应用层面处理ID生成
 -- 这里我们使用一个示例ID，实际应用中会通过ID生成器生成
-INSERT IGNORE INTO sys_tenant (id, tenant_name, company_name, contact_person, contact_phone, username, password, package, user_count, status, is_deleted, create_by, update_by) VALUES
-(1000000000000001, '默认租户', '默认企业', '管理员', '13800138000', 'admin', '$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW', 'enterprise', 100, 0, FALSE, 'system', 'system');
+INSERT IGNORE INTO sys_tenant (id, tenant_name, company_name, contact_person, contact_phone, package, user_count, status, is_deleted, create_by, update_by) VALUES
+(1000000000000001, '默认租户', '默认企业', '管理员', '13800138000', 'enterprise', 100, 0, FALSE, 'system', 'system');
 
 -- 插入默认权限
 INSERT IGNORE INTO sys_permission (id, permission_name, permission_code, permission_type, status, sort_order, is_deleted, create_by, update_by) VALUES
