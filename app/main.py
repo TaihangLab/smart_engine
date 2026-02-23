@@ -181,6 +181,14 @@ app.add_middleware(
 from fastapi import Request, HTTPException
 from fastapi.responses import JSONResponse
 from app.models.rbac import UnifiedResponse
+# 导入业务异常类供其他模块使用
+from app.core.exceptions import (
+    RBACException,
+    NotFoundException,
+    BadRequestException,
+    ForbiddenException,
+    ConflictException
+)
 
 # CORS 配置
 ALLOWED_ORIGINS = ["http://localhost:8080", "http://localhost:4000", "http://127.0.0.1:4000"]
