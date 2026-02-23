@@ -7,8 +7,7 @@
 
 from typing import List, Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, validator
-from pydantic import ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from .rbac_base import BaseResponse, PaginatedResponse
 
 

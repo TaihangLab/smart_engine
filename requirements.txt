@@ -19,6 +19,8 @@ uvicorn[standard]==0.34.2
 # google==3.0.0
 # protobuf==5.29.4
 pymysql==1.1.1
+# aiomysql - 异步 MySQL 驱动（AsyncSession 支持）
+aiomysql>=0.2.0
 python-multipart==0.0.19
 scipy>=1.10.0
 scikit-image==0.25.2

@@ -31,8 +31,8 @@ relation_router = APIRouter()
 @relation_router.get("/user-roles", response_model=UnifiedResponse, summary="获取用户角色关系列表")
 async def get_user_roles_list(
     request: Request,
-    user_id: int = Query(None, description="用户ID"),
-    role_id: int = Query(None, description="角色ID"),
+    user_id: int | None = Query(None, description="用户ID"),
+    role_id: int | None = Query(None, description="角色ID"),
     tenant_id: Optional[int] = Query(None, description="租户编码"),
     db: Session = Depends(get_db)
 ):
