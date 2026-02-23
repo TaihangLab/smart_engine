@@ -7,9 +7,14 @@ from typing import List, Dict, Any
 
 from app.db.session import get_db
 from app.db.ai_task_dao import AITaskDAO
-from app.services.ai_task_executor import task_executor
 
 router = APIRouter()
+
+
+def _get_task_executor():
+    """延迟导入 task_executor"""
+    from app.services.ai_task_executor import task_executor
+    return task_executor
 
 @router.post("/tasks/{task_id}/schedule", response_model=Dict[str, Any])
 def schedule_task(
@@ -32,7 +37,7 @@ def schedule_task(
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
     
     # 创建任务调度
-    task_executor.schedule_task(task_id, db)
+    _get_task_executor().schedule_task(task_id, db)
     
     return {"success": True, "message": f"已为任务 {task_id} 创建调度计划"}
 
@@ -50,7 +55,7 @@ def start_task(
         包含操作结果的JSON对象
     """
     try:
-        task_executor._start_task_thread(task_id)
+        _get_task_executor()._start_task_thread(task_id)
         return {"success": True, "message": f"已发送启动信号给任务 {task_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"启动任务失败: {str(e)}")
@@ -69,7 +74,7 @@ def stop_task(
         包含操作结果的JSON对象
     """
     try:
-        task_executor._stop_task_thread(task_id)
+        _get_task_executor()._stop_task_thread(task_id)
         return {"success": True, "message": f"已发送停止信号给任务 {task_id}"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"停止任务失败: {str(e)}")
@@ -85,14 +90,14 @@ def get_tasks_status():
     status = {}
     
     # 获取所有运行中的任务
-    for task_id, thread in task_executor.running_tasks.items():
+    for task_id, thread in _get_task_executor().running_tasks.items():
         status[task_id] = {
             "is_running": thread.is_alive(),
             "thread_name": thread.name
         }
     
     # 获取所有已调度的任务
-    for task_id, job_ids in task_executor.task_jobs.items():
+    for task_id, job_ids in _get_task_executor().task_jobs.items():
         if task_id not in status:
             status[task_id] = {"is_running": False}
         
@@ -110,23 +115,23 @@ def reload_all_tasks():
         包含操作结果的JSON对象
     """
     # 获取当前运行中的任务数量
-    running_before = len(task_executor.running_tasks)
+    running_before = len(_get_task_executor().running_tasks)
     
     # 重新加载所有任务
-    task_ids = list(task_executor.running_tasks.keys())
+    task_ids = list(_get_task_executor().running_tasks.keys())
     for task_id in task_ids:
-        task_executor._stop_task_thread(task_id)
+        _get_task_executor()._stop_task_thread(task_id)
     
     # 等待所有任务停止
     import time
     time.sleep(3)
     
     # 重新调度所有任务
-    task_executor.schedule_all_tasks()
+    _get_task_executor().schedule_all_tasks()
     
     return {
         "success": True, 
         "message": "已重新加载所有任务",
         "running_before": running_before,
-        "scheduled_now": len(task_executor.task_jobs)
+        "scheduled_now": len(_get_task_executor().task_jobs)
     } 

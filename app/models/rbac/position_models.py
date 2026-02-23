@@ -18,7 +18,7 @@ from .rbac_base import BaseResponse
 
 class PositionBase(BaseModel):
     """岗位基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID（支持字符串类型）")
     position_name: str = Field(..., description="岗位名称", max_length=128)
     position_code: Optional[str] = Field(None, description="岗位编码", max_length=64)
     order_num: int = Field(0, description="排序")

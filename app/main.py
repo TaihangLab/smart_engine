@@ -67,27 +67,42 @@ def signal_handler(signum, frame):
             # 创建新的事件循环
             loop = asyncio.new_event_loop()
             asyncio.set_event_loop(loop)
-            
+
             # 运行关闭操作
             loop.run_until_complete(system_startup_service.shutdown_system())
             loop.close()
-            
+
         except Exception as loop_error:
             logger.warning(f"异步关闭失败，尝试同步关闭: {str(loop_error)}")
-            
+
             # 如果异步关闭失败，尝试直接调用关闭方法
             try:
-                # 导入必要的服务并直接关闭
-                from app.services.ai_task_executor import task_executor
-                from app.services.llm_task_executor import llm_task_executor
-                from app.services.adaptive_frame_reader import frame_reader_manager
-                
-                task_executor.shutdown()
-                llm_task_executor.stop()
-                frame_reader_manager.shutdown()
-                
+                # 关闭 AI 任务执行器（如果已初始化）
+                if settings.AI_TASK_EXECUTOR_ENABLED:
+                    try:
+                        from app.services.ai_task_executor import task_executor
+                        task_executor.shutdown()
+                    except Exception as e:
+                        logger.warning(f"关闭 AI 任务执行器失败: {e}")
+
+                # 关闭 LLM 任务执行器（如果已初始化）
+                if settings.LLM_TASK_EXECUTOR_ENABLED:
+                    try:
+                        from app.services.llm_task_executor import llm_task_executor
+                        llm_task_executor.stop()
+                    except Exception as e:
+                        logger.warning(f"关闭 LLM 任务执行器失败: {e}")
+
+                # 关闭帧读取器管理器（如果已初始化）
+                try:
+                    from app.services.adaptive_frame_reader import _frame_reader_manager
+                    if _frame_reader_manager is not None:
+                        _frame_reader_manager.shutdown()
+                except Exception as e:
+                    logger.warning(f"关闭帧读取器管理器失败: {e}")
+
                 logger.info("✅ 同步关闭完成")
-                
+
             except Exception as sync_error:
                 logger.error(f"同步关闭也失败: {str(sync_error)}")
             

@@ -1034,5 +1034,26 @@ class AlertMergeManager:
             logger.error(f"触发LLM复判失败: {str(e)}")
 
 
-# 创建全局预警合并管理器实例
-alert_merge_manager = AlertMergeManager() 
+# 创建全局预警合并管理器实例（延迟初始化）
+_alert_merge_manager: Optional["AlertMergeManager"] = None
+
+
+def get_alert_merge_manager() -> "AlertMergeManager":
+    """获取预警合并管理器实例（延迟初始化）"""
+    global _alert_merge_manager
+    if _alert_merge_manager is None:
+        _alert_merge_manager = AlertMergeManager()
+    return _alert_merge_manager
+
+
+# 向后兼容的全局变量访问（使用属性）
+class _AlertMergeManagerProxy:
+    """代理类，用于延迟初始化"""
+    def __getattr__(self, name):
+        return getattr(get_alert_merge_manager(), name)
+
+    def __setattr__(self, name, value):
+        setattr(get_alert_merge_manager(), name, value)
+
+
+alert_merge_manager = _AlertMergeManagerProxy() 

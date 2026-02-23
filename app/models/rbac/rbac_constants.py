@@ -8,7 +8,7 @@ RBAC系统常量定义
 
 class TenantConstants:
     """租户相关常量"""
-    TEMPLATE_TENANT_ID = 0  # 模板租户ID
+    TEMPLATE_TENANT_ID = "0"  # 模板租户ID（字符串类型，与数据库保持一致）
 
 
 class RoleConstants:

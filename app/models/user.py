@@ -11,7 +11,7 @@ class UserInfo(BaseModel):
     userId: Optional[str] = None
     userName: Optional[str] = None
     deptName: Optional[str] = None
-    tenantId: Optional[int] = None
+    tenantId: Optional[str] = None  # 支持字符串类型
     deptId: Optional[int] = None
     roleId: Optional[int] = None
     roleCode: Optional[str] = None

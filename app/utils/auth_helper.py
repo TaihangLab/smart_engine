@@ -84,10 +84,10 @@ def get_tenant_id_from_request(request: Request) -> Optional[str]:
         
     Returns:
         租户ID（字符串），未找到返回None
-        
+
     Example:
         >>> tenant_id = get_tenant_id_from_request(request)
-        >>> if tenant_id:
+        >>> if tenant_id is not None:  # 注意：使用 is not None 而不是直接 if tenant_id
         >>>     print(f"当前租户: {tenant_id}")
     """
     user_info = get_user_info_from_request(request)

@@ -18,7 +18,7 @@ from .rbac_base import BaseResponse
 
 class DeptBase(BaseModel):
     """部门基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID（支持字符串类型）")
     name: str = Field(..., description="部门名称", max_length=50)
     parent_id: Optional[int] = Field(None, description="父部门ID")
     sort_order: int = Field(0, description="部门顺序")

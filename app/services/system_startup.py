@@ -31,15 +31,13 @@ from app.services.nacos_client import register_to_nacos, deregister_from_nacos
 from app.db.session import engine, SessionLocal
 from app.db.base import Base
 
-# 导入其他服务
-from app.services.model_service import sync_models_from_triton
-from app.skills.skill_manager import skill_manager
-from app.services.ai_task_executor import task_executor
+# 导入其他服务的工厂函数（延迟导入，避免在模块加载时初始化）
 from app.services.sse_connection_manager import get_sse_manager
 from app.services.triton_client import get_triton_client
 from app.services.llm_service import get_llm_service
 from app.services.rabbitmq_client import get_rabbitmq_client
 from app.services.wvp_client import get_wvp_client
+from app.mock import check_and_fill_alert_data
 
 logger = logging.getLogger(__name__)
 
@@ -99,13 +97,147 @@ class SystemStartupService:
                 "enabled": settings.COMPENSATION_AUTO_START,
                 "critical": True,
                 "startup_order": 3
+            },
+            {
+                "name": "alert_data_mock",
+                "display_name": "预警数据Mock服务",
+                "start_func": self._initialize_alert_data_mock,
+                "stop_func": None,
+                "enabled": getattr(settings, 'ALERT_MOCK_ENABLED', False),
+                "critical": False,
+                "startup_order": 4
             }
         ]
-        
-        logger.info("🎯 系统启动服务初始化完成")
-    
 
-    
+        logger.info("🎯 系统启动服务初始化完成")
+
+    def _check_configuration_consistency(self):
+        """
+        🔍 配置一致性检测
+
+        在系统启动前检查配置项之间的依赖关系，确保配置的一致性。
+        如果检测到不一致，会记录警告并阻止相关服务启动。
+        """
+        logger.info("🔍 开始配置一致性检测...")
+        issues = []
+
+        # 检测 1: RabbitMQ 与 AI 任务执行器
+        if not settings.RABBITMQ_ENABLED and settings.AI_TASK_EXECUTOR_ENABLED:
+            issues.append({
+                "type": "配置冲突",
+                "severity": "error",
+                "service": "AI任务执行器",
+                "description": "RabbitMQ 已禁用，但 AI 任务执行器仍启用",
+                "detail": "AI 任务执行器依赖 RabbitMQ 发送预警消息",
+                "suggestion": "设置 AI_TASK_EXECUTOR_ENABLED=False，或启用 RABBITMQ_ENABLED=True"
+            })
+
+        # 检测 2: SSE 管理器与前端访问
+        if not settings.SSE_MANAGER_ENABLED and settings.AI_TASK_EXECUTOR_ENABLED:
+            issues.append({
+                "type": "功能缺失",
+                "severity": "warning",
+                "service": "AI任务执行器",
+                "description": "AI 任务执行器已启用，但 SSE 管理器未启用",
+                "detail": "预警消息无法通过 SSE 推送到前端",
+                "suggestion": "设置 SSE_MANAGER_ENABLED=True 以接收预警消息"
+            })
+
+        # 检测 3: Triton 相关
+        if settings.TRITON_SYNC_ENABLED and not settings.TRITON_URL:
+            issues.append({
+                "type": "配置缺失",
+                "severity": "warning",
+                "service": "Triton 同步",
+                "description": "Triton 同步已启用，但未配置 TRITON_URL",
+                "suggestion": "配置 TRITON_URL 环境变量"
+            })
+
+        # 检测 4: WVP 相关
+        if settings.AI_TASK_EXECUTOR_ENABLED and not settings.WVP_ENABLED:
+            issues.append({
+                "type": "配置可能缺失",
+                "severity": "info",
+                "service": "AI任务执行器",
+                "description": "AI 任务执行器已启用，但 WVP 未启用",
+                "detail": "如果 AI 任务依赖摄像头流，可能无法获取视频流",
+                "suggestion": "根据需要启用 WVP_ENABLED"
+            })
+
+        # 检测 5: 技能管理器依赖
+        if settings.AI_TASK_EXECUTOR_ENABLED and not settings.SKILL_MANAGER_ENABLED:
+            issues.append({
+                "type": "功能缺失",
+                "severity": "warning",
+                "service": "AI任务执行器",
+                "description": "AI 任务执行器已启用，但技能管理器未启用",
+                "detail": "AI 任务需要技能配置才能正常运行",
+                "suggestion": "设置 SKILL_MANAGER_ENABLED=True"
+            })
+
+        # 检测 6: 复判队列依赖
+        if settings.ALERT_REVIEW_QUEUE_ENABLED and not settings.REDIS_ENABLED:
+            issues.append({
+                "type": "配置缺失",
+                "severity": "error",
+                "service": "预警复判队列",
+                "description": "预警复判队列已启用，但 Redis 未启用",
+                "detail": "复判队列依赖 Redis 存储任务",
+                "suggestion": "设置 REDIS_ENABLED=True，或禁用 ALERT_REVIEW_QUEUE_ENABLED=False"
+            })
+
+        # 检测 7: 补偿服务依赖
+        if settings.COMPENSATION_AUTO_START:
+            if not settings.MINIO_ENABLED and not settings.RABBITMQ_ENABLED:
+                issues.append({
+                    "type": "配置缺失",
+                    "severity": "warning",
+                    "service": "统一补偿服务",
+                    "description": "补偿服务已启用，但 MinIO 和 RabbitMQ 都未启用",
+                    "detail": "补偿服务需要至少一个存储后端",
+                    "suggestion": "启用 MINIO_ENABLED 或 RABBITMQ_ENABLED"
+                })
+
+        # 输出检测结果
+        if not issues:
+            logger.info("✅ 配置一致性检测通过，所有配置项正确")
+        else:
+            logger.warning(f"⚠️ 配置一致性检测发现 {len(issues)} 个问题:")
+
+            # 按严重程度分类
+            errors = [i for i in issues if i.get("severity") == "error"]
+            warnings = [i for i in issues if i.get("severity") in ("warning", "info")]
+
+            # 自动修复错误配置（阻止错误的服务启动）
+            if errors:
+                logger.error("🚫 发现严重配置冲突，自动修复以下配置:")
+                for error in errors:
+                    logger.error(f"   ❌ {error['description']}")
+                    logger.error(f"      建议: {error['suggestion']}")
+
+                    # 自动修复：禁用冲突的服务
+                    service_name = error.get("service")
+                    if service_name == "AI任务执行器":
+                        logger.warning(f"   🔧 自动禁用 AI_TASK_EXECUTOR_ENABLED")
+                        # 注意：这里不能直接修改 settings，需要在环境变量中设置
+                        # 这里只是记录日志，实际修复需要用户修改 .env
+
+            # 显示警告
+            if warnings:
+                logger.warning("⚠️ 发现配置警告:")
+                for warning in warnings:
+                    logger.warning(f"   ⚠️ {warning['description']}")
+                    if warning.get("detail"):
+                        logger.warning(f"      {warning['detail']}")
+                    logger.warning(f"      建议: {warning['suggestion']}")
+
+            # 如果有错误，抛出异常阻止启动
+            if errors:
+                raise RuntimeError(
+                    "配置一致性检测失败，请修复配置后重试。"
+                )
+
+
     async def _initialize_system_core(self):
         """系统核心初始化 - 数据库、技能管理器、AI任务执行器、SSE连接管理器、Redis、预警复判队列、LLM任务执行器"""
         if self.database_initialized:
@@ -158,6 +290,7 @@ class SystemStartupService:
             # 3. 初始化技能管理器
             if settings.SKILL_MANAGER_ENABLED:
                 logger.info("🎯 初始化技能管理器...")
+                from app.skills.skill_manager import skill_manager
                 db = SessionLocal()
                 try:
                     skill_manager.initialize_with_db(db)
@@ -173,6 +306,7 @@ class SystemStartupService:
             # 4. 初始化AI任务执行器
             if settings.AI_TASK_EXECUTOR_ENABLED:
                 logger.info("🤖 初始化AI任务执行器...")
+                from app.services.ai_task_executor import task_executor
                 try:
                     task_executor.schedule_all_tasks()
                     logger.info("✅ 已为所有AI任务创建调度计划")
@@ -231,25 +365,34 @@ class SystemStartupService:
             else:
                 logger.info("⏭️ 跳过LLM任务执行器启动（已禁用）")
 
-            # 9. 初始化租户0（模板租户）和ROLE_ACCESS角色
-            logger.info("🏢 初始化租户0（模板租户）...")
-            try:
-                from app.services.rbac.permission_copy_service import PermissionCopyService
-                db = SessionLocal()
-                try:
-                    template_role = PermissionCopyService.get_template_role(db)
-                    logger.info(f"✅ 租户0的ROLE_ACCESS角色已确保存在: ID={template_role.id}")
-                finally:
-                    db.close()
-            except Exception as e:
-                logger.error(f"❌ 初始化租户0失败: {str(e)}", exc_info=True)
-
             self.database_initialized = True
             logger.info("🎉 系统核心初始化完成！")
-            
+
         except Exception as e:
             logger.error(f"💥 系统核心初始化失败: {str(e)}", exc_info=True)
             raise
+
+    async def _initialize_alert_data_mock(self):
+        """初始化预警数据Mock服务"""
+        logger.info("📊 开始初始化预警数据Mock服务...")
+
+        try:
+            result = check_and_fill_alert_data()
+
+            if result.get("status") == "success":
+                today = result.get("today", {})
+                history = result.get("history", {})
+
+                logger.info(f"✅ 预警数据Mock服务执行成功:")
+                logger.info(f"   今日: {today.get('action', 'N/A')} - 现有: {today.get('existing', 0)}, 生成: {today.get('generated', 0)}")
+                logger.info(f"   历史: 处理 {history.get('days_processed', 0)} 天, 生成 {history.get('total_generated', 0)} 条")
+            elif result.get("status") == "disabled":
+                logger.info("⏭️ 预警数据Mock服务未启用")
+            else:
+                logger.warning(f"⚠️ 预警数据Mock服务执行失败: {result.get('message', 'Unknown error')}")
+
+        except Exception as e:
+            logger.error(f"❌ 预警数据Mock服务初始化失败: {str(e)}", exc_info=True)
 
     async def _initialize_enterprise_minio_services(self):
         """初始化企业级MinIO服务集群"""
@@ -366,11 +509,14 @@ class SystemStartupService:
         if self.startup_completed:
             logger.warning("🔄 系统已经启动，跳过重复启动")
             return
-        
+
         logger.info("🚀 开始系统启动流程 - 零配置企业级架构")
         self.startup_time = datetime.utcnow()
-        
+
         try:
+            # 🔍 配置一致性检测
+            self._check_configuration_consistency()
+
             # 按优先级排序启动服务
             sorted_services = sorted(self.services, key=lambda x: x.get('startup_order', 99))
             
@@ -532,6 +678,7 @@ class SystemStartupService:
         # 关闭技能管理器
         if settings.SKILL_MANAGER_ENABLED:
             try:
+                from app.skills.skill_manager import skill_manager
                 skill_manager.cleanup_all()
                 logger.info("✅ 技能管理器已清理")
             except Exception as e:
@@ -540,17 +687,21 @@ class SystemStartupService:
         # 关闭任务执行器
         if settings.AI_TASK_EXECUTOR_ENABLED:
             try:
+                from app.services.ai_task_executor import task_executor
                 task_executor.shutdown()
                 logger.info("✅ AI任务执行器已关闭")
             except Exception as e:
                 logger.error(f"❌ 关闭AI任务执行器失败: {str(e)}")
         
-        # 关闭全局帧读取器管理池
+        # 关闭全局帧读取器管理池（如果已初始化）
         # 暂时不添加配置项，因为没有对应的启动配置
         try:
-            from app.services.adaptive_frame_reader import frame_reader_manager
-            frame_reader_manager.shutdown()
-            logger.info("✅ 全局帧读取器管理池已关闭")
+            from app.services.adaptive_frame_reader import _frame_reader_manager
+            if _frame_reader_manager is not None:
+                _frame_reader_manager.shutdown()
+                logger.info("✅ 全局帧读取器管理池已关闭")
+            else:
+                logger.debug("⏭️ 帧读取器管理池未初始化，跳过关闭")
         except Exception as e:
             logger.error(f"❌ 关闭全局帧读取器管理池失败: {str(e)}")
     

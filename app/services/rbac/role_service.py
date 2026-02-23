@@ -164,3 +164,56 @@ class RoleService:
     def get_roles_by_permission_by_id(db: Session, permission_id: int, tenant_id: int):
         """根据权限ID获取角色列表"""
         return RbacDao.role_permission.get_roles_by_permission_by_id(db, permission_id, tenant_id)
+
+    @staticmethod
+    def ensure_role_all_exists(db: Session, tenant_id: str):
+        """
+        确保 ROLE_ALL 租户管理员角色存在，如果不存在则创建
+
+        注意：ROLE_ALL 是特殊角色，不通过 sys_role_permission 映射表关联权限
+        用户拥有此角色时，代码逻辑自动返回所有权限，无需维护权限关联
+
+        Args:
+            db: 数据库会话
+            tenant_id: 租户ID（字符串类型）
+
+        Returns:
+            SysRole: 租户管理员角色对象
+        """
+        from app.models.rbac.rbac_constants import RoleConstants
+        from app.models.rbac.sqlalchemy_models import SysRole
+
+        role = db.query(SysRole).filter(
+            SysRole.role_code == RoleConstants.ROLE_ALL,
+            SysRole.tenant_id == tenant_id
+        ).first()
+
+        if role:
+            return role
+
+        # 生成角色ID（租户ID可能是字符串，使用哈希值作为数值）
+        try:
+            tenant_id_int = int(tenant_id)
+        except ValueError:
+            # 如果租户ID是字符串（如"000000"），使用哈希值
+            tenant_id_int = abs(hash(tenant_id)) % 1000000007
+
+        role_id = generate_id(tenant_id_int, "role")
+
+        role = SysRole(
+            id=role_id,
+            role_name="租户管理员",
+            role_code=RoleConstants.ROLE_ALL,
+            tenant_id=tenant_id,
+            data_scope=4,  # 全部数据权限
+            status=0,  # 启用
+            description="租户管理员，拥有该租户下所有权限（无需权限映射表）",
+            sort_order=0
+        )
+
+        db.add(role)
+        db.flush()
+
+        logger.info(f"自动创建租户管理员角色 ROLE_ALL: tenant_id={tenant_id}, role_id={role_id}")
+
+        return role

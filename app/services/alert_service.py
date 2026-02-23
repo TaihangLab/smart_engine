@@ -737,12 +737,13 @@ class AlertService:
                 .scalar()
             )
         
-        # 今日新增（使用DATE函数确保正确比较日期）
-        from sqlalchemy import extract
-        today = datetime.now().date()
+        # 今日新增（使用时间范围查询，避免时区问题）
+        today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        today_end = today_start.replace(hour=23, minute=59, second=59, microsecond=999999)
         today_alerts = (
             db.query(func.count(Alert.alert_id))
-            .filter(func.date(Alert.alert_time) == today)
+            .filter(Alert.alert_time >= today_start)
+            .filter(Alert.alert_time <= today_end)
             .scalar()
         )
         
@@ -760,11 +761,12 @@ class AlertService:
             .scalar()
         )
         
-        # 今日已处理（使用DATE函数确保正确比较日期）
+        # 今日已处理（使用时间范围查询，避免时区问题）
         resolved_today = (
             db.query(func.count(Alert.alert_id))
             .filter(Alert.status == AlertStatus.RESOLVED)
-            .filter(func.date(Alert.processed_at) == today)
+            .filter(Alert.processed_at >= today_start)
+            .filter(Alert.processed_at <= today_end)
             .scalar()
         )
         
@@ -934,12 +936,13 @@ class AlertService:
 
         total = sum(count for _, count in status_stats)
 
-        # 状态映射
+        # 状态映射（与 AlertStatus 枚举保持一致）
         status_mapping = {
             1: {"name": "待处理", "color": "#faad14"},
             2: {"name": "处理中", "color": "#1890ff"},
             3: {"name": "已处理", "color": "#52c41a"},
-            4: {"name": "已忽略", "color": "#d9d9d9"},
+            4: {"name": "已归档", "color": "#d9d9d9"},
+            5: {"name": "误报", "color": "#ff4d4f"},
         }
 
         return [
@@ -1032,8 +1035,29 @@ class AlertService:
         
         logger.info(f"📡 高性能广播完成 [ID={alert_id}]: 成功发送给 {success_count} 个客户端")
 
-# 创建全局AlertService实例
-alert_service = AlertService()
+# 创建全局AlertService实例（延迟初始化）
+_alert_service: Optional["AlertService"] = None
+
+
+def get_alert_service() -> "AlertService":
+    """获取AlertService实例（延迟初始化）"""
+    global _alert_service
+    if _alert_service is None:
+        _alert_service = AlertService()
+    return _alert_service
+
+
+# 向后兼容的全局变量访问（使用属性）
+class _AlertServiceProxy:
+    """代理类，用于延迟初始化"""
+    def __getattr__(self, name):
+        return getattr(get_alert_service(), name)
+
+    def __setattr__(self, name, value):
+        setattr(get_alert_service(), name, value)
+
+
+alert_service = _AlertServiceProxy()
 
 # 注册SSE客户端连接 - 使用连接管理器
 async def register_sse_client(client_ip: str = "unknown", user_agent: str = "unknown") -> asyncio.Queue:

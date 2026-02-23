@@ -21,7 +21,7 @@ class UserRoleAssign(BaseModel):
     role_code: Optional[str] = Field(None, description="角色编码")
     user_id: Optional[int] = Field(None, description="用户ID")
     role_ids: Optional[List[int]] = Field(None, description="角色ID列表")
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID（支持字符串类型）")
 
     model_config = ConfigDict(
         populate_by_name=True
@@ -33,7 +33,7 @@ class UserRoleResponse(BaseModel):
     id: int
     user_name: str
     role_code: str
-    tenant_id: int
+    tenant_id: str
     role_name: str
 
     model_config = ConfigDict(
@@ -50,7 +50,7 @@ class RolePermissionAssign(BaseModel):
     """角色权限分配请求模型"""
     role_code: str = Field(..., description="角色编码")
     permission_code: str = Field(..., description="权限编码")
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID（支持字符串类型）")
 
     model_config = ConfigDict(
         populate_by_name=True
@@ -72,7 +72,7 @@ class RolePermissionResponse(BaseModel):
     id: int
     role_code: str
     permission_code: str
-    tenant_id: int
+    tenant_id: str
     role_name: str
     permission_name: str
 
@@ -89,7 +89,7 @@ class RolePermissionResponse(BaseModel):
 class PermissionCheckRequest(BaseModel):
     """权限检查请求模型"""
     user_name: str = Field(..., description="用户名", max_length=64)
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID（支持字符串类型）")
     url: str = Field(..., description="请求URL", max_length=255)
     method: str = Field(..., description="请求方法", max_length=16)
 
@@ -102,7 +102,7 @@ class PermissionCheckResponse(BaseModel):
     """权限检查响应模型"""
     has_permission: bool = Field(..., description="是否有权限")
     user_name: str = Field(..., description="用户名")
-    tenant_id: int = Field(..., description="租户ID")
+    tenant_id: str = Field(..., description="租户ID（支持字符串类型）")
     url: str = Field(..., description="请求URL")
     method: str = Field(..., description="请求方法")
 
@@ -118,7 +118,7 @@ class PermissionCheckResponse(BaseModel):
 class UserPermissionResponse(BaseModel):
     """用户权限列表响应模型"""
     user_name: str  # 使用user_name字段名，更准确反映实际内容
-    tenant_id: int
+    tenant_id: str
     permissions: list = Field(default_factory=list, description="权限列表")
 
     model_config = ConfigDict(
@@ -133,7 +133,7 @@ class UserPermissionResponse(BaseModel):
 
 class TenantStatsResponse(BaseModel):
     """租户统计信息响应模型"""
-    tenant_id: int
+    tenant_id: str
     tenant_name: str
     user_count: int = Field(0, description="用户数量")
     role_count: int = Field(0, description="角色数量")

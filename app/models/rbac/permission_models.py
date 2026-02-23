@@ -97,7 +97,7 @@ class PermissionResponse(PermissionBase, BaseResponse):
 class PermissionNodeResponse(BaseModel):
     """权限节点响应模型 - 支持树形结构"""
     id: int
-    tenant_id: int
+    tenant_id: str
     permission_name: str
     permission_code: str
     permission_type: str
@@ -164,7 +164,7 @@ class PermissionTreeResponse(BaseModel):
 class PermissionListResponse(BaseModel):
     """权限列表响应模型"""
     id: int
-    tenant_id: Optional[int] = None
+    tenant_id: Optional[str] = None
     permission_name: str
     permission_code: str
     path: Optional[str]

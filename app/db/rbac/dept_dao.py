@@ -358,8 +358,8 @@ class DeptDao:
             SysDept.is_deleted == False
         )
 
-        # 添加租户过滤
-        if tenant_id:
+        # 添加租户过滤（注意：使用 is not None 因为 "0" 是有效的租户ID）
+        if tenant_id is not None:
             query = query.filter(SysDept.tenant_id == tenant_id)
 
         # 添加名称模糊查询
@@ -423,7 +423,8 @@ class DeptDao:
             SysDept.is_deleted == False
         )
 
-        if tenant_id:
+        # 添加租户过滤（注意：使用 is not None 因为 "0" 是有效的租户ID）
+        if tenant_id is not None:
             query = query.filter(SysDept.tenant_id == tenant_id)
 
         # 添加状态过滤（可选）

@@ -685,24 +685,33 @@ class UnifiedCompensationService:
 # 导入socket模块（用于获取主机名）
 import socket
 
-# 全局实例
-unified_compensation_service = UnifiedCompensationService()
+# 延迟初始化全局实例
+_unified_compensation_service: Optional["UnifiedCompensationService"] = None
+
+
+def _get_unified_compensation_service() -> "UnifiedCompensationService":
+    """获取统一补偿服务实例（延迟初始化）"""
+    global _unified_compensation_service
+    if _unified_compensation_service is None:
+        _unified_compensation_service = UnifiedCompensationService()
+    return _unified_compensation_service
 
 
 async def start_unified_compensation():
     """启动统一补偿服务"""
     if settings.COMPENSATION_AUTO_START:
-        await unified_compensation_service.start()
+        await _get_unified_compensation_service().start()
 
 
 async def stop_unified_compensation():
     """停止统一补偿服务"""
-    await unified_compensation_service.stop()
+    if _unified_compensation_service is not None:
+        await _unified_compensation_service.stop()
 
 
 def get_compensation_service_stats() -> Dict[str, Any]:
     """获取补偿服务统计"""
-    return unified_compensation_service.get_compensation_stats()
+    return _get_unified_compensation_service().get_compensation_stats()
 
 
 async def get_compensation_health() -> Dict[str, Any]:

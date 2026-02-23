@@ -18,7 +18,7 @@ class SysTenant(Base):
     """租户表"""
     __tablename__ = "sys_tenant"
 
-    id = Column(BigInteger, primary_key=True, comment="租户ID，52位合成ID")
+    id = Column(String(64), primary_key=True, comment="租户ID（支持字符串类型，如'000000'）")
     tenant_name = Column(String(64), nullable=False, comment="租户名称")
     company_name = Column(String(128), nullable=False, comment="企业名称")
     contact_person = Column(String(64), nullable=False, comment="联系人")
@@ -49,7 +49,7 @@ class SysUser(Base):
 
     id = Column(BigInteger, primary_key=True, comment="用户ID，52位合成ID")
     user_name = Column(String(64), nullable=False, comment="用户名")
-    tenant_id = Column(BigInteger, nullable=False, comment="租户ID（内部关联）")
+    tenant_id = Column(String(64), nullable=False, comment="租户ID（支持字符串类型）")
     external_user_id = Column(String(128), nullable=True, comment="外部系统用户ID（综管平台等）")
     external_tenant_id = Column(String(128), nullable=True, comment="外部系统租户ID（原始字符串）")
 
@@ -88,7 +88,7 @@ class SysRole(Base):
     id = Column(BigInteger, primary_key=True, comment="角色ID，52位合成ID")
     role_name = Column(String(64), nullable=False, comment="角色名称")
     role_code = Column(String(64), nullable=False, comment="角色编码")
-    tenant_id = Column(BigInteger, nullable=False, comment="租户ID")
+    tenant_id = Column(String(64), nullable=False, comment="租户ID（支持字符串类型）")
     status = Column(Integer, default=0, comment="状态: 0(启用)、1(禁用)")
     data_scope = Column(Integer, default=1, comment="数据权限范围: 1(全部数据权限)、2(自定数据权限)、3(本部门数据权限)、4(本部门及以下数据权限)")
     sort_order = Column(Integer, default=0, comment="显示顺序")
@@ -172,7 +172,7 @@ class SysDept(Base):
     __tablename__ = "sys_dept"
 
     id = Column(BigInteger, primary_key=True, comment="部门ID，52位合成ID")
-    tenant_id = Column(BigInteger, nullable=False, comment="租户ID")
+    tenant_id = Column(String(64), nullable=False, comment="租户ID（支持字符串类型）")
     name = Column(String(50), nullable=False, comment="部门名称")
     parent_id = Column(BigInteger, nullable=True, comment="父部门ID")
     path = Column(String(255), nullable=False, comment="Materialized Path")
@@ -195,7 +195,7 @@ class SysPosition(Base):
     __tablename__ = "sys_position"
 
     id = Column(BigInteger, primary_key=True, comment="岗位ID，52位合成ID")
-    tenant_id = Column(BigInteger, nullable=False, comment="租户ID")
+    tenant_id = Column(String(64), nullable=False, comment="租户ID（支持字符串类型）")
     position_name = Column(String(128), nullable=False, comment="岗位名称")
     position_code = Column(String(64), nullable=True, comment="岗位编码")
     order_num = Column(Integer, default=0, comment="排序")

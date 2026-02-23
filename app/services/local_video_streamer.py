@@ -318,6 +318,27 @@ class LocalVideoStreamManager:
             logger.info("所有视频推流已停止")
 
 
-# 创建全局推流管理器实例
-local_video_stream_manager = LocalVideoStreamManager()
+# 创建全局推流管理器实例（延迟初始化）
+_local_video_stream_manager: Optional["LocalVideoStreamManager"] = None
+
+
+def get_local_video_stream_manager() -> "LocalVideoStreamManager":
+    """获取本地视频推流管理器实例（延迟初始化）"""
+    global _local_video_stream_manager
+    if _local_video_stream_manager is None:
+        _local_video_stream_manager = LocalVideoStreamManager()
+    return _local_video_stream_manager
+
+
+# 向后兼容的全局变量访问（使用属性）
+class _LocalVideoStreamManagerProxy:
+    """代理类，用于延迟初始化"""
+    def __getattr__(self, name):
+        return getattr(get_local_video_stream_manager(), name)
+
+    def __setattr__(self, name, value):
+        setattr(get_local_video_stream_manager(), name, value)
+
+
+local_video_stream_manager = _LocalVideoStreamManagerProxy()
 

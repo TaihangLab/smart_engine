@@ -206,6 +206,7 @@ config/local_*
 config/production_*
 config/.env*
 .env.*
+!.env.example
 secrets/
 private/
 

@@ -70,7 +70,7 @@ class TenantUpdate(BaseModel):
 
 class TenantResponse(BaseModel):
     """租户响应模型"""
-    id: int
+    id: str
     tenant_name: str
     company_name: Optional[str] = None
     contact_person: Optional[str] = None
@@ -136,7 +136,7 @@ class TenantResponse(BaseModel):
 
 class BatchDeleteTenantsRequest(BaseModel):
     """批量删除租户请求模型"""
-    tenant_ids: List[int] = Field(..., description="要删除的租户ID列表", min_items=1, max_items=100)
+    tenant_ids: List[str] = Field(..., description="要删除的租户ID列表", min_items=1, max_items=100)
 
     model_config = ConfigDict(
         populate_by_name=True

@@ -4,7 +4,6 @@
 """
 from typing import Optional, Dict, Any, Set
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
-from app.services.ai_task_executor import task_executor
 import logging
 import json
 import asyncio
@@ -65,11 +64,11 @@ async def websocket_detection_endpoint(
 ):
     """
     WebSocket端点: 推送实时检测结果
-    
+
     Args:
         websocket: WebSocket连接
         task_id: AI任务ID
-        
+
     推送数据格式:
     {
         "task_id": 1,
@@ -89,32 +88,35 @@ async def websocket_detection_endpoint(
         }
     }
     """
+    # 延迟导入 task_executor
+    from app.services.ai_task_executor import task_executor
+
     # 先检查任务是否在运行
     if task_id not in task_executor.running_tasks:
         logger.error(f"❌ 任务 {task_id} 未运行，拒绝WebSocket连接")
         await websocket.close(code=1008, reason=f"Task {task_id} is not running")
         return
-    
+
     if task_id not in task_executor.frame_processors:
         logger.error(f"❌ 任务 {task_id} 的帧处理器未初始化，拒绝WebSocket连接")
         await websocket.close(code=1008, reason=f"Task {task_id} frame processor not initialized")
         return
-    
+
     await connection_manager.connect(websocket, task_id)
-    
+
     try:
         # 持续推送检测结果
         while True:
             # 从任务执行器获取最新检测结果
             detection_result = task_executor.get_task_detection_result(task_id)
-            
+
             if detection_result:
                 # 发送检测结果
                 await websocket.send_json(detection_result)
-            
+
             # 控制推送频率 (约30fps)
             await asyncio.sleep(0.033)
-            
+
     except WebSocketDisconnect:
         connection_manager.disconnect(websocket, task_id)
     except Exception as e:
@@ -126,10 +128,10 @@ async def websocket_detection_endpoint(
 def get_detection_tasks_by_camera(camera_id: int):
     """
     获取指定摄像头的所有运行中的AI任务列表
-    
+
     Args:
         camera_id: 摄像头ID
-        
+
     Returns:
         {
             "code": 0,
@@ -144,15 +146,17 @@ def get_detection_tasks_by_camera(camera_id: int):
             ]
         }
     """
+    from app.services.ai_task_executor import task_executor
+
     try:
         tasks = task_executor.get_running_tasks_by_camera(camera_id)
-        
+
         return {
             "code": 0,
             "msg": "成功",
             "data": tasks
         }
-        
+
     except Exception as e:
         logger.error(f"❌ 获取任务列表失败: {str(e)}")
         return {
@@ -166,16 +170,18 @@ def get_detection_tasks_by_camera(camera_id: int):
 def get_detection_result(task_id: int):
     """
     获取指定任务的当前检测结果 (HTTP轮询方式)
-    
+
     Args:
         task_id: AI任务ID
-        
+
     Returns:
         检测结果数据
     """
+    from app.services.ai_task_executor import task_executor
+
     try:
         result = task_executor.get_task_detection_result(task_id)
-        
+
         if result:
             return {
                 "code": 0,
@@ -188,7 +194,7 @@ def get_detection_result(task_id: int):
                 "msg": "暂无检测结果",
                 "data": None
             }
-            
+
     except Exception as e:
         logger.error(f"❌ 获取检测结果失败: {str(e)}")
         return {

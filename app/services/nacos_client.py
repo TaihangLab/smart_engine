@@ -322,24 +322,34 @@ class NacosClient:
 
 
 # ================================================================
-# 🌟 全局实例
+# 🌟 延迟初始化全局实例
 # ================================================================
 
-nacos_client = NacosClient()
+_nacos_client: Optional["NacosClient"] = None
+
+
+def _get_nacos_client() -> "NacosClient":
+    """获取Nacos客户端实例（延迟初始化）"""
+    global _nacos_client
+    if _nacos_client is None:
+        _nacos_client = NacosClient()
+    return _nacos_client
 
 
 # 便捷接口函数
 def register_to_nacos() -> bool:
     """注册服务到Nacos"""
-    return nacos_client.register()
+    return _get_nacos_client().register()
 
 
 def deregister_from_nacos() -> bool:
     """从Nacos注销服务"""
-    return nacos_client.deregister()
+    if _nacos_client is not None:
+        return _nacos_client.deregister()
+    return True
 
 
 def get_nacos_service_info() -> Dict[str, Any]:
     """获取Nacos服务信息"""
-    return nacos_client.get_service_info()
+    return _get_nacos_client().get_service_info()
 

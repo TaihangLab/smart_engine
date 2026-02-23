@@ -9,13 +9,18 @@ from app.db.session import get_db
 from app.models.alert import AlertResponse
 from app.services.alert_service import alert_service
 from app.services.wvp_client import wvp_client
-from app.services.ai_task_executor import task_executor
 from app.services.alert_merge_manager import alert_merge_manager
 from app.services.adaptive_frame_reader import frame_reader_manager
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _get_task_executor():
+    """延迟导入 task_executor"""
+    from app.services.ai_task_executor import task_executor
+    return task_executor
 
 # 定义预警前置信息模型
 class PreviousAlert(BaseModel):
@@ -97,10 +102,10 @@ def get_channel_live_stream(
 async def get_executor_status():
     """获取AI任务执行器状态"""
     return {
-        "running_tasks": list(task_executor.running_tasks.keys()),
-        "task_count": len(task_executor.running_tasks),
-        "scheduler_running": task_executor.scheduler.running,
-        "scheduled_jobs": len(task_executor.scheduler.get_jobs())
+        "running_tasks": list(_get_task_executor().running_tasks.keys()),
+        "task_count": len(_get_task_executor().running_tasks),
+        "scheduler_running": _get_task_executor().scheduler.running,
+        "scheduled_jobs": len(_get_task_executor().scheduler.get_jobs())
     }
 
 @router.get("/alert-merge-status", response_model=Dict[str, Any])
@@ -112,7 +117,7 @@ async def get_alert_merge_status():
 async def get_task_performance(task_id: int):
     """获取任务性能报告"""
     # 检查任务是否在运行
-    if task_id not in task_executor.running_tasks:
+    if task_id not in _get_task_executor().running_tasks:
         return {"error": f"任务 {task_id} 未在运行"}
     
     # 这里可以扩展获取具体任务的性能数据
@@ -287,9 +292,9 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
         video_streams = 0
 
         try:
-            if task_executor:
-                running_tasks = len(task_executor.get_active_tasks())
-                scheduler_running = task_executor.scheduler.running
+            if _get_task_executor():
+                running_tasks = len(_get_task_executor().get_active_tasks())
+                scheduler_running = _get_task_executor().scheduler.running
                 video_streams = running_tasks
         except Exception as e:
             logger.warning(f"获取任务执行器状态失败: {str(e)}")
@@ -389,8 +394,8 @@ def get_device_statistics():
         # 从AI任务执行器获取活跃视频流数量
         video_streams = 0
         try:
-            if task_executor:
-                video_streams = len(task_executor.get_active_tasks())
+            if _get_task_executor():
+                video_streams = len(_get_task_executor().get_active_tasks())
         except Exception as e:
             logger.warning(f"获取活跃任务数失败: {str(e)}")
         

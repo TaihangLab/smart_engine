@@ -2419,8 +2419,10 @@ async def get_alert_forward_statistics(
     db: Session = Depends(get_db)
 ):
     """
-    获取报警转发统计（Mock数据版本）
-    
+    获取报警转发统计（真实数据版本）
+
+    统计通过 RabbitMQ 发布和 SSE 通知的报警数量
+
     返回格式:
     {
         "code": 0,
@@ -2428,16 +2430,18 @@ async def get_alert_forward_statistics(
         "data": {
             "forward_counts": [10, 20, 15, ...],  # 每日转发数量
             "date_labels": ["2024-01-01", "2024-01-02", ...],  # 日期标签
-            "total_forwards": 1000  # 总转发数
+            "total_forwards": 1000,  # 总转发数
+            "publish_count": 800,     # RabbitMQ发布数
+            "notification_count": 200  # SSE通知数
         }
     }
     """
     try:
         from datetime import timedelta
-        import random
-        
+        from app.db.compensation_dao import AlertPublishLogDAO, AlertNotificationLogDAO
+
         logger.info(f"收到获取报警转发统计请求: time_range={time_range}")
-        
+
         # 解析时间范围
         end_date = datetime.now()
         if time_range == "30d":
@@ -2446,31 +2450,55 @@ async def get_alert_forward_statistics(
             days = 7
         else:
             days = 7
-        
+
         start_date = end_date - timedelta(days=days)
-        
-        # 生成Mock数据
-        forward_counts = []
+
+        # 获取发布统计（RabbitMQ）
+        publish_stats = AlertPublishLogDAO.get_daily_statistics(db, start_date, end_date)
+        publish_total = AlertPublishLogDAO.get_total_count(db, start_date, end_date)
+
+        # 获取通知统计（SSE）
+        notification_stats = AlertNotificationLogDAO.get_daily_statistics(db, start_date, end_date)
+
+        # 构建日期标签和每日统计数据
         date_labels = []
-        
-        for i in range(days):
-            date = start_date + timedelta(days=i)
-            date_labels.append(date.strftime("%Y-%m-%d"))
-            # 随机生成转发数量 (50-200之间)
-            forward_counts.append(random.randint(50, 200))
-        
-        total_forwards = sum(forward_counts)
-        
+        forward_counts = []
+
+        # 创建日期映射字典
+        publish_dict = {item["date"]: item["count"] for item in publish_stats}
+        notification_dict = {item["date"]: item["count"] for item in notification_stats}
+
+        # 获取所有有数据的日期并排序
+        all_dates = set(publish_dict.keys()) | set(notification_dict.keys())
+        sorted_dates = sorted(all_dates)
+
+        for date_str in sorted_dates:
+            date_labels.append(date_str)
+            # 每日转发数 = 发布数 + 通知数
+            daily_count = publish_dict.get(date_str, 0) + notification_dict.get(date_str, 0)
+            forward_counts.append(daily_count)
+
+        # 如果没有数据，生成空的时间序列
+        if not date_labels:
+            for i in range(days):
+                date = start_date + timedelta(days=i)
+                date_labels.append(date.strftime("%Y-%m-%d"))
+                forward_counts.append(0)
+
+        total_forwards = publish_total
+
         return {
             "code": 0,
             "msg": "success",
             "data": {
                 "forward_counts": forward_counts,
                 "date_labels": date_labels,
-                "total_forwards": total_forwards
+                "total_forwards": total_forwards,
+                "publish_count": publish_total,
+                "notification_count": sum(notification_dict.values())
             }
         }
-        
+
     except Exception as e:
         logger.error(f"获取报警转发统计失败: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"获取报警转发统计失败: {str(e)}")

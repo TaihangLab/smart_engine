@@ -317,8 +317,13 @@ class RabbitMQClient:
     
     def subscribe_to_alerts(self, callback: Callable[[Dict[str, Any]], None]) -> None:
         """📮 智能订阅报警消息 - 增强状态管理"""
+        # 检查 RabbitMQ 是否启用
+        if not RABBITMQ_ENABLED or pika is None:
+            logger.info(f"⏭️ RabbitMQ客户端已禁用，跳过订阅")
+            return
+
         logger.info(f"📮 新增预警订阅者: {callback.__qualname__ if hasattr(callback, '__qualname__') else 'unknown'}")
-        
+
         # 🔧 确保连接状态
         if not self.is_connected:
             logger.info("🔄 检测到连接断开，重新连接...")

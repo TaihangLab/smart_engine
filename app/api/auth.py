@@ -512,13 +512,39 @@ async def get_user_permissions(
     """
     获取当前登录用户的权限码列表
     返回用户的所有权限码（permission_code数组），用于前端权限判断
+    超管用户返回所有权限码
     """
     try:
         # 获取当前用户信息
         from app.core.auth import get_current_user
         current_user = await get_current_user(request)
 
-        # 获取用户详细信息
+        # 检查是否为超管用户
+        if current_user.isSuperAdmin:
+            # 超管用户：使用缓存获取所有权限码
+            from app.services.cache_service import PermissionCacheService
+            all_permissions = PermissionCacheService.get_all_permissions(db)
+
+            permission_codes = [p.permission_code for p in all_permissions if p.permission_code] if all_permissions else []
+
+            logger.info(
+                f"[超管]获取所有权限码成功: {current_user.userName}, "
+                f"权限数: {len(permission_codes)}"
+            )
+
+            return UnifiedResponse(
+                success=True,
+                code=200,
+                message="获取权限码成功（超管）",
+                data={
+                    "user_id": current_user.userId,
+                    "user_name": current_user.userName,
+                    "permission_codes": permission_codes,
+                    "is_super_admin": True
+                }
+            )
+
+        # 非超管用户：获取用户详细信息
         user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
         if not user:
             return UnifiedResponse(
@@ -528,10 +554,10 @@ async def get_user_permissions(
                 data=None
             )
 
-        # 获取用户权限列表
-        from app.db.rbac import RbacDao
-        permission_objects = RbacDao.get_user_permissions(
-            db, user.user_name, user.tenant_id
+        # 使用缓存获取用户权限列表
+        from app.services.cache_service import PermissionCacheService
+        permission_objects = PermissionCacheService.get_user_permissions(
+            db, user.id, user.tenant_id
         )
 
         # 提取权限码
@@ -549,7 +575,8 @@ async def get_user_permissions(
             data={
                 "user_id": user.id,
                 "user_name": user.user_name,
-                "permission_codes": permission_codes
+                "permission_codes": permission_codes,
+                "is_super_admin": False
             }
         )
 
@@ -572,13 +599,39 @@ async def get_user_menu_tree(
     获取当前登录用户的菜单树结构
     返回用户权限组下的全部菜单（folder 和 menu 类型，排除 button）
     parent_id 为 null 的作为根节点
+    超管用户返回所有菜单
     """
     try:
         # 获取当前用户信息
         from app.core.auth import get_current_user
         current_user = await get_current_user(request)
 
-        # 获取用户详细信息
+        # 检查是否为超管用户
+        if current_user.isSuperAdmin:
+            # 超管用户：使用缓存获取所有菜单
+            from app.services.cache_service import MenuCacheService
+            menu_tree = MenuCacheService.get_all_menu_tree(db)
+
+            menu_tree = menu_tree if menu_tree else []
+
+            logger.info(
+                f"[超管]获取所有菜单树成功: {current_user.userName}, "
+                f"菜单节点数: {_count_tree_nodes(menu_tree)}"
+            )
+
+            return UnifiedResponse(
+                success=True,
+                code=200,
+                message="获取菜单树成功（超管）",
+                data={
+                    "user_id": current_user.userId,
+                    "user_name": current_user.userName,
+                    "menu_tree": menu_tree,
+                    "is_super_admin": True
+                }
+            )
+
+        # 非超管用户：获取用户详细信息
         user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
         if not user:
             return UnifiedResponse(
@@ -588,94 +641,11 @@ async def get_user_menu_tree(
                 data=None
             )
 
-        # 获取用户权限列表（包括所有类型的权限）
-        from app.db.rbac import RbacDao
-        from app.models.rbac import SysPermission
-        permission_objects = RbacDao.get_user_permissions(
-            db, user.user_name, user.tenant_id
-        )
-        permission_codes = {p.permission_code for p in permission_objects} if permission_objects else set()
+        # 使用缓存获取用户菜单树
+        from app.services.cache_service import MenuCacheService
+        menu_tree = MenuCacheService.get_user_menu_tree(db, user.id, user.tenant_id)
 
-        # 获取所有的 folder 和 menu 类型权限（完整树形结构）
-        all_menu_permissions = db.query(SysPermission).filter(
-            SysPermission.is_deleted == False,
-            SysPermission.permission_type.in_(["folder", "menu"])
-        ).order_by(SysPermission.sort_order, SysPermission.id).all()
-
-        # 构建菜单字典和获取用户有权访问的菜单权限码
-        menu_dict = {}
-        accessible_menu_codes = set()
-
-        for perm in all_menu_permissions:
-            # 检查用户是否有权限访问此菜单
-            # 如果菜单的 permission_code 在用户的权限列表中，则用户可以访问
-            if perm.permission_code in permission_codes:
-                accessible_menu_codes.add(perm.permission_code)
-
-            # 构建菜单节点
-            menu_dict[perm.id] = {
-                "id": perm.id,
-                "permission_name": perm.permission_name,
-                "permission_code": perm.permission_code,
-                "permission_type": perm.permission_type,
-                "parent_id": perm.parent_id,
-                "path": perm.path,
-                "component": perm.component,
-                "layout": perm.layout,
-                "visible": perm.visible,
-                "icon": perm.icon,
-                "sort_order": perm.sort_order,
-                "open_new_tab": perm.open_new_tab,
-                "keep_alive": perm.keep_alive,
-                "status": perm.status,
-                "children": []
-            }
-
-        # 构建树形结构：只保留用户有权访问的菜单
-        root_menus = []
-        for menu_id, menu_node in menu_dict.items():
-            # 判断用户是否有权访问此菜单
-            has_access = menu_node["permission_code"] in accessible_menu_codes
-
-            # 检查子节点中是否有用户有权访问的菜单
-            has_accessible_child = False
-            for other_menu in menu_dict.values():
-                if other_menu["parent_id"] == menu_id:
-                    if other_menu["permission_code"] in accessible_menu_codes:
-                        has_accessible_child = True
-                        break
-
-            # 只有用户有权访问，或者有可访问子节点的菜单才保留
-            if not has_access and not has_accessible_child:
-                continue
-
-            # 建立父子关系
-            if menu_node["parent_id"] is None:
-                # 根节点
-                root_menus.append(menu_node)
-            elif menu_node["parent_id"] in menu_dict:
-                # 添加到父节点的 children
-                parent = menu_dict[menu_node["parent_id"]]
-                # 只添加用户有权访问的子节点，或父节点本身也有权访问
-                if has_access or menu_node["permission_code"] in accessible_menu_codes:
-                    parent["children"].append(menu_node)
-
-        # 递归清理空 children 并排序
-        def clean_and_sort_tree(tree: list) -> list:
-            """清理空的 children 列表并按 sort_order 排序"""
-            result = []
-            for node in tree:
-                if node["children"]:
-                    node["children"] = clean_and_sort_tree(node["children"])
-                    # 如果有子节点，保留；否则移除空列表
-                    if not node["children"]:
-                        del node["children"]
-                result.append(node)
-            # 按 sort_order 排序
-            result.sort(key=lambda x: x["sort_order"])
-            return result
-
-        filtered_menu_tree = clean_and_sort_tree(root_menus)
+        menu_tree = menu_tree if menu_tree else []
 
         logger.info(
             f"获取用户菜单树成功: {user.user_name} (ID: {user.id}), "
@@ -690,7 +660,8 @@ async def get_user_menu_tree(
             data={
                 "user_id": user.id,
                 "user_name": user.user_name,
-                "menu_tree": filtered_menu_tree
+                "menu_tree": filtered_menu_tree,
+                "is_super_admin": False
             }
         )
 
@@ -754,6 +725,174 @@ def _count_tree_nodes(tree: list) -> int:
         if 'children' in node and node['children']:
             count += _count_tree_nodes(node['children'])
     return count
+
+
+# 缓存管理API
+@auth_router.get("/cache/stats", response_model=UnifiedResponse, summary="获取缓存统计信息")
+async def get_cache_stats(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    获取缓存统计信息
+    用于调试和监控缓存状态
+    """
+    try:
+        from app.services.cache_service import CacheManager
+
+        stats = CacheManager.get_cache_stats()
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取缓存统计成功",
+            data=stats
+        )
+    except Exception as e:
+        logger.error(f"获取缓存统计失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取缓存统计失败",
+            data=None
+        )
+
+
+@auth_router.post("/cache/clear", response_model=UnifiedResponse, summary="清除指定缓存")
+async def clear_cache(
+    request: Request,
+    db: Session = Depends(get_db),
+    user_id: Optional[int] = None,
+    tenant_id: Optional[str] = None,
+    clear_all: bool = False
+):
+    """
+    清除缓存
+
+    参数:
+    - user_id: 用户ID（清除该用户的所有缓存）
+    - tenant_id: 租户ID（清除该租户的所有缓存）
+    - clear_all: 清除所有缓存
+    """
+    try:
+        from app.services.cache_service import CacheManager
+
+        if clear_all:
+            CacheManager.invalidate_all()
+            message = "已清除所有缓存"
+        elif user_id is not None:
+            CacheManager.invalidate_user(user_id, tenant_id)
+            message = f"已清除用户 {user_id} 的缓存"
+        elif tenant_id is not None:
+            CacheManager.invalidate_tenant(tenant_id)
+            message = f"已清除租户 {tenant_id} 的缓存"
+        else:
+            return UnifiedResponse(
+                success=False,
+                code=400,
+                message="请提供 user_id、tenant_id 或 clear_all 参数",
+                data=None
+            )
+
+        logger.info(message)
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message=message,
+            data=None
+        )
+    except Exception as e:
+        logger.error(f"清除缓存失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="清除缓存失败",
+            data=None
+        )
+
+
+@auth_router.post("/user-info/refresh", response_model=UnifiedResponse, summary="刷新当前用户态")
+async def refresh_user_state(
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    """
+    刷新当前用户态
+    清除当前用户的缓存，重新构建用户信息并返回
+
+    前端刷新按钮调用此接口
+    """
+    try:
+        # 获取当前用户信息
+        from app.core.auth import get_current_user
+        current_user = await get_current_user(request)
+
+        # 清除当前用户的缓存
+        from app.services.cache_service import CacheManager
+        CacheManager.invalidate_user(int(current_user.userId), str(current_user.tenantId))
+
+        logger.info(f"刷新用户态: {current_user.userName} (ID: {current_user.userId})")
+
+        # 重新获取用户详细信息（会重新从数据库查询并缓存）
+        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        if not user:
+            return UnifiedResponse(
+                success=False,
+                code=404,
+                message="用户不存在",
+                data=None
+            )
+
+        # 获取用户角色
+        roles = AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
+
+        # 获取用户权限列表（使用缓存服务）
+        from app.services.cache_service import PermissionCacheService
+        permission_objects = PermissionCacheService.get_user_permissions(db, user.id, user.tenant_id)
+        permission_codes = [p.permission_code for p in permission_objects] if permission_objects else []
+
+        # 获取权限树（菜单结构）
+        from app.services.rbac_service import RbacService
+        permission_tree = RbacService.get_permission_tree(db)
+
+        # 构建用户信息响应
+        user_info = {
+            "userId": user.id,
+            "userName": user.user_name,
+            "nickName": user.nick_name,
+            "tenantId": user.tenant_id,
+            "deptId": user.dept_id,
+            "phone": user.phone,
+            "email": user.email,
+            "gender": user.gender,
+            "status": user.status,
+            "avatar": user.avatar,
+            "signature": user.signature,
+            "roles": roles,
+            "permissions": permission_codes,
+            "permissionTree": permission_tree,
+            "createTime": user.create_time.isoformat() if user.create_time else None,
+            "updateTime": user.update_time.isoformat() if user.update_time else None
+        }
+
+        logger.info(f"刷新用户态成功: {user.user_name} (ID: {user.id})")
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="刷新用户态成功",
+            data=user_info
+        )
+
+    except Exception as e:
+        logger.error(f"刷新用户态失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="刷新用户态失败",
+            data=None
+        )
 
 
 __all__ = ["auth_router"]

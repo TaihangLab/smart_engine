@@ -61,7 +61,7 @@ def _match_path_with_params(pattern: str, actual_path: str) -> bool:
     return True
 
 
-def _extract_tenant_id_from_path(request: Request) -> Optional[int]:
+def _extract_tenant_id_from_path(request: Request) -> Optional[str]:
     """
     从请求路径中提取租户ID
 
@@ -74,7 +74,7 @@ def _extract_tenant_id_from_path(request: Request) -> Optional[int]:
         request: FastAPI 请求对象
 
     Returns:
-        租户ID，如果路径中不包含租户ID则返回None
+        租户ID（字符串类型），如果路径中不包含租户ID则返回None
     """
     from typing import Optional
     path = request.url.path
@@ -85,7 +85,7 @@ def _extract_tenant_id_from_path(request: Request) -> Optional[int]:
         try:
             idx = parts.index('tenants')
             if idx + 1 < len(parts):
-                return int(parts[idx + 1])
+                return parts[idx + 1]  # 保持字符串类型
         except (ValueError, IndexError):
             pass
 
@@ -133,10 +133,14 @@ def _is_super_admin_user(user_info: Dict[str, Any]) -> bool:
 
 def parse_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    解析Base64编码的token，获取用户信息
+    解析Token，支持两种格式：
+    1. JWT token 格式（推荐）：header.payload.signature
+    2. Base64 编码的 JSON token（向后兼容）
 
     Args:
-        token: Base64编码的token字符串
+        token: Token字符串
+              JWT格式: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiAiMCJ9..."
+              Base64格式: "eyJ1c2VySWQiOiAiMCJ9..."
 
     Returns:
         解析后的用户信息字典，解析失败返回None
@@ -144,13 +148,36 @@ def parse_token(token: str) -> Optional[Dict[str, Any]]:
     try:
         logger.info(f"开始解析 token，长度: {len(token)}, 前50字符: {token[:50]}")
 
-        # Base64解码
+        # 尝试解析 JWT token（标准格式：header.payload.signature）
+        if '.' in token:
+            parts = token.split('.')
+            if len(parts) == 3:
+                # JWT 格式
+                try:
+                    # 只解析 payload 部分（中间部分），不验证签名
+                    payload_b64 = parts[1]
+                    # 添加必要的 base64 padding（base64url 编码可能缺少 padding）
+                    payload_b64 += '=' * (4 - len(payload_b64) % 4)
+                    # 使用 urlsafe_b64decode 解码 base64url 格式
+                    decoded_bytes = base64.urlsafe_b64decode(payload_b64.encode('utf-8'))
+                    decoded_str = decoded_bytes.decode('utf-8')
+
+                    logger.info(f"JWT 解码成功，内容: {decoded_str}")
+
+                    user_info = json.loads(decoded_str)
+
+                    logger.info(f"JSON 解析成功，用户信息: tenantId={user_info.get('tenantId')}, userId={user_info.get('userId')}, deptId={user_info.get('deptId')}")
+
+                    return user_info
+                except Exception as e:
+                    logger.debug(f"JWT Token解析失败: {str(e)}，尝试Base64格式")
+
+        # 尝试解析 Base64 编码的 JSON（向后兼容）
         decoded_bytes = base64.b64decode(token.encode('utf-8'))
         decoded_str = decoded_bytes.decode('utf-8')
 
         logger.info(f"Base64 解码成功，内容: {decoded_str}")
 
-        # 转换为JSON对象
         user_info = json.loads(decoded_str)
 
         logger.info(f"JSON 解析成功，用户信息: tenantId={user_info.get('tenantId')}, userId={user_info.get('userId')}, deptId={user_info.get('deptId')}")
@@ -181,27 +208,15 @@ def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
 
     # ========== 提取外部系统信息 ==========
     external_user_id = user_info.get('userId', '')  # 外部系统的用户ID（综管平台等）
-    external_tenant_id = user_info.get('tenantId', '')  # 外部系统的租户ID（可能为字符串"000000"）
+    external_tenant_id = user_info.get('tenantId', '1')  # 外部系统的租户ID，保持字符串类型
     user_name = user_info.get('userName', f'user_{external_user_id}')
 
     # ========== 处理租户ID ==========
-    # 外部租户ID可能是字符串（如"000000"），需要转换为内部整数租户ID
-    if isinstance(external_tenant_id, str):
-        try:
-            internal_tenant_id = int(external_tenant_id)
-        except ValueError:
-            # 无法转换（如"000000"会被int()转为0），使用默认租户1
-            internal_tenant_id = 1
-            logger.warning(f"外部租户ID '{external_tenant_id}' 无法转换为整数，使用默认租户1")
-    else:
-        internal_tenant_id = int(external_tenant_id)
-
     # 租户0是模板租户，不允许外部用户使用
-    if internal_tenant_id == 0:
-        internal_tenant_id = 1
+    tenant_id = external_tenant_id
+    if tenant_id == '0' or tenant_id == 0:
+        tenant_id = '1'
         logger.warning(f"外部租户ID为0（模板租户），改为使用默认租户1")
-
-    tenant_id = internal_tenant_id
 
     # ========== 处理部门ID ==========
     if 'deptId' not in user_info or user_info['deptId'] is None:
@@ -449,7 +464,7 @@ def _build_user_state(db, user, role: Optional[Any], dept_id: int, dept_name: st
         userId=str(user.id),
         userName=user.user_name,
         deptName=dept_name,
-        tenantId=tenant_id,
+        tenantId=tenant_id,  # 已经是字符串类型，无需转换
         deptId=dept_id,
         roleId=role.id if role else None,
         roleCode=role.role_code if role else None,
@@ -604,7 +619,11 @@ def ensure_dept_exists(dept_info: Dict[str, Any], db):
 
     dept_name = dept_info.get('deptName')
     if not dept_name:
-        raise ValueError("部门信息中缺少必需的 deptName 字段")
+        # 生成默认部门名称
+        dept_id = dept_info.get('deptId', 0)
+        tenant_id = dept_info.get('tenantId', '1')
+        dept_name = f'{tenant_id}_默认部门_{dept_id}'
+        logger.debug(f"部门名称为空，使用默认值: {dept_name}")
 
     parent_id = dept_info.get('parentId')  # 允许为None
 
@@ -798,7 +817,15 @@ async def auth_middleware(request: Request, call_next):
         # 鉴权：检查请求路径和方法是否在用户权限中
         request_path = request.url.path
         request_method = request.method
-        tenant_id = user_state.tenantId or 0
+        tenant_id = user_state.tenantId
+
+        # 鉴权必须要有有效的租户ID
+        if not tenant_id:
+            logger.error(f"鉴权失败：用户态中缺少 tenantId，用户: {user_state.userName}")
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="认证信息不完整：缺少租户信息"
+            )
 
         from app.models.rbac.rbac_constants import TenantConstants
 

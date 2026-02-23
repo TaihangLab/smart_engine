@@ -573,8 +573,29 @@ class FrameReaderManager:
         logger.info("全局帧读取器管理池已关闭")
 
 
-# 全局实例
-frame_reader_manager = FrameReaderManager()
+# 全局实例（延迟初始化）
+_frame_reader_manager: Optional["FrameReaderManager"] = None
+
+
+def get_frame_reader_manager() -> "FrameReaderManager":
+    """获取帧读取器管理器实例（延迟初始化）"""
+    global _frame_reader_manager
+    if _frame_reader_manager is None:
+        _frame_reader_manager = FrameReaderManager()
+    return _frame_reader_manager
+
+
+# 向后兼容的全局变量访问（使用属性）
+class _FrameReaderManagerProxy:
+    """代理类，用于延迟初始化"""
+    def __getattr__(self, name):
+        return getattr(get_frame_reader_manager(), name)
+
+    def __setattr__(self, name, value):
+        setattr(get_frame_reader_manager(), name, value)
+
+
+frame_reader_manager = _FrameReaderManagerProxy()
 
 
 class AdaptiveFrameReader:

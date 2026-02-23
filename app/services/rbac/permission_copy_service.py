@@ -145,16 +145,23 @@ class PermissionCopyService:
         return paths
 
     @staticmethod
-    def ensure_role_has_permissions(db: Session, tenant_id: int) -> SysRole:
+    def ensure_role_has_permissions(db: Session, tenant_id: str) -> SysRole:
         """确保租户的ROLE_ACCESS角色有权限，没有则从租户0复制
 
         Args:
             db: 数据库会话
-            tenant_id: 租户ID
+            tenant_id: 租户ID（字符串类型）
 
         Returns:
             ROLE_ACCESS角色对象
         """
+        # 转换租户ID为整数，用于ID生成
+        try:
+            tenant_id_int = int(tenant_id)
+        except ValueError:
+            # 如果租户ID是字符串（如"000000"），使用哈希值
+            tenant_id_int = abs(hash(tenant_id)) % 1000000000
+
         # 获取或创建租户的ROLE_ACCESS角色
         role = db.query(SysRole).filter(
             SysRole.tenant_id == tenant_id,
@@ -164,7 +171,7 @@ class PermissionCopyService:
 
         if not role:
             # 创建ROLE_ACCESS角色
-            role_id = generate_id(tenant_id, "role_access")
+            role_id = generate_id(tenant_id_int, "role_access")
             role = SysRole(
                 id=role_id,
                 role_code=RoleConstants.ROLE_ACCESS,
@@ -193,7 +200,7 @@ class PermissionCopyService:
 
             copied_count = 0
             for perm in template_permissions:
-                assoc_id = generate_id(tenant_id, "role_permission")
+                assoc_id = generate_id(tenant_id_int, "role_permission")
                 role_perm = SysRolePermission(
                     id=assoc_id,
                     role_id=role.id,
