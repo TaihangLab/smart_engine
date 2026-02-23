@@ -2,12 +2,12 @@
 # -*- coding: utf-8 -*-
 
 """
-租户管理服务
+租户管理服务（异步）
 """
 
 import logging
 from typing import Optional, Dict, Any, List
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.rbac import RbacDao
 from app.models.rbac import SysTenant, PackageType
 
@@ -15,20 +15,21 @@ logger = logging.getLogger(__name__)
 
 
 class TenantService:
-    """租户管理服务"""
-    @staticmethod
-    def get_tenant_by_id(db: Session, id: int) -> Optional[SysTenant]:
-        """根据租户ID获取租户"""
-        return RbacDao.tenant.get_tenant_by_id(db, id)
+    """租户管理服务（异步）"""
 
     @staticmethod
-    def get_tenant_by_company_code(db: Session, company_code: str) -> Optional[SysTenant]:
-        """根据统一社会信用代码获取租户"""
-        return RbacDao.tenant.get_tenant_by_company_code(db, company_code)
+    async def get_tenant_by_id(db: AsyncSession, id: int) -> Optional[SysTenant]:
+        """根据租户ID获取租户（异步）"""
+        return await RbacDao.tenant.get_tenant_by_id(db, id)
 
     @staticmethod
-    def create_tenant(db: Session, tenant_data: Dict[str, Any]) -> SysTenant:
-        """创建租户"""
+    async def get_tenant_by_company_code(db: AsyncSession, company_code: str) -> Optional[SysTenant]:
+        """根据统一社会信用代码获取租户（异步）"""
+        return await RbacDao.tenant.get_tenant_by_company_code(db, company_code)
+
+    @staticmethod
+    async def create_tenant(db: AsyncSession, tenant_data: Dict[str, Any]) -> SysTenant:
+        """创建租户（异步）"""
         from app.models.rbac.rbac_constants import TenantConstants
 
         # 检查是否尝试创建租户0（模板租户）
@@ -38,7 +39,7 @@ class TenantService:
         # 检查统一社会信用代码是否已存在
         company_code = tenant_data.get("company_code")
         if company_code:
-            existing_tenant = RbacDao.tenant.get_tenant_by_company_code(db, company_code)
+            existing_tenant = await RbacDao.tenant.get_tenant_by_company_code(db, company_code)
             if existing_tenant:
                 raise ValueError(f"统一社会信用代码 {company_code} 已存在")
 
@@ -95,97 +96,96 @@ class TenantService:
 
         tenant = SysTenant(**valid_fields)
         db.add(tenant)
-        db.commit()
-        db.refresh(tenant)
+        await db.commit()
+        await db.refresh(tenant)
         logger.info(f"创建租户成功: {tenant.tenant_name} (ID: {tenant.id})，套餐: {tenant.package}")
         return tenant
 
-
     @staticmethod
-    def update_tenant_by_id(db: Session, id: int, update_data: Dict[str, Any]) -> Optional[SysTenant]:
-        """更新租户信息（通过租户ID）"""
+    async def update_tenant_by_id(db: AsyncSession, id: int, update_data: Dict[str, Any]) -> Optional[SysTenant]:
+        """更新租户信息（通过租户ID）（异步）"""
         # 验证套餐字段
         if "package" in update_data:
             package = update_data["package"]
             if package not in [pkg.value for pkg in PackageType]:
                 raise ValueError(f"无效的套餐类型: {package}，允许的值: {[pkg.value for pkg in PackageType]}")
 
-        updated_tenant = RbacDao.tenant.update_tenant_by_id(db, id, update_data)
+        updated_tenant = await RbacDao.tenant.update_tenant_by_id(db, id, update_data)
         if updated_tenant:
             logger.info(f"更新租户成功: {updated_tenant.tenant_name}，套餐: {updated_tenant.package}")
         return updated_tenant
 
     @staticmethod
-    def delete_tenant(db: Session, tenant_id: str) -> bool:
-        """删除租户（通过租户编码）"""
-        tenant = RbacDao.tenant.get_tenant_by_id(db, tenant_id)
+    async def delete_tenant(db: AsyncSession, tenant_id: str) -> bool:
+        """删除租户（通过租户编码）（异步）"""
+        tenant = await RbacDao.tenant.get_tenant_by_id(db, tenant_id)
         if not tenant:
             return False
 
-        success = RbacDao.tenant.delete_tenant(db, tenant_id)
+        success = await RbacDao.tenant.delete_tenant(db, tenant_id)
         if success:
             logger.info(f"删除租户成功: {tenant.tenant_name}")
         return success
 
     @staticmethod
-    def delete_tenant_by_id(db: Session, id: int) -> bool:
-        """删除租户（通过租户ID）"""
-        tenant = RbacDao.tenant.get_tenant_by_id(db, id)
+    async def delete_tenant_by_id(db: AsyncSession, id: int) -> bool:
+        """删除租户（通过租户ID）（异步）"""
+        tenant = await RbacDao.tenant.get_tenant_by_id(db, id)
         if not tenant:
             return False
 
-        success = RbacDao.tenant.delete_tenant_by_id(db, id)
+        success = await RbacDao.tenant.delete_tenant_by_id(db, id)
         if success:
             logger.info(f"删除租户成功: {tenant.tenant_name}")
         return success
 
     @staticmethod
-    def get_all_tenants(db: Session, skip: int = 0, limit: int = 100) -> List[SysTenant]:
-        """获取所有租户"""
-        return RbacDao.tenant.get_all_tenants(db, skip, limit)
+    async def get_all_tenants(db: AsyncSession, skip: int = 0, limit: int = 100) -> List[SysTenant]:
+        """获取所有租户（异步）"""
+        return await RbacDao.tenant.get_all_tenants(db, skip, limit)
 
     @staticmethod
-    def get_tenant_count(db: Session) -> int:
-        """获取租户总数"""
-        return RbacDao.tenant.get_tenant_count(db)
+    async def get_tenant_count(db: AsyncSession) -> int:
+        """获取租户总数（异步）"""
+        return await RbacDao.tenant.get_tenant_count(db)
 
     @staticmethod
-    def get_tenants_by_name(db: Session, tenant_name: str, skip: int = 0, limit: int = 100) -> List[SysTenant]:
-        """根据租户名称获取租户列表"""
-        return RbacDao.tenant.get_tenants_by_name(db, tenant_name, skip, limit)
+    async def get_tenants_by_name(db: AsyncSession, tenant_name: str, skip: int = 0, limit: int = 100) -> List[SysTenant]:
+        """根据租户名称获取租户列表（异步）"""
+        return await RbacDao.tenant.get_tenants_by_name(db, tenant_name, skip, limit)
 
     @staticmethod
-    def get_tenant_count_by_name(db: Session, tenant_name: str) -> int:
-        """根据租户名称获取租户数量"""
-        return RbacDao.tenant.get_tenant_count_by_name(db, tenant_name)
+    async def get_tenant_count_by_name(db: AsyncSession, tenant_name: str) -> int:
+        """根据租户名称获取租户数量（异步）"""
+        return await RbacDao.tenant.get_tenant_count_by_name(db, tenant_name)
 
     @staticmethod
-    def get_tenants_by_company_name(db: Session, company_name: str, skip: int = 0, limit: int = 100) -> List[SysTenant]:
-        """根据企业名称获取租户列表"""
-        return RbacDao.tenant.get_tenants_by_company_name(db, company_name, skip, limit)
+    async def get_tenants_by_company_name(db: AsyncSession, company_name: str, skip: int = 0, limit: int = 100) -> List[SysTenant]:
+        """根据企业名称获取租户列表（异步）"""
+        return await RbacDao.tenant.get_tenants_by_company_name(db, company_name, skip, limit)
 
     @staticmethod
-    def get_tenant_count_by_company_name(db: Session, company_name: str) -> int:
-        """根据企业名称获取租户数量"""
-        return RbacDao.tenant.get_tenant_count_by_company_name(db, company_name)
+    async def get_tenant_count_by_company_name(db: AsyncSession, company_name: str) -> int:
+        """根据企业名称获取租户数量（异步）"""
+        return await RbacDao.tenant.get_tenant_count_by_company_name(db, company_name)
 
     @staticmethod
-    def get_tenants_by_status(db: Session, status: int, skip: int = 0, limit: int = 100) -> List[SysTenant]:
-        """根据状态获取租户列表"""
-        return RbacDao.tenant.get_tenants_by_status(db, status, skip, limit)
+    async def get_tenants_by_status(db: AsyncSession, status: int, skip: int = 0, limit: int = 100) -> List[SysTenant]:
+        """根据状态获取租户列表（异步）"""
+        return await RbacDao.tenant.get_tenants_by_status(db, status, skip, limit)
 
     @staticmethod
-    def get_tenant_count_by_status(db: Session, status: int) -> int:
-        """根据状态获取租户数量"""
-        return RbacDao.tenant.get_tenant_count_by_status(db, status)
+    async def get_tenant_count_by_status(db: AsyncSession, status: int) -> int:
+        """根据状态获取租户数量（异步）"""
+        return await RbacDao.tenant.get_tenant_count_by_status(db, status)
 
     @staticmethod
-    def export_tenants_data(db: Session,
-                           tenant_name: str = None,
-                           company_name: str = None,
-                           status: int = None) -> List[Dict[str, Any]]:
-        """导出租户数据"""
-        tenants = RbacDao.tenant.get_filtered_tenants_for_export(
+    async def export_tenants_data(db: AsyncSession,
+                                  tenant_name: str = None,
+                                  company_name: str = None,
+                                  status: int = None) -> List[Dict[str, Any]]:
+        """导出租户数据（异步）"""
+        tenants = await RbacDao.tenant.get_filtered_tenants_for_export(
             db,
             tenant_name=tenant_name,
             company_name=company_name,
@@ -213,14 +213,14 @@ class TenantService:
         ]
 
     @staticmethod
-    def batch_delete_tenants_by_ids(db: Session, tenant_ids: List[int]) -> Dict[str, Any]:
-        """按ID批量删除租户"""
+    async def batch_delete_tenants_by_ids(db: AsyncSession, tenant_ids: List[int]) -> Dict[str, Any]:
+        """按ID批量删除租户（异步）"""
         # 检查是否存在正在删除的租户
-        existing_tenants = RbacDao.tenant.get_tenants_by_ids(db, tenant_ids)
+        existing_tenants = await RbacDao.tenant.get_tenants_by_ids(db, tenant_ids)
         existing_ids = {tenant.id for tenant in existing_tenants}
 
         # 实际删除的租户数量
-        deleted_count = RbacDao.tenant.batch_delete_tenants_by_ids(db, tenant_ids)
+        deleted_count = await RbacDao.tenant.batch_delete_tenants_by_ids(db, tenant_ids)
 
         # 返回删除结果
         return {
