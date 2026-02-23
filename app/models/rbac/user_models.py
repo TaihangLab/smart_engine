@@ -85,14 +85,16 @@ class UserListResponse(BaseModel):
         populate_by_name=True
     )
 
-    @validator('email', pre=True, always=True)
+    @field_validator('email', mode='before')
+    @classmethod
     def parse_email(cls, v):
         """处理email字段，将空字符串转换为None"""
         if v is None or v == '':
             return None
         return str(v) if v else None
 
-    @validator('create_time', pre=True, always=True)
+    @field_validator('create_time', mode='before')
+    @classmethod
     def parse_datetime(cls, v):
         """处理无效的日期时间值"""
         if v is None:
