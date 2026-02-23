@@ -1,77 +1,92 @@
 from typing import List, Optional
-from sqlalchemy.orm import Session
-from sqlalchemy import and_, desc
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, desc, select, func, exists
 from app.models.rbac import SysUser, SysPosition, SysUserRole
 
 
 class UserDao:
-    """用户数据访问对象"""
+    """用户数据访问对象（异步）"""
 
     @staticmethod
-    def get_user_by_user_name(db: Session, user_name: str, tenant_id: int) -> Optional[SysUser]:
-        """根据用户名和租户ID获取用户"""
-        return db.query(SysUser).filter(
-            SysUser.user_name == user_name,
-            SysUser.tenant_id == tenant_id,
-            SysUser.is_deleted == False
-        ).first()
+    async def get_user_by_user_name(db: AsyncSession, user_name: str, tenant_id: int) -> Optional[SysUser]:
+        """根据用户名和租户ID获取用户（异步）"""
+        result = await db.execute(
+            select(SysUser).filter(
+                SysUser.user_name == user_name,
+                SysUser.tenant_id == tenant_id,
+                SysUser.is_deleted == False
+            )
+        )
+        return result.scalars().first()
 
     @staticmethod
-    def get_user_by_user_name_and_tenant_id(db: Session, user_name: str, tenant_id: int) -> Optional[SysUser]:
-        """根据用户名和租户ID获取用户（别名方法）"""
-        return UserDao.get_user_by_user_name(db, user_name, tenant_id)
+    async def get_user_by_user_name_and_tenant_id(db: AsyncSession, user_name: str, tenant_id: int) -> Optional[SysUser]:
+        """根据用户名和租户ID获取用户（别名方法，异步）"""
+        return await UserDao.get_user_by_user_name(db, user_name, tenant_id)
 
     @staticmethod
-    def get_user_by_id(db: Session, user_id: int) -> Optional[SysUser]:
-        """根据主键ID获取用户"""
-        return db.query(SysUser).filter(
-            SysUser.id == user_id,
-            SysUser.is_deleted == False
-        ).first()
+    async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[SysUser]:
+        """根据主键ID获取用户（异步）"""
+        result = await db.execute(
+            select(SysUser).filter(
+                SysUser.id == user_id,
+                SysUser.is_deleted == False
+            )
+        )
+        return result.scalars().first()
 
     @staticmethod
-    def get_user_by_user_id_and_tenant_id(db: Session, user_id: str, tenant_id: int) -> Optional[SysUser]:
+    async def get_user_by_user_id_and_tenant_id(db: AsyncSession, user_id: str, tenant_id: int) -> Optional[SysUser]:
         """
-        根据userId和tenantId获取用户
+        根据userId和tenantId获取用户（异步）
         文档要求：根据 tenantId + userId 检查用户
-        
+
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             user_id: 用户ID（可能是字符串形式的数字ID）
             tenant_id: 租户ID
-            
+
         Returns:
             用户对象或None
         """
         try:
             # 尝试将user_id转换为整数（如果是数字ID）
             user_id_int = int(user_id)
-            return db.query(SysUser).filter(
-                SysUser.id == user_id_int,
-                SysUser.tenant_id == tenant_id,
-                SysUser.is_deleted == False
-            ).first()
+            result = await db.execute(
+                select(SysUser).filter(
+                    SysUser.id == user_id_int,
+                    SysUser.tenant_id == tenant_id,
+                    SysUser.is_deleted == False
+                )
+            )
+            return result.scalars().first()
         except (ValueError, TypeError):
             # 如果user_id不是数字，可能是用户名，尝试按user_name查询（向后兼容）
-            return db.query(SysUser).filter(
-                SysUser.user_name == user_id,
-                SysUser.tenant_id == tenant_id,
-                SysUser.is_deleted == False
-            ).first()
+            result = await db.execute(
+                select(SysUser).filter(
+                    SysUser.user_name == user_id,
+                    SysUser.tenant_id == tenant_id,
+                    SysUser.is_deleted == False
+                )
+            )
+            return result.scalars().first()
 
     @staticmethod
-    def get_users_by_tenant_id(db: Session, tenant_id: int, skip: int = 0, limit: int = 100) -> List[SysUser]:
-        """根据租户ID获取用户列表"""
+    async def get_users_by_tenant_id(db: AsyncSession, tenant_id: int, skip: int = 0, limit: int = 100) -> List[SysUser]:
+        """根据租户ID获取用户列表（异步）"""
         if tenant_id is None or tenant_id < 0:
             raise ValueError("tenant_id 必须是有效的正整数")
-        return db.query(SysUser).filter(
-            SysUser.tenant_id == tenant_id,
-            SysUser.is_deleted == False
-        ).order_by(desc(SysUser.update_time)).offset(skip).limit(limit).all()
+        result = await db.execute(
+            select(SysUser).filter(
+                SysUser.tenant_id == tenant_id,
+                SysUser.is_deleted == False
+            ).order_by(desc(SysUser.update_time)).offset(skip).limit(limit)
+        )
+        return list(result.scalars().all())
 
     @staticmethod
-    def create_user(db: Session, user_data: dict) -> SysUser:
-        """创建用户"""
+    async def create_user(db: AsyncSession, user_data: dict) -> SysUser:
+        """创建用户（异步）"""
         # 如果没有提供ID，则生成新的ID
         if 'id' not in user_data:
             # 从tenant_id生成租户ID用于ID生成器
@@ -90,52 +105,63 @@ class UserDao:
 
         user = SysUser(**user_data)
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
         return user
 
     @staticmethod
-    def update_user(db: Session, user_id: int, update_data: dict) -> Optional[SysUser]:
-        """更新用户信息"""
-        user = db.query(SysUser).filter(SysUser.id == user_id).first()
+    async def update_user(db: AsyncSession, user_id: int, update_data: dict) -> Optional[SysUser]:
+        """更新用户信息（异步）"""
+        result = await db.execute(
+            select(SysUser).filter(SysUser.id == user_id)
+        )
+        user = result.scalars().first()
         if user:
             for key, value in update_data.items():
                 if hasattr(user, key):
                     setattr(user, key, value)
-            db.commit()
-            db.refresh(user)
+            await db.commit()
+            await db.refresh(user)
         return user
 
     @staticmethod
-    def delete_user(db: Session, user_id: int) -> bool:
-        """删除用户"""
-        user = db.query(SysUser).filter(SysUser.id == user_id).first()
+    async def delete_user(db: AsyncSession, user_id: int) -> bool:
+        """删除用户（异步）"""
+        result = await db.execute(
+            select(SysUser).filter(SysUser.id == user_id)
+        )
+        user = result.scalars().first()
         if user:
             user.is_deleted = True
-            db.commit()
-            db.refresh(user)
+            await db.commit()
+            await db.refresh(user)
             return True
         return False
 
     @staticmethod
-    def get_user_count_by_tenant_id(db: Session, tenant_id: int) -> int:
-        """根据租户ID获取用户数量"""
+    async def get_user_count_by_tenant_id(db: AsyncSession, tenant_id: int) -> int:
+        """根据租户ID获取用户数量（异步）"""
         if tenant_id is None or tenant_id < 0:
             raise ValueError("tenant_id 必须是有效的正整数")
-        return db.query(SysUser).filter(
-            SysUser.tenant_id == tenant_id,
-            SysUser.is_deleted == False
-        ).count()
+        result = await db.execute(
+            select(func.count()).select_from(
+                select(SysUser).filter(
+                    SysUser.tenant_id == tenant_id,
+                    SysUser.is_deleted == False
+                ).subquery()
+            )
+        )
+        return result.scalar() or 0
 
     @staticmethod
-    def get_users_advanced_search(db: Session, tenant_id: int, user_name: str = None, nick_name: str = None,
+    async def get_users_advanced_search(db: AsyncSession, tenant_id: int, user_name: str = None, nick_name: str = None,
                                   phone: str = None, status: int = None, dept_id: int = None,
                                   gender: int = None, position_code: str = None, role_code: str = None,
                                   skip: int = 0, limit: int = 100) -> List[SysUser]:
-        """根据租户ID高级搜索用户
+        """根据租户ID高级搜索用户（异步）
 
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             tenant_id: 租户ID
             user_name: 用户名（模糊查询）
             nick_name: 昵称（模糊查询）
@@ -149,58 +175,59 @@ class UserDao:
             limit: 限制返回的记录数
         """
         # 基础查询
-        query = db.query(SysUser).filter(
+        stmt = select(SysUser).filter(
             SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False
         )
 
         if user_name:
-            query = query.filter(SysUser.user_name.contains(user_name))
+            stmt = stmt.filter(SysUser.user_name.contains(user_name))
         if nick_name:
-            query = query.filter(SysUser.nick_name.contains(nick_name))
+            stmt = stmt.filter(SysUser.nick_name.contains(nick_name))
         if phone:
-            query = query.filter(SysUser.phone.contains(phone))
+            stmt = stmt.filter(SysUser.phone.contains(phone))
         if status is not None:
-            query = query.filter(SysUser.status == status)
+            stmt = stmt.filter(SysUser.status == status)
         if dept_id is not None:
-            query = query.filter(SysUser.dept_id == dept_id)
+            stmt = stmt.filter(SysUser.dept_id == dept_id)
         if gender is not None:
-            query = query.filter(SysUser.gender == gender)
+            stmt = stmt.filter(SysUser.gender == gender)
 
         # 如果需要按岗位查询，通过岗位ID关联
         if position_code:
             # 通过子查询找到符合条件的岗位ID，然后与用户关联
-            position_ids = db.query(SysPosition.id).filter(
+            position_subq = select(SysPosition.id).filter(
                 SysPosition.position_code.contains(position_code),
                 SysPosition.tenant_id == tenant_id
             ).subquery()
 
             # 通过岗位ID关联用户
-            query = query.filter(SysUser.position_id.in_(db.query(position_ids.c.id).subquery()))
+            stmt = stmt.filter(SysUser.position_id.in_(select(position_subq.c.id)))
 
         # 如果需要按角色查询
         if role_code:
             # 使用EXISTS子查询来检查用户是否具有特定角色
-            role_exists = db.query(SysUserRole).filter(
+            role_exists_subq = select(SysUserRole).filter(
                 SysUserRole.user_name == SysUser.user_name,
                 SysUserRole.role_code == role_code,
                 SysUserRole.tenant_id == tenant_id
-            ).exists()
-            query = query.filter(role_exists)
+            )
+            stmt = stmt.filter(exists(role_exists_subq))
 
         # 去重，因为一个用户可能有多个角色
-        query = query.distinct()
+        stmt = stmt.distinct().offset(skip).limit(limit)
 
-        return query.offset(skip).limit(limit).all()
+        result = await db.execute(stmt)
+        return list(result.scalars().all())
 
     @staticmethod
-    def get_user_count_advanced_search(db: Session, tenant_id: int, user_name: str = None, nick_name: str = None,
+    async def get_user_count_advanced_search(db: AsyncSession, tenant_id: int, user_name: str = None, nick_name: str = None,
                                        phone: str = None, status: int = None, dept_id: int = None,
                                        gender: int = None, position_code: str = None, role_code: str = None) -> int:
-        """高级搜索用户数量统计
+        """高级搜索用户数量统计（异步）
 
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             tenant_id: 租户ID
             user_name: 用户名（模糊查询）
             nick_name: 昵称（模糊查询）
@@ -211,59 +238,71 @@ class UserDao:
             position_code: 岗位编码（关联查询）
             role_code: 角色编码（关联查询）
         """
-        query = db.query(SysUser).filter(
+        # 基础查询
+        stmt = select(func.count()).select_from(
+            select(SysUser).filter(
+                SysUser.tenant_id == tenant_id,
+                SysUser.is_deleted == False
+            ).subquery()
+        )
+
+        # 由于需要应用所有过滤条件，我们采用不同的方式
+        # 先构建用户的查询
+        user_stmt = select(SysUser).filter(
             SysUser.tenant_id == tenant_id,
             SysUser.is_deleted == False
         )
 
         if user_name:
-            query = query.filter(SysUser.user_name.contains(user_name))
+            user_stmt = user_stmt.filter(SysUser.user_name.contains(user_name))
         if nick_name:
-            query = query.filter(SysUser.nick_name.contains(nick_name))
+            user_stmt = user_stmt.filter(SysUser.nick_name.contains(nick_name))
         if phone:
-            query = query.filter(SysUser.phone.contains(phone))
+            user_stmt = user_stmt.filter(SysUser.phone.contains(phone))
         if status is not None:
-            query = query.filter(SysUser.status == status)
+            user_stmt = user_stmt.filter(SysUser.status == status)
         if dept_id is not None:
-            query = query.filter(SysUser.dept_id == dept_id)
+            user_stmt = user_stmt.filter(SysUser.dept_id == dept_id)
         if gender is not None:
-            query = query.filter(SysUser.gender == gender)
+            user_stmt = user_stmt.filter(SysUser.gender == gender)
 
         # 如果需要按岗位查询
         if position_code:
-            # 通过子查询找到符合条件的岗位ID，然后与用户关联
-            position_ids = db.query(SysPosition.id).filter(
+            position_subq = select(SysPosition.id).filter(
                 SysPosition.position_code.contains(position_code),
                 SysPosition.tenant_id == tenant_id
             ).subquery()
-
-            # 通过岗位ID关联用户
-            query = query.filter(SysUser.position_id.in_(db.query(position_ids.c.id).subquery()))
+            user_stmt = user_stmt.filter(SysUser.position_id.in_(select(position_subq.c.id)))
 
         # 如果需要按角色查询
         if role_code:
-            # 使用EXISTS子查询来检查用户是否具有特定角色
-            role_exists = db.query(SysUserRole).filter(
+            role_exists_subq = select(SysUserRole).filter(
                 SysUserRole.user_name == SysUser.user_name,
                 SysUserRole.role_code == role_code,
                 SysUserRole.tenant_id == tenant_id
-            ).exists()
-            query = query.filter(role_exists)
+            )
+            user_stmt = user_stmt.filter(exists(role_exists_subq))
 
-        return query.count()
+        # 统计去重后的数量
+        count_stmt = select(func.count()).select_from(user_stmt.distinct().subquery())
+        result = await db.execute(count_stmt)
+        return result.scalar() or 0
 
     @staticmethod
-    def delete_user_by_username_and_tenant_id(db: Session, tenant_id: int, user_name: str) -> bool:
-        """根据用户名和租户ID删除用户"""
-        user = db.query(SysUser).filter(
-            SysUser.user_name == user_name,
-            SysUser.tenant_id == tenant_id
-        ).first()
+    async def delete_user_by_username_and_tenant_id(db: AsyncSession, tenant_id: int, user_name: str) -> bool:
+        """根据用户名和租户ID删除用户（异步）"""
+        result = await db.execute(
+            select(SysUser).filter(
+                SysUser.user_name == user_name,
+                SysUser.tenant_id == tenant_id
+            )
+        )
+        user = result.scalars().first()
 
         if not user:
             return False
 
         user.is_deleted = True
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
         return True
