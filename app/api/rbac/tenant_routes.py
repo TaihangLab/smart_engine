@@ -7,9 +7,9 @@ RBAC租户管理API
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException
+from fastapi import APIRouter, Depends, Query, HTTPException, status
 from typing import Optional
-from fastapi.responses import StreamingResponse
+from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.rbac import (
@@ -139,7 +139,7 @@ async def create_tenant(
         tenant_obj = await RbacService.create_tenant(db, tenant.model_dump())
         return UnifiedResponse(
             success=True,
-            code=200,
+            code=201,
             message="创建租户成功",
             data=TenantResponse.model_validate(tenant_obj)
         )
@@ -216,11 +216,9 @@ async def delete_tenant(
                 message="租户不存在",
                 data=None
             )
-        return UnifiedResponse(
-            success=True,
-            code=200,
-            message="租户删除成功",
-            data=None
+        return JSONResponse(
+            status_code=status.HTTP_204_NO_CONTENT,
+            content=None
         )
     except Exception as e:
         logger.error(f"删除租户失败: {str(e)}", exc_info=True)

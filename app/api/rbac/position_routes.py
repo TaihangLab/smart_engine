@@ -7,7 +7,8 @@ RBAC岗位管理API
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 from app.db.async_session import get_async_db
@@ -110,7 +111,7 @@ async def create_position(
         position_obj = await RbacService.create_position(db, position.model_dump())
         return UnifiedResponse(
             success=True,
-            code=200,
+            code=201,
             message="创建岗位成功",
             data=PositionResponse.model_validate(position_obj)
         )
@@ -180,11 +181,9 @@ async def delete_position(
                 message="岗位不存在",
                 data=None
             )
-        return UnifiedResponse(
-            success=True,
-            code=200,
-            message="岗位删除成功",
-            data=None
+        return JSONResponse(
+            status_code=status.HTTP_204_NO_CONTENT,
+            content=None
         )
     except Exception as e:
         logger.error(f"删除岗位失败: {str(e)}", exc_info=True)

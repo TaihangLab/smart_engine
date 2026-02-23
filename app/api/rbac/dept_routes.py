@@ -7,7 +7,8 @@ RBAC部门管理API
 """
 
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.rbac.dept_models import (
@@ -143,7 +144,7 @@ async def create_dept(
     dept_obj = await RbacService.create_dept(db, dept.model_dump())
     return UnifiedResponse(
         success=True,
-        code=200,
+        code=201,
         message="创建部门成功",
         data=DeptResponse.model_validate(dept_obj)
     )
@@ -219,11 +220,9 @@ async def delete_dept(
                 message="部门不存在",
                 data=None
             )
-        return UnifiedResponse(
-            success=True,
-            code=200,
-            message="部门删除成功",
-            data=None
+        return JSONResponse(
+            status_code=status.HTTP_204_NO_CONTENT,
+            content=None
         )
     except ValueError as e:
         # 捕获存在子部门的错误

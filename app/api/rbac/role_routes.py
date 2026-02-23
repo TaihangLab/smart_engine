@@ -7,7 +7,8 @@ RBAC角色管理API（异步）
 """
 
 from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, Request
+from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.rbac import (
@@ -147,7 +148,7 @@ async def create_role(
     role_obj = await RbacService.create_role(db, role.model_dump())
     return UnifiedResponse(
         success=True,
-        code=200,
+        code=201,
         message="创建角色成功",
         data=RoleResponse.model_validate(role_obj)
     )
@@ -263,11 +264,9 @@ async def delete_role(
                 data=None
             )
 
-        return UnifiedResponse(
-            success=True,
-            code=200,
-            message="角色删除成功",
-            data=None
+        return JSONResponse(
+            status_code=status.HTTP_204_NO_CONTENT,
+            content=None
         )
     except Exception as e:
         logger.error(f"删除角色失败: {str(e)}", exc_info=True)
@@ -303,7 +302,7 @@ async def assign_permission_to_role(
     if success:
         return UnifiedResponse(
             success=True,
-            code=200,
+            code=201,
             message="权限分配成功",
             data=None
         )

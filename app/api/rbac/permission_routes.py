@@ -7,7 +7,8 @@ RBAC权限管理API
 """
 
 from typing import Optional, Dict, Any
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.rbac import (
@@ -251,7 +252,7 @@ async def create_permission(
         response_data = PermissionResponse.model_validate(permission_obj)
         return UnifiedResponse(
             success=True,
-            code=200,
+            code=201,
             message="创建权限成功",
             data=response_data
         )
@@ -325,11 +326,9 @@ async def delete_permission(
                 message="权限不存在",
                 data=None
             )
-        return UnifiedResponse(
-            success=True,
-            code=200,
-            message="权限删除成功",
-            data=None
+        return JSONResponse(
+            status_code=status.HTTP_204_NO_CONTENT,
+            content=None
         )
     except Exception as e:
         logger.error(f"删除权限失败: {str(e)}", exc_info=True)

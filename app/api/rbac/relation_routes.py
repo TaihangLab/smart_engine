@@ -7,7 +7,8 @@ RBAC关系管理API
 """
 
 from typing import Optional, List
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.rbac import (
@@ -156,7 +157,7 @@ async def assign_role_to_user(
         if success:
             return UnifiedResponse(
                 success=True,
-                code=200,
+                code=201,
                 message="角色分配成功",
                 data=None
             )
@@ -194,11 +195,9 @@ async def remove_role_from_user(
             tenant_id
         )
         if success:
-            return UnifiedResponse(
-                success=True,
-                code=200,
-                message="角色移除成功",
-                data=None
+            return JSONResponse(
+                status_code=status.HTTP_204_NO_CONTENT,
+                content=None
             )
         else:
             return UnifiedResponse(
@@ -323,7 +322,7 @@ async def assign_permission_to_role(
         if success:
             return UnifiedResponse(
                 success=True,
-                code=200,
+                code=201,
                 message="权限分配成功",
                 data=None
             )
@@ -372,7 +371,7 @@ async def assign_permission_to_role_by_id(
         if success:
             return UnifiedResponse(
                 success=True,
-                code=200,
+                code=201,
                 message="权限分配成功",
                 data=None
             )
@@ -414,11 +413,9 @@ async def remove_permission_from_role_by_id(
             validated_tenant_id
         )
         if success:
-            return UnifiedResponse(
-                success=True,
-                code=200,
-                message="权限移除成功",
-                data=None
+            return JSONResponse(
+                status_code=status.HTTP_204_NO_CONTENT,
+                content=None
             )
         else:
             return UnifiedResponse(
@@ -454,11 +451,9 @@ async def remove_permission_from_role_by_codes(
             tenant_id
         )
         if success:
-            return UnifiedResponse(
-                success=True,
-                code=200,
-                message="权限移除成功",
-                data=None
+            return JSONResponse(
+                status_code=status.HTTP_204_NO_CONTENT,
+                content=None
             )
         else:
             return UnifiedResponse(

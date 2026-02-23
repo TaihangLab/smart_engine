@@ -7,7 +7,8 @@ RBAC用户管理API
 """
 
 from typing import Optional, List
-from fastapi import APIRouter, Depends, Query, UploadFile, Body, Request, HTTPException
+from fastapi import APIRouter, Depends, Query, UploadFile, Body, Request, HTTPException, status
+from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.rbac import (
@@ -173,7 +174,7 @@ async def create_user(
         user_obj = await RbacService.create_user(db, user.model_dump())
         return UnifiedResponse(
             success=True,
-            code=200,
+            code=201,
             message="创建用户成功",
             data=UserResponse.model_validate(user_obj)
         )
@@ -271,11 +272,9 @@ async def delete_user(
                 message="用户不存在",
                 data=None
             )
-        return UnifiedResponse(
-            success=True,
-            code=200,
-            message="用户删除成功",
-            data=None
+        return JSONResponse(
+            status_code=status.HTTP_204_NO_CONTENT,
+            content=None
         )
     except Exception as e:
         logger.error(f"删除用户失败: {str(e)}", exc_info=True)
@@ -385,7 +384,7 @@ async def assign_role_to_user(
         if success:
             return UnifiedResponse(
                 success=True,
-                code=200,
+                code=201,
                 message="角色分配成功",
                 data=None
             )
@@ -448,11 +447,9 @@ async def remove_role_from_user(
             )
 
         if success:
-            return UnifiedResponse(
-                success=True,
-                code=200,
-                message="角色移除成功",
-                data=None
+            return JSONResponse(
+                status_code=status.HTTP_204_NO_CONTENT,
+                content=None
             )
         else:
             return UnifiedResponse(
