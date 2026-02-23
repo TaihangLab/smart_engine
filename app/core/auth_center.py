@@ -9,9 +9,11 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 from fastapi import Request, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.user import UserInfo
 from app.services.rbac_service import RbacService
 from app.db.session import get_db
+from app.db.async_session import AsyncSessionLocal
 from app.core.config import settings
 
 # 类型检查时导入，避免循环导入
@@ -688,9 +690,8 @@ async def authenticate_request(request: Request) -> Optional[UserInfo]:
             detail=f"客户端不匹配：Token 中的 Client ID ({token_client_id}) 与请求头不一致"
         )
 
-    # 获取数据库会话
-    db_gen = get_db()
-    db = next(db_gen)
+    # 获取异步数据库会话
+    db: AsyncSession = AsyncSessionLocal()
 
     try:
         # 验证 token 中必需包含 tenantId
@@ -752,7 +753,7 @@ async def authenticate_request(request: Request) -> Optional[UserInfo]:
 
         return user_state
     finally:
-        db.close()
+        await db.close()
 
 
 async def auth_middleware(request: Request, call_next):
@@ -863,8 +864,7 @@ async def auth_middleware(request: Request, call_next):
         # ========== 步骤2: 不在用户权限中，检查租户0权限 ==========
         logger.debug(f"[鉴权步骤1] ❌ 用户权限中未找到，继续检查租户0权限")
 
-        db_gen = get_db()
-        db = next(db_gen)
+        db: AsyncSession = AsyncSessionLocal()
 
         try:
             from app.services.rbac.permission_copy_service import PermissionCopyService
@@ -873,16 +873,20 @@ async def auth_middleware(request: Request, call_next):
 
             logger.debug(f"[鉴权步骤2] 租户0的ROLE_ACCESS角色ID: {template_role.id}")
 
-            # 获取租户0的权限详情
+            # 获取租户0的权限详情（异步查询）
             from app.models.rbac import SysPermission, SysRolePermission
-            template_perms = db.query(SysPermission).join(
-                SysRolePermission,
-                SysPermission.id == SysRolePermission.permission_id
-            ).filter(
-                SysRolePermission.role_id == template_role.id,
-                SysPermission.is_deleted == False,
-                SysPermission.status == 0
-            ).all()
+            from sqlalchemy import select
+            result = await db.execute(
+                select(SysPermission).join(
+                    SysRolePermission,
+                    SysPermission.id == SysRolePermission.permission_id
+                ).filter(
+                    SysRolePermission.role_id == template_role.id,
+                    SysPermission.is_deleted == False,
+                    SysPermission.status == 0
+                )
+            )
+            template_perms = result.scalars().all()
 
             logger.debug(f"[鉴权步骤2] 租户0权限查询结果: 共 {len(template_perms)} 条")
 
@@ -947,7 +951,7 @@ async def auth_middleware(request: Request, call_next):
                     detail=f"权限不足，无权限访问该资源: {request_path} [{request_method}]"
                 )
         finally:
-            db.close()
+            await db.close()
             # 清除请求上下文
             from app.services.user_context_service import clear_request_context
             clear_request_context()
