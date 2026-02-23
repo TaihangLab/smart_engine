@@ -10,8 +10,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Optional
 from fastapi.responses import StreamingResponse
-from sqlalchemy.orm import Session
-from app.db.session import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.async_session import get_async_db
 from app.models.rbac import (
     TenantCreate, TenantUpdate, TenantResponse, TenantStatsResponse,
     PaginatedResponse, UnifiedResponse, BatchDeleteTenantsRequest
@@ -31,7 +31,7 @@ tenant_router = APIRouter()
 @tenant_router.get("/tenants/{id}", response_model=UnifiedResponse, summary="获取租户详情")
 async def get_tenant(
     id: int,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """根据租户ID获取租户详情"""
     try:
@@ -47,7 +47,7 @@ async def get_tenant(
         )
 
     # 获取租户
-    tenant = RbacService.get_tenant_by_id(db, validated_tenant_id)
+    tenant = await RbacService.get_tenant_by_id(db, validated_tenant_id)
     if not tenant:
         return UnifiedResponse(
             success=False,
@@ -71,23 +71,23 @@ async def get_tenants(
     tenant_name: str = Query(None, description="租户名称过滤条件"),
     company_name: str = Query(None, description="企业名称过滤条件"),
     status: int = Query(None, description="状态过滤条件: 0(启用)、1(禁用)"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """获取租户列表"""
     try:
         # 如果同时提供了多个过滤条件，则按优先级过滤：status > company_name > tenant_name
         if status is not None:
-            tenants = RbacService.get_tenants_by_status(db, status, skip, limit)
-            total = RbacService.get_tenant_count_by_status(db, status)
+            tenants = await RbacService.get_tenants_by_status(db, status, skip, limit)
+            total = await RbacService.get_tenant_count_by_status(db, status)
         elif company_name:
-            tenants = RbacService.get_tenants_by_company_name(db, company_name, skip, limit)
-            total = RbacService.get_tenant_count_by_company_name(db, company_name)
+            tenants = await RbacService.get_tenants_by_company_name(db, company_name, skip, limit)
+            total = await RbacService.get_tenant_count_by_company_name(db, company_name)
         elif tenant_name:
-            tenants = RbacService.get_tenants_by_name(db, tenant_name, skip, limit)
-            total = RbacService.get_tenant_count_by_name(db, tenant_name)
+            tenants = await RbacService.get_tenants_by_name(db, tenant_name, skip, limit)
+            total = await RbacService.get_tenant_count_by_name(db, tenant_name)
         else:
-            tenants = RbacService.get_all_tenants(db, skip, limit)
-            total = RbacService.get_tenant_count(db)
+            tenants = await RbacService.get_all_tenants(db, skip, limit)
+            total = await RbacService.get_tenant_count(db)
 
         tenant_list = [
             TenantResponse.model_validate(tenant).model_dump(by_alias=True)
@@ -121,13 +121,13 @@ async def get_tenants(
 @tenant_router.post("/tenants", response_model=UnifiedResponse, summary="创建租户")
 async def create_tenant(
     tenant: TenantCreate,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """创建新租户"""
     try:
         # 检查统一社会信用代码是否已存在
         if tenant.company_code:
-            existing_tenant = RbacService.get_tenant_by_company_code(db, tenant.company_code)
+            existing_tenant = await RbacService.get_tenant_by_company_code(db, tenant.company_code)
             if existing_tenant:
                 return UnifiedResponse(
                     success=False,
@@ -136,7 +136,7 @@ async def create_tenant(
                     data=None
                 )
 
-        tenant_obj = RbacService.create_tenant(db, tenant.model_dump())
+        tenant_obj = await RbacService.create_tenant(db, tenant.model_dump())
         return UnifiedResponse(
             success=True,
             code=200,
@@ -164,12 +164,12 @@ async def create_tenant(
 async def update_tenant(
     id: int,
     tenant_update: TenantUpdate,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """更新租户信息"""
     try:
         # 更新租户
-        updated_tenant = RbacService.update_tenant_by_id(db, id, tenant_update.model_dump(exclude_unset=True))
+        updated_tenant = await RbacService.update_tenant_by_id(db, id, tenant_update.model_dump(exclude_unset=True))
         if not updated_tenant:
             return UnifiedResponse(
                 success=False,
@@ -203,12 +203,12 @@ async def update_tenant(
 @tenant_router.delete("/tenants/{id}", response_model=UnifiedResponse, summary="删除租户")
 async def delete_tenant(
     id: int,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """删除租户"""
     try:
         # 删除租户
-        success = RbacService.delete_tenant_by_id(db, id)
+        success = await RbacService.delete_tenant_by_id(db, id)
         if not success:
             return UnifiedResponse(
                 success=False,
@@ -235,12 +235,12 @@ async def delete_tenant(
 @tenant_router.get("/tenants/{id}/stats", response_model=UnifiedResponse, summary="获取租户统计信息")
 async def get_tenant_stats(
     id: int,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """获取租户的统计信息"""
     try:
         # 获取租户信息
-        tenant = RbacService.get_tenant_by_id(db, id)
+        tenant = await RbacService.get_tenant_by_id(db, id)
         if not tenant:
             return UnifiedResponse(
                 success=False,
@@ -250,9 +250,9 @@ async def get_tenant_stats(
             )
 
         # 使用租户ID获取相关统计数据
-        user_count = RbacService.get_user_count_by_tenant_id(db, tenant.id)
-        role_count = RbacService.get_role_count_by_tenant_id(db, tenant.id)
-        permission_count = RbacService.get_permission_count_by_tenant_id(db, tenant.id)
+        user_count = await RbacService.get_user_count_by_tenant_id(db, tenant.id)
+        role_count = await RbacService.get_role_count_by_tenant_id(db, tenant.id)
+        permission_count = await RbacService.get_permission_count_by_tenant_id(db, tenant.id)
 
         stats_response = TenantStatsResponse(
             tenant_id=tenant.id,
@@ -284,7 +284,7 @@ async def export_tenants(
     tenant_name: str = Query(None, description="租户名称过滤条件"),
     company_name: str = Query(None, description="企业名称过滤条件"),
     status: int = Query(None, description="状态过滤条件: 0(启用)、1(禁用)"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """导出租户数据"""
     # 从用户态获取并验证租户ID
@@ -296,7 +296,7 @@ async def export_tenants(
     from io import BytesIO
 
     # 获取过滤后的租户数据
-    tenants_data = RbacService.export_tenants_data(
+    tenants_data = await RbacService.export_tenants_data(
         db,
         tenant_name=tenant_name,
         company_name=company_name,
@@ -337,7 +337,7 @@ async def export_tenants(
 @tenant_router.post("/tenants/batch-delete", response_model=UnifiedResponse, summary="批量删除租户")
 async def batch_delete_tenants(
     request: BatchDeleteTenantsRequest,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """批量删除租户"""
     # 从用户态获取并验证租户ID
@@ -346,7 +346,7 @@ async def batch_delete_tenants(
     user_context_service.get_validated_tenant_id()
 
     # 调用服务层批量删除租户
-    result = RbacService.batch_delete_tenants_by_ids(db, request.tenant_ids)
+    result = await RbacService.batch_delete_tenants_by_ids(db, request.tenant_ids)
 
     # 准备响应消息
     message = f"批量删除租户完成，成功删除 {result['deleted_count']} 个租户"

@@ -2,14 +2,14 @@
 # -*- coding: utf-8 -*-
 
 """
-RBAC角色管理API
+RBAC角色管理API（异步）
 处理角色相关的增删改查操作
 """
 
 from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, Request
-from sqlalchemy.orm import Session
-from app.db.session import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.async_session import get_async_db
 from app.models.rbac import (
     RoleCreate, RoleUpdate, RoleResponse, RoleListResponse,
     RolePermissionAssign, RolePermissionResponse,
@@ -33,16 +33,16 @@ async def get_role(
     id: int,
     request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
-    """根据角色ID获取角色详情"""
+    """根据角色ID获取角色详情（异步）"""
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
         validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 获取角色
-        role = RbacService.get_role_by_id(db, id)
+        role = await RbacService.get_role_by_id(db, id)
         if not role:
             return UnifiedResponse(
                 success=False,
@@ -87,25 +87,25 @@ async def get_roles(
     role_code: str = Query(None, description="角色编码过滤条件（模糊查询）"),
     status: int = Query(None, description="角色状态过滤条件"),
     data_scope: int = Query(None, description="数据权限范围过滤条件"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
-    """获取指定租户的角色列表，支持高级搜索"""
+    """获取指定租户的角色列表，支持高级搜索（异步）"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
     tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
     # 如果提供了任何高级搜索参数，则使用高级搜索
     if role_name or role_code or status is not None or data_scope is not None:
-        roles = RbacService.get_roles_advanced_search_by_tenant_id(
+        roles = await RbacService.get_roles_advanced_search_by_tenant_id(
             db, tenant_id, role_name, role_code, status, data_scope, skip, limit
         )
-        total = RbacService.get_role_count_advanced_search_by_tenant_id(
+        total = await RbacService.get_role_count_advanced_search_by_tenant_id(
             db, tenant_id, role_name, role_code, status, data_scope
         )
     else:
         # 否则使用基本查询
-        roles = RbacService.get_roles_by_tenant_id(db, tenant_id, skip, limit)
-        total = RbacService.get_role_count_by_tenant_id(db, tenant_id)
+        roles = await RbacService.get_roles_by_tenant_id(db, tenant_id, skip, limit)
+        total = await RbacService.get_role_count_by_tenant_id(db, tenant_id)
 
     role_list = [
         RoleListResponse.model_validate(role).model_dump(by_alias=True)
@@ -132,19 +132,19 @@ async def get_roles(
 async def create_role(
     role: RoleCreate,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
-    """创建新角色"""
+    """创建新角色（异步）"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
     role.tenant_id = user_context_service.get_validated_tenant_id(request, role.tenant_id)
 
     # 检查角色编码在租户内是否已存在
-    existing_role = RbacService.get_role_by_code(db, role.role_code, role.tenant_id)
+    existing_role = await RbacService.get_role_by_code(db, role.role_code, role.tenant_id)
     if existing_role:
         raise HTTPException(status_code=400, detail=f"角色编码 {role.role_code} 在租户 {role.tenant_id} 中已存在")
 
-    role_obj = RbacService.create_role(db, role.model_dump())
+    role_obj = await RbacService.create_role(db, role.model_dump())
     return UnifiedResponse(
         success=True,
         code=200,
@@ -157,17 +157,18 @@ async def create_role(
 async def update_role(
     id: int,
     role_update: RoleUpdate,
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
-    """更新角色信息"""
+    """更新角色信息（异步）"""
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
         validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 获取原始角色信息以验证租户ID
-        original_role = RbacService.get_role_by_id(db, id)
+        original_role = await RbacService.get_role_by_id(db, id)
         if not original_role:
             return UnifiedResponse(
                 success=False,
@@ -195,7 +196,7 @@ async def update_role(
             )
 
         # 更新角色
-        updated_role = RbacService.update_role_by_id(db, id, role_update.model_dump(exclude_unset=True))
+        updated_role = await RbacService.update_role_by_id(db, id, role_update.model_dump(exclude_unset=True))
         if not updated_role:
             return UnifiedResponse(
                 success=False,
@@ -223,17 +224,18 @@ async def update_role(
 @role_router.delete("/roles/{id}", response_model=UnifiedResponse, summary="删除角色")
 async def delete_role(
     id: int,
+    request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
-    """删除角色"""
+    """删除角色（异步）"""
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
         validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 获取原始角色信息以验证租户ID
-        original_role = RbacService.get_role_by_id(db, id)
+        original_role = await RbacService.get_role_by_id(db, id)
         if not original_role:
             return UnifiedResponse(
                 success=False,
@@ -252,7 +254,7 @@ async def delete_role(
             )
 
         # 删除角色
-        success = RbacService.delete_role_by_id(db, id)
+        success = await RbacService.delete_role_by_id(db, id)
         if not success:
             return UnifiedResponse(
                 success=False,
@@ -285,14 +287,14 @@ async def delete_role(
 async def assign_permission_to_role(
     assignment: RolePermissionAssign,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
-    """为角色分配权限"""
+    """为角色分配权限（异步）"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
     assignment.tenant_id = user_context_service.get_validated_tenant_id(request, assignment.tenant_id)
 
-    success = RbacService.assign_permission_to_role_by_ids(
+    success = await RbacService.assign_permission_to_role_by_ids(
         db,
         assignment.role_id,
         assignment.permission_id,
@@ -314,14 +316,14 @@ async def get_roles_by_permission(
     id: int,
     request: Request,
     tenant_id: Optional[int] = Query(None, description="租户ID"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
-    """获取拥有指定权限的角色列表"""
+    """获取拥有指定权限的角色列表（异步）"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
     tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
 
-    roles = RbacService.get_roles_by_permission_by_ids(db, id, tenant_id)
+    roles = await RbacService.get_roles_by_permission_by_ids(db, id, tenant_id)
     return UnifiedResponse(
         success=True,
         code=200,

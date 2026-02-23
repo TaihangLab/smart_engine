@@ -8,8 +8,8 @@ RBAC用户管理API
 
 from typing import Optional, List
 from fastapi import APIRouter, Depends, Query, UploadFile, Body, Request, HTTPException
-from sqlalchemy.orm import Session
-from app.db.session import get_db
+from sqlalchemy.ext.asyncio import AsyncSession
+from app.db.async_session import get_async_db
 from app.models.rbac import (
     UserCreate, UserUpdate, UserResponse, UserListResponse,
     UserRoleAssign, UserRoleResponse, UserPermissionResponse,
@@ -33,11 +33,11 @@ user_router = APIRouter()
 async def get_user(
     id: int,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """根据用户ID获取用户详情"""
     try:
-        user = RbacService.get_user_by_id(db, id)
+        user = await RbacService.get_user_by_id(db, id)
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -80,7 +80,7 @@ async def get_users(
     gender: int = Query(None, description="性别过滤条件"),
     position_code: str = Query(None, description="岗位编码过滤条件（模糊查询）"),
     role_code: str = Query(None, description="角色编码过滤条件"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """获取指定租户的用户列表，支持高级搜索"""
     try:
@@ -99,16 +99,16 @@ async def get_users(
 
         # 如果提供了任何高级搜索参数，则使用高级搜索
         if user_name or nick_name or phone or status is not None or dept_id is not None or gender is not None or position_code or role_code:
-            users = RbacService.get_users_advanced_search_by_tenant_id(
+            users = await RbacService.get_users_advanced_search_by_tenant_id(
                 db, tenant_id, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code, skip, limit
             )
-            total = RbacService.get_user_count_advanced_search_by_tenant_id(
+            total = await RbacService.get_user_count_advanced_search_by_tenant_id(
                 db, tenant_id, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code
             )
         else:
             # 否则使用基本查询
-            users = RbacService.get_users_by_tenant(db, tenant_id, skip, limit)
-            total = RbacService.get_user_count_by_tenant_id(db, tenant_id)
+            users = await RbacService.get_users_by_tenant(db, tenant_id, skip, limit)
+            total = await RbacService.get_user_count_by_tenant_id(db, tenant_id)
 
         user_list = [
             UserListResponse.model_validate(user).model_dump(by_alias=True)
@@ -143,7 +143,7 @@ async def get_users(
 async def create_user(
     user: UserCreate,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """创建新用户"""
     try:
@@ -161,7 +161,7 @@ async def create_user(
             )
 
         # 检查用户是否已存在
-        existing_user = RbacService.get_user_by_user_name_and_tenant_id(db, user.user_name, user.tenant_id)
+        existing_user = await RbacService.get_user_by_user_name_and_tenant_id(db, user.user_name, user.tenant_id)
         if existing_user:
             return UnifiedResponse(
                 success=False,
@@ -170,7 +170,7 @@ async def create_user(
                 data=None
             )
 
-        user_obj = RbacService.create_user(db, user.model_dump())
+        user_obj = await RbacService.create_user(db, user.model_dump())
         return UnifiedResponse(
             success=True,
             code=200,
@@ -199,12 +199,12 @@ async def update_user(
     id: int,
     user_update: UserUpdate,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """更新用户信息"""
     try:
         # 首先获取用户信息，验证租户权限
-        user = RbacService.get_user_by_id(db, id)
+        user = await RbacService.get_user_by_id(db, id)
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -217,7 +217,7 @@ async def update_user(
         from app.services.user_context_service import user_context_service
         user_context_service.get_validated_tenant_id(request, user.tenant_id)
         
-        updated_user = RbacService.update_user_by_id(db, id, user_update.model_dump(exclude_unset=True))
+        updated_user = await RbacService.update_user_by_id(db, id, user_update.model_dump(exclude_unset=True))
         if not updated_user:
             return UnifiedResponse(
                 success=False,
@@ -245,12 +245,12 @@ async def update_user(
 async def delete_user(
     id: int,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """删除用户"""
     try:
         # 首先获取用户信息，验证租户权限
-        user = RbacService.get_user_by_id(db, id)
+        user = await RbacService.get_user_by_id(db, id)
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -263,7 +263,7 @@ async def delete_user(
         from app.services.user_context_service import user_context_service
         user_context_service.get_validated_tenant_id(request, user.tenant_id)
         
-        success = RbacService.delete_user_by_id(db, id)
+        success = await RbacService.delete_user_by_id(db, id)
         if not success:
             return UnifiedResponse(
                 success=False,
@@ -295,12 +295,12 @@ async def delete_user(
 async def get_user_roles(
     id: int,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """获取用户的角色列表"""
     try:
         # 首先检查用户是否存在
-        user = RbacService.get_user_by_id(db, id)
+        user = await RbacService.get_user_by_id(db, id)
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -313,7 +313,7 @@ async def get_user_roles(
         from app.services.user_context_service import user_context_service
         user_context_service.get_validated_tenant_id(request, user.tenant_id)
 
-        roles = RbacService.get_user_roles_by_user_id(db, id, user.tenant_id)
+        roles = await RbacService.get_user_roles_by_user_id(db, id, user.tenant_id)
 
         result = []
         for role in roles:
@@ -345,7 +345,7 @@ async def get_user_roles(
 async def assign_role_to_user(
     assignment: UserRoleAssign,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """为用户分配角色"""
     try:
@@ -358,7 +358,7 @@ async def assign_role_to_user(
             # 使用ID方式进行分配
             success = True
             for role_id in assignment.role_ids:
-                result = RbacService.assign_role_to_user_by_id(
+                result = await RbacService.assign_role_to_user_by_id(
                     db,
                     assignment.user_id,
                     role_id,
@@ -368,7 +368,7 @@ async def assign_role_to_user(
                     success = False
         elif assignment.user_name is not None and assignment.role_code is not None:
             # 使用名称方式进行分配
-            success = RbacService.assign_role_to_user(
+            success = await RbacService.assign_role_to_user(
                 db,
                 assignment.user_name,
                 assignment.role_code,
@@ -410,7 +410,7 @@ async def assign_role_to_user(
 async def remove_role_from_user(
     assignment: UserRoleAssign,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """移除用户的角色"""
     try:
@@ -423,7 +423,7 @@ async def remove_role_from_user(
             # 使用ID方式进行移除
             success = True
             for role_id in assignment.role_ids:
-                result = RbacService.remove_role_from_user_by_id(
+                result = await RbacService.remove_role_from_user_by_id(
                     db,
                     assignment.user_id,
                     role_id,
@@ -433,7 +433,7 @@ async def remove_role_from_user(
                     success = False
         elif assignment.user_name is not None and assignment.role_code is not None:
             # 使用名称方式进行移除
-            success = RbacService.remove_role_from_user(
+            success = await RbacService.remove_role_from_user(
                 db,
                 assignment.user_name,
                 assignment.role_code,
@@ -476,7 +476,7 @@ async def get_users_by_role(
     role_code: str,
     request: Request,
     tenant_id: Optional[int] = Query(None, description="租户编码"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """获取拥有指定角色的用户列表"""
     try:
@@ -484,7 +484,7 @@ async def get_users_by_role(
         from app.services.user_context_service import user_context_service
         user_context_service.get_validated_tenant_id(request, tenant_id)
         
-        users = RbacService.get_users_by_role(db, role_code, tenant_id)
+        users = await RbacService.get_users_by_role(db, role_code, tenant_id)
         return UnifiedResponse(
             success=True,
             code=200,
@@ -505,12 +505,12 @@ async def get_users_by_role(
 async def get_user_permissions(
     id: int,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """获取用户的完整权限列表"""
     try:
         # 首先获取用户信息
-        user = RbacService.get_user_by_id(db, id)
+        user = await RbacService.get_user_by_id(db, id)
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -523,7 +523,7 @@ async def get_user_permissions(
         from app.services.user_context_service import user_context_service
         user_context_service.get_validated_tenant_id(request, user.tenant_id)
 
-        permissions = RbacService.get_user_permission_list_by_id(db, id, user.tenant_id)
+        permissions = await RbacService.get_user_permission_list_by_id(db, id, user.tenant_id)
 
         return UnifiedResponse(
             success=True,
@@ -556,7 +556,7 @@ async def change_user_password(
     password: Optional[str] = Query(None, description="新密码（兼容前端）"),
     old_password: Optional[str] = Body(None, description="旧密码（请求体）"),
     new_password: Optional[str] = Body(None, description="新密码（请求体）"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """修改当前用户密码（用户修改自己的密码）"""
     try:
@@ -605,7 +605,7 @@ async def change_user_password(
             user_id = int(current_user.userId) if current_user.userId else None
         except (ValueError, TypeError):
             # 如果userId不是数字，尝试通过用户名查找
-            user = RbacService.get_user_by_user_name(db, current_user.userName, current_user.tenantId)
+            user = await RbacService.get_user_by_user_name(db, current_user.userName, current_user.tenantId)
             if not user:
                 return UnifiedResponse(
                     success=False,
@@ -657,12 +657,12 @@ async def reset_user_password(
     request: Request,
     reset_request: ResetPasswordRequest,
     password: str = Query(None, description="新密码（查询参数，兼容前端）"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """重置用户密码（管理员操作）"""
     try:
         # 首先获取用户信息，验证租户权限
-        user = RbacService.get_user_by_id(db, id)
+        user = await RbacService.get_user_by_id(db, id)
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -730,7 +730,7 @@ async def batch_delete_users_api(
     http_request: Request,
     delete_request: BatchDeleteUserRequest,
     tenant_id: Optional[int] = Query(None, description="租户编码（可选，用于验证权限）"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """批量删除用户"""
     try:
@@ -746,7 +746,7 @@ async def batch_delete_users_api(
         logger.info(f"当前用户可访问的租户ID: {accessible_tenant_ids}")
 
         # 使用用户ID列表进行批量删除
-        deleted_count = RbacService.batch_delete_users_by_ids(db, accessible_tenant_ids, delete_request.user_ids)
+        deleted_count = await RbacService.batch_delete_users_by_ids(db, accessible_tenant_ids, delete_request.user_ids)
         logger.info(f"批量删除完成: 成功删除 {deleted_count} 个用户")
         return UnifiedResponse(
             success=True,
@@ -812,7 +812,7 @@ async def import_users(
     file: UploadFile,
     request: Request,
     tenant_id: Optional[int] = Query(None, description="租户编码"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """导入用户数据"""
     try:
@@ -883,14 +883,14 @@ async def import_users(
                 user_data["password"] = "$2b$12$EixZaYVK1fsbw1ZfbX3OXePaWxn96p36WQoeG6Lruj3vjPGga31lW"  # 默认密码hash
 
                 # 检查用户是否已存在
-                existing_user = RbacService.get_user_by_user_name(db, user_data["user_name"], tenant_id)
+                existing_user = await RbacService.get_user_by_user_name(db, user_data["user_name"], tenant_id)
                 if existing_user:
                     # 如果用户已存在，可以选择跳过或更新
                     continue
 
                 # 创建用户
                 user_create_model = UserCreate(**user_data)
-                RbacService.create_user(db, user_create_model.model_dump())
+                await RbacService.create_user(db, user_create_model.model_dump())
                 imported_count += 1
 
             except Exception as e:
@@ -935,7 +935,7 @@ async def export_users(
     gender: int = Query(None, description="性别过滤条件"),
     position_code: str = Query(None, description="岗位编码过滤条件（模糊查询）"),
     role_code: str = Query(None, description="角色编码过滤条件"),
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """导出用户数据"""
     try:
@@ -947,7 +947,7 @@ async def export_users(
         user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 使用高级搜索获取用户数据
-        users = RbacService.get_users_advanced_search(
+        users = await RbacService.get_users_advanced_search(
             db, tenant_id, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code, 0, 10000  # 限制最大导出数量
         )
 
