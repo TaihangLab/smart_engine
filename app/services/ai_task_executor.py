@@ -1,5 +1,5 @@
 """
-基于精确调度的AI任务执行器
+基于精确调度的AI任务执行器（异步化版本）
 """
 import asyncio
 import cv2
@@ -15,13 +15,16 @@ import queue
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
-from apscheduler.schedulers.background import BackgroundScheduler
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from concurrent.futures import ThreadPoolExecutor
 from app.services.ai_task_service import AITaskService
 from app.services.wvp_client import wvp_client
 from app.models.ai_task import AITask
 from app.db.session import get_db
+from app.db.async_session import AsyncSessionLocal, get_async_db_session
 from app.services.camera_service import CameraService
 from app.services.minio_client import minio_client
 from app.services.alert_merge_manager import alert_merge_manager
@@ -709,18 +712,19 @@ class FFmpegRTSPStreamer:
 
 
 class AITaskExecutor:
-    """基于精确调度的AI任务执行器"""
-    
+    """基于精确调度的AI任务执行器（异步化版本）"""
+
     def __init__(self):
         self.running_tasks = {}  # 存储正在运行的任务 {task_id: thread}
         self.stop_event = {}     # 存储任务停止事件 {task_id: threading.Event}
         self.task_jobs = {}      # 存储任务的调度作业 {task_id: [start_job_id, stop_job_id]}
         self.frame_processors = {}  # 存储任务的帧处理器 {task_id: OptimizedAsyncProcessor}
         self.task_camera_mapping = {}  # 存储任务与摄像头的映射 {task_id: camera_id}
-        
-        # 创建任务调度器
-        self.scheduler = BackgroundScheduler()
-        self.scheduler.start()
+
+        # 创建异步任务调度器
+        self.scheduler = AsyncIOScheduler()
+        self.loop = None  # 事件循环引用
+        _scheduler_started = False
         
         # 🚀 创建高性能线程池用于异步处理预警
         from app.core.config import settings
