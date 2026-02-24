@@ -125,7 +125,6 @@ def _is_super_admin_user(user_info: Dict[str, Any]) -> bool:
 
     # 检查本地用户名
     if user_name and user_name in settings.SUPER_ADMIN_USERS:
-        logger.info(f"检测到超管用户（用户名）: {user_name}")
         return True
 
     # 检查外部用户ID
@@ -173,10 +172,6 @@ def parse_token(token: str) -> Optional[Dict[str, Any]]:
 
                     user_info = json.loads(decoded_str)
 
-                    logger.info(
-                        f"JSON 解析成功，用户信息: tenantId={user_info.get('tenantId')}, userId={user_info.get('userId')}, deptId={user_info.get('deptId')}"
-                    )
-
                     return user_info
                 except Exception as e:
                     logger.debug(f"JWT Token解析失败: {str(e)}，尝试Base64格式")
@@ -188,10 +183,6 @@ def parse_token(token: str) -> Optional[Dict[str, Any]]:
         logger.info(f"Base64 解码成功，内容: {decoded_str}")
 
         user_info = json.loads(decoded_str)
-
-        logger.info(
-            f"JSON 解析成功，用户信息: tenantId={user_info.get('tenantId')}, userId={user_info.get('userId')}, deptId={user_info.get('deptId')}"
-        )
 
         return user_info
     except Exception as e:
@@ -237,7 +228,6 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
     tenant_id = external_tenant_id
     if tenant_id == "0" or tenant_id == 0:
         tenant_id = "1"
-        logger.warning(f"外部租户ID为0（模板租户），改为使用默认租户1")
 
     # ========== 处理部门ID ==========
     if "deptId" not in user_info or user_info["deptId"] is None:
@@ -281,9 +271,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         existing_user = result.scalar_one_or_none()
 
         if existing_user:
-            logger.info(
-                f"通过 external_user_id '{external_user_id}' 找到已存在用户: {existing_user.user_name}"
-            )
+            pass  # 用户已存在，继续处理
 
     # 如果通过外部用户ID没找到，尝试使用用户名查找（兼容本地用户）
     if not existing_user:
@@ -291,7 +279,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
             db, user_name, tenant_id
         )
         if existing_user:
-            logger.info(f"通过 user_name '{user_name}' 找到已存在用户")
+            pass  # 用户已存在，继续处理
 
     if existing_user:
         # 存在：获取用户
@@ -323,8 +311,6 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         # 获取该用户当前的部门的子部门
         sub_depts = await RbacService.get_dept_subtree(db, dept_id)
 
-        logger.info(f"用户 {user_name} 已存在，获取其角色、部门和子部门信息")
-
         # ========== 检查并分配角色（支持超管配置） ==========
         # 检查是否为超管用户
         if _is_super_admin_user(user_info):
@@ -339,16 +325,11 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
                 db, user_name, role_code, tenant_id
             )
             if success:
-                logger.info(f"为已存在的用户 {user_name} 分配了 {role_code} 角色")
+                pass  # 角色分配成功
             else:
                 logger.warning(f"为已存在的用户 {user_name} 分配 {role_code} 角色失败")
-        else:
-            logger.info(f"用户 {user_name} 已拥有 {role_code} 角色")
 
         # 获取用户角色，优先检查 ROLE_ALL（超管角色）
-        logger.info(
-            f"用户 {user_name} 的角色列表: {[(r.id, r.role_code, r.role_name) for r in user_roles]}"
-        )
         role = next(
             (r for r in user_roles if r.role_code == RoleConstants.ROLE_ALL), None
         )
@@ -357,9 +338,6 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
                 (r for r in user_roles if r.role_code == RoleConstants.ROLE_ACCESS),
                 None,
             )
-        logger.info(
-            f"选择的角色: {role.role_code if role else None} (id={role.id if role else None})"
-        )
 
         # 构建完整用户态
         return await _build_user_state(
@@ -368,8 +346,6 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
 
     else:
         # 不存在：上述逻辑中新增租户，部门，角色，用户逻辑
-        logger.info(f"用户 {user_name} 不存在，开始执行新增租户、部门、角色、用户逻辑")
-
         # 1. 确保租户存在
         tenant_info = {
             "tenantId": tenant_id,
@@ -441,9 +417,6 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
                 (r for r in user_roles if r.role_code == RoleConstants.ROLE_ACCESS),
                 None,
             )
-        logger.info(
-            f"选择的角色: {role.role_code if role else None} (id={role.id if role else None})"
-        )
 
         # 构建完整用户态
         return await _build_user_state(
@@ -495,9 +468,6 @@ async def _build_user_state(
         # 检查是否为超管角色
         if role.role_code == RoleConstants.ROLE_ALL:
             is_super_admin = True
-            logger.info(
-                f"检测到超管用户: {user.user_name}, 角色ID: {role.id}, 角色编码: {role.role_code}"
-            )
 
         # 非超管才需要查询权限详情
         if not is_super_admin:
@@ -576,7 +546,6 @@ def ensure_tenant_exists(tenant_info: Dict[str, Any], db):
 
     # 租户0是模板租户，不需要创建
     if tenant_id == TenantConstants.TEMPLATE_TENANT_ID:
-        logger.info(f"租户 {tenant_id} 是模板租户，跳过创建")
         return
 
     tenant_name = tenant_info.get("tenantName", f"Tenant-{tenant_id}")
@@ -638,12 +607,10 @@ async def ensure_role_exists(tenant_id: str, db):
     if tenant_id == TenantConstants.TEMPLATE_TENANT_ID:
         # 确保租户0的ROLE_ACCESS角色存在
         await PermissionCopyService.get_template_role(db)
-        logger.info(f"租户0的ROLE_ACCESS角色已确保存在")
         return
 
     # 确保租户的ROLE_ACCESS角色有权限，没有则从租户0复制
     role = await PermissionCopyService.ensure_role_has_permissions(db, str(tenant_id))
-    logger.info(f"租户 {tenant_id} 的ROLE_ACCESS角色已确保存在并有权限")
 
 
 def _get_or_create_role_all(db: Session, tenant_id: str):
