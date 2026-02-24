@@ -55,7 +55,7 @@ async def login(
         logger.info(f"用户登录尝试: {login_request.username}, 租户: {login_request.tenantCode}, IP: {client_ip}")
 
         # 验证用户凭据
-        user, error_msg = AuthenticationService.authenticate_user(
+        user, error_msg = await AuthenticationService.authenticate_user(
             db,
             login_request.username,
             login_request.password,
@@ -73,8 +73,8 @@ async def login(
             )
 
         # 获取用户角色和权限
-        roles = AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
-        permissions = AuthenticationService.get_user_permissions(db, user.id, user.user_name, user.tenant_id)
+        roles = await AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
+        permissions = await AuthenticationService.get_user_permissions(db, user.id, user.user_name, user.tenant_id)
 
         # 生成adminToken
         admin_token = AuthenticationService.generate_admin_token(user, roles, permissions)
@@ -223,7 +223,7 @@ async def change_password(
                 user_id = user.id
             
             # 执行密码更改
-            success, message = AuthenticationService.change_password(
+            success, message = await AuthenticationService.change_password(
                 db,
                 user_id,
                 password_change.old_password,
@@ -329,7 +329,7 @@ async def get_current_user_info(
         current_user = await get_current_user(request)
 
         # 获取用户详细信息
-        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        user = await AuthenticationService.get_user_by_id(db, int(current_user.userId))
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -339,10 +339,10 @@ async def get_current_user_info(
             )
 
         # 获取用户角色
-        roles = AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
+        roles = await AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
 
         # 获取用户权限列表
-        permissions = AuthenticationService.get_user_permissions(db, user.id, user.user_name, user.tenant_id)
+        permissions = await AuthenticationService.get_user_permissions(db, user.id, user.user_name, user.tenant_id)
         permission_codes = [p.code for p in permissions] if permissions else []
 
         # 获取权限树（菜单结构）
@@ -403,7 +403,7 @@ async def get_current_user_info_simple(
         current_user = await get_current_user(request)
 
         # 获取用户详细信息
-        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        user = await AuthenticationService.get_user_by_id(db, int(current_user.userId))
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -545,7 +545,7 @@ async def get_user_permissions(
             )
 
         # 非超管用户：获取用户详细信息
-        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        user = await AuthenticationService.get_user_by_id(db, int(current_user.userId))
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -632,7 +632,7 @@ async def get_user_menu_tree(
             )
 
         # 非超管用户：获取用户详细信息
-        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        user = await AuthenticationService.get_user_by_id(db, int(current_user.userId))
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -835,7 +835,7 @@ async def refresh_user_state(
         logger.info(f"刷新用户态: {current_user.userName} (ID: {current_user.userId})")
 
         # 重新获取用户详细信息（会重新从数据库查询并缓存）
-        user = AuthenticationService.get_user_by_id(db, int(current_user.userId))
+        user = await AuthenticationService.get_user_by_id(db, int(current_user.userId))
         if not user:
             return UnifiedResponse(
                 success=False,
@@ -845,7 +845,7 @@ async def refresh_user_state(
             )
 
         # 获取用户角色
-        roles = AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
+        roles = await AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
 
         # 获取用户权限列表（使用缓存服务）
         from app.services.cache_service import PermissionCacheService

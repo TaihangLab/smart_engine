@@ -2,16 +2,19 @@
 # -*- coding: utf-8 -*-
 
 """
-认证服务模块
+认证服务模块（异步）
 处理用户认证、登录验证等相关逻辑
 """
 
 import logging
 from typing import List, Optional, Tuple
-from sqlalchemy.orm import Session
-from app.models.rbac import SysUser
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
+from app.models.rbac import SysUser, SysDept
 from app.utils.password_utils import verify_password, hash_password
 from app.services.rbac.user_service import UserService
+from app.services.rbac.relation_service import RelationService
+from app.services.rbac.rbac_base_service import BaseRbacService
 from app.core.auth import create_access_token
 from app.models.auth import LoginRequest, LoginResponse, NewLoginResponse, UserInfo
 import base64
@@ -23,15 +26,15 @@ logger = logging.getLogger(__name__)
 
 
 class AuthenticationService:
-    """认证服务类"""
-    
+    """认证服务类（异步）"""
+
     @staticmethod
-    def authenticate_user(db: Session, username: str, password: str, tenant_code: str = None) -> Tuple[Optional[SysUser], Optional[str]]:
+    async def authenticate_user(db: AsyncSession, username: str, password: str, tenant_code: str = None) -> Tuple[Optional[SysUser], Optional[str]]:
         """
-        验证用户凭据
+        验证用户凭据（异步）
 
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             username: 用户名
             password: 明文密码
             tenant_code: 租户编码
@@ -40,25 +43,24 @@ class AuthenticationService:
             (用户对象, 错误信息)
         """
         try:
-            # 根据租户编码查找用户
-            query = db.query(SysUser).filter(
+            # 构建查询
+            stmt = select(SysUser).filter(
                 SysUser.user_name == username,
                 SysUser.is_deleted == False
             )
 
             # 如果提供了租户编码，按租户过滤
             if tenant_code:
-                # 假设tenant_id字段存储的是租户编码
-                # 如果tenant_code是数字，尝试转换为整数
+                # 如果tenant_code是数字，转换为整数
                 try:
                     tenant_id = int(tenant_code)
-                    query = query.filter(SysUser.tenant_id == tenant_id)
+                    stmt = stmt.filter(SysUser.tenant_id == str(tenant_id))
                 except ValueError:
-                    # 如果tenant_code不是数字，可能需要通过其他方式查找
-                    # 这里暂时忽略租户编码限制
-                    pass
+                    # 如果tenant_code不是数字，直接使用字符串
+                    stmt = stmt.filter(SysUser.tenant_id == tenant_code)
 
-            user = query.first()
+            result = await db.execute(stmt)
+            user = result.scalars().first()
 
             if not user:
                 logger.warning(f"用户不存在: {username}")
@@ -88,12 +90,12 @@ class AuthenticationService:
             return None, "认证服务异常"
 
     @staticmethod
-    def get_user_roles(db: Session, user_id: int, user_name: str, tenant_id: str) -> List[str]:
+    async def get_user_roles(db: AsyncSession, user_id: int, user_name: str, tenant_id: str) -> List[str]:
         """
-        获取用户角色列表
+        获取用户角色列表（异步）
 
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             user_id: 用户ID
             user_name: 用户名
             tenant_id: 租户ID（字符串类型）
@@ -102,8 +104,7 @@ class AuthenticationService:
             用户角色列表
         """
         try:
-            from app.services.rbac.relation_service import RelationService
-            roles = RelationService.get_user_roles(db, user_name, tenant_id)
+            roles = await RelationService.get_user_roles(db, user_name, tenant_id)
             # 提取角色编码作为角色列表
             return [role.role_code for role in roles]
         except Exception as e:
@@ -111,12 +112,12 @@ class AuthenticationService:
             return []
 
     @staticmethod
-    def get_user_permissions(db: Session, user_id: int, user_name: str, tenant_id: str) -> List[str]:
+    async def get_user_permissions(db: AsyncSession, user_id: int, user_name: str, tenant_id: str) -> List[str]:
         """
-        获取用户权限列表
+        获取用户权限列表（异步）
 
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             user_id: 用户ID
             user_name: 用户名
             tenant_id: 租户ID
@@ -125,14 +126,13 @@ class AuthenticationService:
             用户权限列表
         """
         try:
-            from app.services.rbac.rbac_base_service import BaseRbacService
-            permissions = BaseRbacService.get_user_permission_list(db, user_name, tenant_id)
+            permissions = await BaseRbacService.get_user_permission_list(db, user_name, tenant_id)
             # 提取权限编码作为权限列表
             return [perm.get('permission_code', '') for perm in permissions if perm.get('permission_code')]
         except Exception as e:
             logger.error(f"获取用户权限列表失败: {str(e)}", exc_info=True)
             return []
-    
+
     @staticmethod
     def create_login_response(user: SysUser) -> LoginResponse:
         """
@@ -164,7 +164,7 @@ class AuthenticationService:
             expires_in=expires_in,
             user_id=user.id,
             username=user.user_name,
-            tenant_id=user.tenant_id
+            tenant_id=str(user.tenant_id)
         )
 
     @staticmethod
@@ -222,11 +222,12 @@ class AuthenticationService:
         )
 
     @staticmethod
-    def generate_admin_token(user: SysUser, roles: List[str], permissions: List[str]) -> str:
+    async def generate_admin_token(db: AsyncSession, user: SysUser, roles: List[str], permissions: List[str]) -> str:
         """
-        生成管理员令牌（JWT 格式）
+        生成管理员令牌（JWT 格式）（异步）
 
         Args:
+            db: 异步数据库会话
             user: 用户对象
             roles: 用户角色列表
             permissions: 用户权限列表
@@ -237,15 +238,10 @@ class AuthenticationService:
         # 获取部门信息
         dept_name = ""
         if user.dept_id:
-            from app.db.session import SessionLocal
-            from app.services.rbac_service import RbacService
-            db = SessionLocal()
-            try:
-                dept = RbacService.get_dept_by_id(db, user.dept_id)
-                if dept:
-                    dept_name = dept.name  # SysDept 的字段名是 name
-            finally:
-                db.close()
+            from app.services.rbac.dept_service import DeptService
+            dept = await DeptService.get_dept_by_id(db, user.dept_id)
+            if dept:
+                dept_name = dept.name
 
         # 获取租户信息
         tenant_name = f"Tenant-{user.tenant_id}"
@@ -276,184 +272,199 @@ class AuthenticationService:
         admin_token = create_access_token(data=admin_data)
 
         return admin_token
-    
+
     @staticmethod
-    def change_password(db: Session, user_id: int, old_password: str, new_password: str) -> Tuple[bool, str]:
+    async def change_password(db: AsyncSession, user_id: int, old_password: str, new_password: str) -> Tuple[bool, str]:
         """
-        更改用户密码
-        
+        更改用户密码（异步）
+
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             user_id: 用户ID
             old_password: 旧密码（必填）
             new_password: 新密码
-            
+
         Returns:
             (是否成功, 消息)
         """
         try:
             # 获取用户
-            user = db.query(SysUser).filter(
-                SysUser.id == user_id,
-                SysUser.is_deleted == False
-            ).first()
-            
+            result = await db.execute(
+                select(SysUser).filter(
+                    SysUser.id == user_id,
+                    SysUser.is_deleted == False
+                )
+            )
+            user = result.scalars().first()
+
             if not user:
                 return False, "用户不存在"
-            
+
             # 验证旧密码（必填）
             if not old_password:
                 return False, "请输入旧密码"
-            
+
             # 如果用户没有密码，提示使用重置密码功能
             if not user.password or not user.password.strip():
                 return False, "用户尚未设置密码，请使用重置密码功能"
-            
+
             # 验证旧密码
             if not verify_password(old_password, user.password):
                 return False, "旧密码错误"
-            
+
             # 验证新密码强度（可选）
             # 这里可以添加密码强度验证逻辑
-            
+
             # 更新密码
             user.password = hash_password(new_password)
             user.update_time = datetime.utcnow()
-            
-            db.commit()
-            db.refresh(user)
-            
+
+            await db.commit()
+            await db.refresh(user)
+
             logger.info(f"用户 {user.user_name} 密码更改成功")
             return True, "密码更改成功"
-            
+
         except Exception as e:
             logger.error(f"更改密码时发生异常: {str(e)}", exc_info=True)
-            db.rollback()
+            await db.rollback()
             return False, "密码更改失败"
-    
+
     @staticmethod
-    def reset_password(db: Session, username: str, new_password: str) -> Tuple[bool, str]:
+    async def reset_password(db: AsyncSession, username: str, new_password: str) -> Tuple[bool, str]:
         """
-        重置用户密码（通常由管理员操作）
-        
-        Args:
-            db: 数据库会话
-            username: 用户名
-            new_password: 新密码
-            
-        Returns:
-            (是否成功, 消息)
-        """
-        try:
-            # 获取用户
-            user = db.query(SysUser).filter(
-                SysUser.user_name == username,
-                SysUser.is_deleted == False
-            ).first()
-            
-            if not user:
-                return False, "用户不存在"
-            
-            # 更新密码
-            user.password = hash_password(new_password)
-            user.update_time = datetime.utcnow()
-            
-            db.commit()
-            db.refresh(user)
-            
-            logger.info(f"用户 {user.user_name} 密码重置成功")
-            return True, "密码重置成功"
-            
-        except Exception as e:
-            logger.error(f"重置密码时发生异常: {str(e)}", exc_info=True)
-            db.rollback()
-            return False, "密码重置失败"
-    
-    @staticmethod
-    def reset_password_by_id(db: Session, user_id: int, new_password: str) -> Tuple[bool, str]:
-        """
-        重置用户密码（通过用户ID，通常由管理员操作）
-        
-        Args:
-            db: 数据库会话
-            user_id: 用户ID
-            new_password: 新密码
-            
-        Returns:
-            (是否成功, 消息)
-        """
-        try:
-            # 获取用户
-            user = db.query(SysUser).filter(
-                SysUser.id == user_id,
-                SysUser.is_deleted == False
-            ).first()
-            
-            if not user:
-                return False, "用户不存在"
-            
-            # 更新密码
-            user.password = hash_password(new_password)
-            user.update_time = datetime.utcnow()
-            
-            db.commit()
-            db.refresh(user)
-            
-            logger.info(f"用户 {user.user_name} (ID: {user_id}) 密码重置成功")
-            return True, "密码重置成功"
-            
-        except Exception as e:
-            logger.error(f"重置密码时发生异常: {str(e)}", exc_info=True)
-            db.rollback()
-            return False, "密码重置失败"
-    
-    @staticmethod
-    def get_user_by_id(db: Session, user_id: int) -> Optional[SysUser]:
-        """
-        根据用户ID获取用户对象
+        重置用户密码（异步，通常由管理员操作）
 
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
+            username: 用户名
+            new_password: 新密码
+
+        Returns:
+            (是否成功, 消息)
+        """
+        try:
+            # 获取用户
+            result = await db.execute(
+                select(SysUser).filter(
+                    SysUser.user_name == username,
+                    SysUser.is_deleted == False
+                )
+            )
+            user = result.scalars().first()
+
+            if not user:
+                return False, "用户不存在"
+
+            # 更新密码
+            user.password = hash_password(new_password)
+            user.update_time = datetime.utcnow()
+
+            await db.commit()
+            await db.refresh(user)
+
+            logger.info(f"用户 {user.user_name} 密码重置成功")
+            return True, "密码重置成功"
+
+        except Exception as e:
+            logger.error(f"重置密码时发生异常: {str(e)}", exc_info=True)
+            await db.rollback()
+            return False, "密码重置失败"
+
+    @staticmethod
+    async def reset_password_by_id(db: AsyncSession, user_id: int, new_password: str) -> Tuple[bool, str]:
+        """
+        重置用户密码（通过用户ID，通常由管理员操作）（异步）
+
+        Args:
+            db: 异步数据库会话
+            user_id: 用户ID
+            new_password: 新密码
+
+        Returns:
+            (是否成功, 消息)
+        """
+        try:
+            # 获取用户
+            result = await db.execute(
+                select(SysUser).filter(
+                    SysUser.id == user_id,
+                    SysUser.is_deleted == False
+                )
+            )
+            user = result.scalars().first()
+
+            if not user:
+                return False, "用户不存在"
+
+            # 更新密码
+            user.password = hash_password(new_password)
+            user.update_time = datetime.utcnow()
+
+            await db.commit()
+            await db.refresh(user)
+
+            logger.info(f"用户 {user.user_name} (ID: {user_id}) 密码重置成功")
+            return True, "密码重置成功"
+
+        except Exception as e:
+            logger.error(f"重置密码时发生异常: {str(e)}", exc_info=True)
+            await db.rollback()
+            return False, "密码重置失败"
+
+    @staticmethod
+    async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[SysUser]:
+        """
+        根据用户ID获取用户对象（异步）
+
+        Args:
+            db: 异步数据库会话
             user_id: 用户ID
 
         Returns:
             用户对象或None
         """
         try:
-            user = db.query(SysUser).filter(
-                SysUser.id == user_id,
-                SysUser.is_deleted == False
-            ).first()
+            result = await db.execute(
+                select(SysUser).filter(
+                    SysUser.id == user_id,
+                    SysUser.is_deleted == False
+                )
+            )
+            user = result.scalars().first()
             return user
         except Exception as e:
             logger.error(f"获取用户失败: {str(e)}", exc_info=True)
             return None
 
     @staticmethod
-    def validate_and_get_user_by_token(db: Session, token: str) -> Optional[SysUser]:
+    async def validate_and_get_user_by_token(db: AsyncSession, token: str) -> Optional[SysUser]:
         """
-        通过令牌验证并获取用户信息
-        
+        通过令牌验证并获取用户信息（异步）
+
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             token: 访问令牌
-            
+
         Returns:
             用户对象或None
         """
         from app.core.auth import verify_token
-        
+
         payload = verify_token(token)
         if not payload:
             return None
-        
+
         user_id = payload.get("user_id")
         if not user_id:
             return None
-        
-        user = db.query(SysUser).filter(
-            SysUser.id == user_id,
-            SysUser.is_deleted == False
-        ).first()
-        
+
+        result = await db.execute(
+            select(SysUser).filter(
+                SysUser.id == user_id,
+                SysUser.is_deleted == False
+            )
+        )
+        user = result.scalars().first()
+
         return user
