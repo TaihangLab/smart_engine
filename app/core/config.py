@@ -37,6 +37,12 @@ class Settings(BaseSettings):
     ALERT_GENERATION_POOL_SIZE: int = Field(default=10, description="预警生成线程池大小")
     MESSAGE_PROCESSING_POOL_SIZE: int = Field(default=5, description="消息处理线程池大小")
     IMAGE_PROCESSING_POOL_SIZE: int = Field(default=8, description="图像处理线程池大小")
+
+    # 异步模式配置
+    USE_ASYNC_SCHEDULER: bool = Field(default=False, description="是否使用异步调度器（AsyncIOScheduler）")
+    USE_ASYNC_SESSION: bool = Field(default=False, description="是否使用异步数据库会话（AsyncSession）")
+    USE_ASYNC_QUEUE: bool = Field(default=False, description="是否使用异步队列服务")
+    USE_ASYNC_LLM_EXECUTOR: bool = Field(default=False, description="是否使用异步LLM任务执行器")
     
     # Triton服务器配置
     TRITON_ENABLED: bool = Field(default=False, description="是否启用Triton客户端")

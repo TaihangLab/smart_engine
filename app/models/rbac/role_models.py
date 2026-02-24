@@ -7,8 +7,7 @@
 
 from typing import Optional
 from datetime import datetime
-from pydantic import BaseModel, Field, validator
-from pydantic import ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from .rbac_base import BaseResponse
 
 
@@ -73,7 +72,8 @@ class RoleListResponse(BaseModel):
         populate_by_name=True
     )
 
-    @validator('create_time', pre=True, always=True)
+    @field_validator('create_time', mode='before')
+    @classmethod
     def parse_datetime(cls, v):
         """处理无效的日期时间值"""
         if v is None:

@@ -2,27 +2,27 @@
 # -*- coding: utf-8 -*-
 
 """
-RBAC基础服务类
+RBAC基础服务类（异步）
 """
 
 import logging
 from typing import Optional, Dict, Any
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.rbac import RbacDao
 
 logger = logging.getLogger(__name__)
 
 
 class BaseRbacService:
-    """RBAC基础服务类"""
-    
+    """RBAC基础服务类（异步）"""
+
     @staticmethod
-    def has_permission(db: Session, user_name: str, tenant_id: int, url: str, method: str) -> bool:
+    async def has_permission(db: AsyncSession, user_name: str, tenant_id: int, url: str, method: str) -> bool:
         """
-        检查用户是否有权限访问指定URL和方法
+        检查用户是否有权限访问指定URL和方法（异步）
 
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             user_name: 用户名
             tenant_id: 租户编码
             url: 请求URL路径
@@ -33,7 +33,7 @@ class BaseRbacService:
         """
         try:
             # 获取用户权限列表
-            permissions = RbacDao.get_user_permissions(db, user_name, tenant_id)
+            permissions = await RbacDao.get_user_permissions(db, user_name, tenant_id)
 
             if not permissions:
                 logger.warning(f"用户 {user_name}@{tenant_id} 没有任何权限")
@@ -53,17 +53,17 @@ class BaseRbacService:
             return False
 
     @staticmethod
-    def get_user_permission_list(db: Session, user_name: str, tenant_id: int) -> list:
+    async def get_user_permission_list(db: AsyncSession, user_name: str, tenant_id: int) -> list:
         """
-        获取用户权限列表
+        获取用户权限列表（异步）
 
         Args:
-            db: 数据库会话
+            db: 异步数据库会话
             user_name: 用户名
             tenant_id: 租户编码
 
         Returns:
             权限对象列表
         """
-        permissions = RbacDao.get_user_permissions(db, user_name, tenant_id)
+        permissions = await RbacDao.get_user_permissions(db, user_name, tenant_id)
         return permissions

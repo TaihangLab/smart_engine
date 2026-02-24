@@ -1,39 +1,53 @@
 from typing import List
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 from app.models.rbac import SysRolePermission, SysPermission, SysRole
 from app.utils.id_generator import generate_id
 
 
 class RolePermissionDao:
-    """角色权限关联数据访问对象"""
+    """角色权限关联数据访问对象（异步）"""
 
     @staticmethod
-    def get_role_permission(db: Session, role_code: str, permission_code: str, tenant_id: int):
-        """获取角色权限关联"""
-        return db.query(SysRolePermission).join(
-            SysRole, SysRole.id == SysRolePermission.role_id
-        ).join(
-            SysPermission, SysPermission.id == SysRolePermission.permission_id
-        ).filter(
-            SysRole.role_code == role_code,
-            SysPermission.permission_code == permission_code
-        ).first()
+    async def get_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: int):
+        """获取角色权限关联（异步）"""
+        result = await db.execute(
+            select(SysRolePermission).join(
+                SysRole, SysRole.id == SysRolePermission.role_id
+            ).join(
+                SysPermission, SysPermission.id == SysRolePermission.permission_id
+            ).filter(
+                SysRole.role_code == role_code,
+                SysPermission.permission_code == permission_code
+            )
+        )
+        return result.scalars().first()
 
     @staticmethod
-    def create_role_permission(db: Session, role_code: str, permission_code: str, tenant_id: int):
-        """创建角色权限关联"""
+    async def create_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: int):
+        """创建角色权限关联（异步）"""
         # 首先获取角色和权限的ID
-        role = db.query(SysRole).filter(SysRole.role_code == role_code, SysRole.tenant_id == tenant_id).first()
-        permission = db.query(SysPermission).filter(SysPermission.permission_code == permission_code).first()
+        result = await db.execute(
+            select(SysRole).filter(SysRole.role_code == role_code, SysRole.tenant_id == tenant_id)
+        )
+        role = result.scalars().first()
+
+        result = await db.execute(
+            select(SysPermission).filter(SysPermission.permission_code == permission_code)
+        )
+        permission = result.scalars().first()
 
         if not role or not permission:
             raise ValueError("角色或权限不存在")
 
         # 检查是否已存在关联
-        existing = db.query(SysRolePermission).filter(
-            SysRolePermission.role_id == role.id,
-            SysRolePermission.permission_id == permission.id
-        ).first()
+        result = await db.execute(
+            select(SysRolePermission).filter(
+                SysRolePermission.role_id == role.id,
+                SysRolePermission.permission_id == permission.id
+            )
+        )
+        existing = result.scalars().first()
 
         if existing:
             return existing  # 已存在，返回现有记录
@@ -44,80 +58,95 @@ class RolePermissionDao:
             permission_id=permission.id
         )
         db.add(role_permission)
-        db.commit()
-        db.refresh(role_permission)
+        await db.commit()
+        await db.refresh(role_permission)
         return role_permission
 
     @staticmethod
-    def get_role_permissions(db: Session, role_code: str, tenant_id: int):
-        """获取角色的权限列表"""
-        return db.query(SysPermission).join(
-            SysRolePermission, SysPermission.id == SysRolePermission.permission_id
-        ).join(
-            SysRole, SysRole.id == SysRolePermission.role_id
-        ).filter(
-            SysRole.role_code == role_code,
-            SysRole.tenant_id == tenant_id,
-            SysPermission.is_deleted == False,
-            SysPermission.status == 0
-        ).all()
+    async def get_role_permissions(db: AsyncSession, role_code: str, tenant_id: int):
+        """获取角色的权限列表（异步）"""
+        result = await db.execute(
+            select(SysPermission).join(
+                SysRolePermission, SysPermission.id == SysRolePermission.permission_id
+            ).join(
+                SysRole, SysRole.id == SysRolePermission.role_id
+            ).filter(
+                SysRole.role_code == role_code,
+                SysRole.tenant_id == tenant_id,
+                SysPermission.is_deleted == False,
+                SysPermission.status == 0
+            )
+        )
+        return list(result.scalars().all())
 
     @staticmethod
-    def get_role_permissions_by_id(db: Session, role_id: int, tenant_id: int):
-        """获取角色的权限列表（通过ID）"""
-        return db.query(SysPermission).join(
-            SysRolePermission, SysPermission.id == SysRolePermission.permission_id
-        ).filter(
-            SysRolePermission.role_id == role_id,
-            SysPermission.is_deleted == False,
-            SysPermission.status == 0
-        ).all()
+    async def get_role_permissions_by_id(db: AsyncSession, role_id: int, tenant_id: int):
+        """获取角色的权限列表（通过ID）（异步）"""
+        result = await db.execute(
+            select(SysPermission).join(
+                SysRolePermission, SysPermission.id == SysRolePermission.permission_id
+            ).filter(
+                SysRolePermission.role_id == role_id,
+                SysPermission.is_deleted == False,
+                SysPermission.status == 0
+            )
+        )
+        return list(result.scalars().all())
 
     @staticmethod
-    def get_roles_by_permission(db: Session, permission_code: str, tenant_id: int):
-        """获取拥有指定权限的角色列表"""
-        return db.query(SysRole).join(
-            SysRolePermission, SysRole.id == SysRolePermission.role_id
-        ).join(
-            SysPermission, SysPermission.id == SysRolePermission.permission_id
-        ).filter(
-            SysPermission.permission_code == permission_code,
-            SysRole.tenant_id == tenant_id,
-            SysRole.is_deleted == False,
-            SysRole.status == 0
-        ).all()
+    async def get_roles_by_permission(db: AsyncSession, permission_code: str, tenant_id: int):
+        """获取拥有指定权限的角色列表（异步）"""
+        result = await db.execute(
+            select(SysRole).join(
+                SysRolePermission, SysRole.id == SysRolePermission.role_id
+            ).join(
+                SysPermission, SysPermission.id == SysRolePermission.permission_id
+            ).filter(
+                SysPermission.permission_code == permission_code,
+                SysRole.tenant_id == tenant_id,
+                SysRole.is_deleted == False,
+                SysRole.status == 0
+            )
+        )
+        return list(result.scalars().all())
 
     @staticmethod
-    def get_roles_by_permission_by_id(db: Session, permission_id: int, tenant_id: int):
-        """获取拥有指定权限的角色列表（通过ID）"""
-        return db.query(SysRole).join(
-            SysRolePermission, SysRole.id == SysRolePermission.role_id
-        ).filter(
-            SysRolePermission.permission_id == permission_id,
-            SysRole.tenant_id == tenant_id,
-            SysRole.is_deleted == False,
-            SysRole.status == 0
-        ).all()
+    async def get_roles_by_permission_by_id(db: AsyncSession, permission_id: int, tenant_id: int):
+        """获取拥有指定权限的角色列表（通过ID）（异步）"""
+        result = await db.execute(
+            select(SysRole).join(
+                SysRolePermission, SysRole.id == SysRolePermission.role_id
+            ).filter(
+                SysRolePermission.permission_id == permission_id,
+                SysRole.tenant_id == tenant_id,
+                SysRole.is_deleted == False,
+                SysRole.status == 0
+            )
+        )
+        return list(result.scalars().all())
 
     @staticmethod
-    def remove_role_permission(db: Session, role_code: str, permission_code: str, tenant_id: int):
-        """移除角色的权限"""
-        role_permission = RolePermissionDao.get_role_permission(db, role_code, permission_code, tenant_id)
+    async def remove_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: int):
+        """移除角色的权限（异步）"""
+        role_permission = await RolePermissionDao.get_role_permission(db, role_code, permission_code, tenant_id)
         if role_permission:
-            db.delete(role_permission)
-            db.commit()
+            await db.delete(role_permission)
+            await db.commit()
             return True
         return False
 
     @staticmethod
-    def assign_permission_to_role_by_id(db: Session, role_id: int, permission_id: int, tenant_id: int) -> bool:
-        """为角色分配权限（通过ID）"""
+    async def assign_permission_to_role_by_id(db: AsyncSession, role_id: int, permission_id: int, tenant_id: int) -> bool:
+        """为角色分配权限（通过ID）（异步）"""
         try:
             # 检查是否已存在
-            existing = db.query(SysRolePermission).filter(
-                SysRolePermission.role_id == role_id,
-                SysRolePermission.permission_id == permission_id
-            ).first()
+            result = await db.execute(
+                select(SysRolePermission).filter(
+                    SysRolePermission.role_id == role_id,
+                    SysRolePermission.permission_id == permission_id
+                )
+            )
+            existing = result.scalars().first()
             if existing:
                 return False  # 已存在，不重复分配
 
@@ -128,34 +157,37 @@ class RolePermissionDao:
                 permission_id=permission_id
             )
             db.add(role_permission)
-            db.commit()
+            await db.commit()
             return True
         except Exception as e:
             return False
 
     @staticmethod
-    def remove_permission_from_role_by_id(db: Session, role_id: int, permission_id: int, tenant_id: int):
-        """移除角色的权限（通过ID）"""
-        role_permission = db.query(SysRolePermission).filter(
-            SysRolePermission.role_id == role_id,
-            SysRolePermission.permission_id == permission_id
-        ).first()
+    async def remove_permission_from_role_by_id(db: AsyncSession, role_id: int, permission_id: int, tenant_id: int):
+        """移除角色的权限（通过ID）（异步）"""
+        result = await db.execute(
+            select(SysRolePermission).filter(
+                SysRolePermission.role_id == role_id,
+                SysRolePermission.permission_id == permission_id
+            )
+        )
+        role_permission = result.scalars().first()
         if role_permission:
-            db.delete(role_permission)
-            db.commit()
+            await db.delete(role_permission)
+            await db.commit()
             return True
         return False
 
     @staticmethod
-    def assign_permission_to_role(db: Session, role_code: str, permission_code: str, tenant_id: int) -> bool:
-        """为角色分配权限"""
+    async def assign_permission_to_role(db: AsyncSession, role_code: str, permission_code: str, tenant_id: int) -> bool:
+        """为角色分配权限（异步）"""
         try:
             # 检查是否已存在
-            existing = RolePermissionDao.get_role_permission(db, role_code, permission_code, tenant_id)
+            existing = await RolePermissionDao.get_role_permission(db, role_code, permission_code, tenant_id)
             if existing:
                 return False  # 已存在，不重复分配
             # 创建新的角色权限关联
-            RolePermissionDao.create_role_permission(db, role_code, permission_code, tenant_id)
+            await RolePermissionDao.create_role_permission(db, role_code, permission_code, tenant_id)
             return True
         except Exception as e:
             return False

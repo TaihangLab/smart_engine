@@ -20,7 +20,7 @@ import asyncio
 import logging
 from typing import Set, Optional, Dict, Any
 from datetime import datetime
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 
@@ -28,7 +28,7 @@ from app.core.config import settings
 SSE_ENABLED = getattr(settings, 'SSE_MANAGER_ENABLED', True)
 
 # 仅在SSE启用时导入依赖
-SessionLocal = None
+AsyncSessionLocal = None
 AlertNotificationLog = None
 AlertNotificationLogCreate = None
 NotificationStatus = None
@@ -37,7 +37,7 @@ generate_message_id = None
 
 if SSE_ENABLED:
     try:
-        from app.db.session import SessionLocal
+        from app.db.async_session import AsyncSessionLocal
         from app.models.compensation import (
             AlertNotificationLog, AlertNotificationLogCreate,
             NotificationStatus, NotificationChannel
@@ -193,130 +193,121 @@ class SSEConnectionManager:
         return success_count
     
     async def _create_notification_log(self, alert_data: Dict[str, Any], client_queue: asyncio.Queue) -> AlertNotificationLog:
-        """创建通知日志记录"""
+        """创建通知日志记录（异步）"""
         try:
-            db = SessionLocal()
-            
-            # 创建通知日志
-            notification_log = AlertNotificationLog(
-                alert_id=alert_data.get('alert_id', 0),
-                message_id=alert_data.get('message_id', generate_message_id()),
-                client_ip=getattr(client_queue, '_client_ip', 'unknown'),
-                user_agent=getattr(client_queue, '_user_agent', 'unknown'),
-                session_id=str(id(client_queue)),
-                channel=NotificationChannel.SSE,
-                notification_content=alert_data,
-                status=NotificationStatus.SENDING,
-                ack_required=alert_data.get('ack_required', True),
-                ack_timeout_seconds=self.ack_timeout_seconds
-            )
-            
-            db.add(notification_log)
-            db.commit()
-            db.refresh(notification_log)
-            
-            logger.debug(f"🎯 通知日志已创建 [ID: {notification_log.id}]")
-            return notification_log
-            
+            async with AsyncSessionLocal() as db:
+                # 创建通知日志
+                notification_log = AlertNotificationLog(
+                    alert_id=alert_data.get('alert_id', 0),
+                    message_id=alert_data.get('message_id', generate_message_id()),
+                    client_ip=getattr(client_queue, '_client_ip', 'unknown'),
+                    user_agent=getattr(client_queue, '_user_agent', 'unknown'),
+                    session_id=str(id(client_queue)),
+                    channel=NotificationChannel.SSE,
+                    notification_content=alert_data,
+                    status=NotificationStatus.SENDING,
+                    ack_required=alert_data.get('ack_required', True),
+                    ack_timeout_seconds=self.ack_timeout_seconds
+                )
+
+                db.add(notification_log)
+                await db.commit()
+                await db.refresh(notification_log)
+
+                logger.debug(f"🎯 通知日志已创建 [ID: {notification_log.id}]")
+                return notification_log
+
         except Exception as e:
             logger.error(f"❌ 创建通知日志失败: {e}")
-            if db:
-                db.rollback()
             return None
-        finally:
-            if db:
-                db.close()
     
-    async def _update_notification_status(self, notification_id: int, status: NotificationStatus, 
+    async def _update_notification_status(self, notification_id: int, status: NotificationStatus,
                                         error_message: str = None):
-        """更新通知状态"""
+        """更新通知状态（异步）"""
         try:
-            db = SessionLocal()
-            
-            notification_log = db.query(AlertNotificationLog).filter(
-                AlertNotificationLog.id == notification_id
-            ).first()
-            
-            if notification_log:
-                notification_log.status = status
-                notification_log.updated_at = datetime.utcnow()
-                
-                if status == NotificationStatus.DELIVERED:
-                    notification_log.sent_at = datetime.utcnow()
-                    notification_log.delivered_at = datetime.utcnow()
-                
-                if error_message:
-                    notification_log.error_message = error_message
-                
-                db.commit()
-                logger.debug(f"🎯 通知状态已更新 [ID: {notification_id}] → {status.name}")
-            
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+
+                result = await db.execute(
+                    select(AlertNotificationLog).filter(
+                        AlertNotificationLog.id == notification_id
+                    )
+                )
+                notification_log = result.scalars().first()
+
+                if notification_log:
+                    notification_log.status = status
+                    notification_log.updated_at = datetime.utcnow()
+
+                    if status == NotificationStatus.DELIVERED:
+                        notification_log.sent_at = datetime.utcnow()
+                        notification_log.delivered_at = datetime.utcnow()
+
+                    if error_message:
+                        notification_log.error_message = error_message
+
+                    await db.commit()
+                    logger.debug(f"🎯 通知状态已更新 [ID: {notification_id}] → {status.name}")
+
         except Exception as e:
             logger.error(f"❌ 更新通知状态失败: {e}")
-            if db:
-                db.rollback()
-        finally:
-            if db:
-                db.close()
     
     async def _check_ack_timeout(self, notification_id: int):
-        """⏰ 检查ACK超时"""
+        """⏰ 检查ACK超时（异步）"""
         await asyncio.sleep(self.ack_timeout_seconds)
-        
+
         try:
-            db = SessionLocal()
-            
-            notification_log = db.query(AlertNotificationLog).filter(
-                AlertNotificationLog.id == notification_id
-            ).first()
-            
-            if notification_log and not notification_log.ack_received:
-                # ACK超时，标记为过期
-                notification_log.status = NotificationStatus.EXPIRED
-                notification_log.updated_at = datetime.utcnow()
-                db.commit()
-                
-                logger.warning(f"⏰ ACK超时: notification_id={notification_id}")
-            
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+
+                result = await db.execute(
+                    select(AlertNotificationLog).filter(
+                        AlertNotificationLog.id == notification_id
+                    )
+                )
+                notification_log = result.scalars().first()
+
+                if notification_log and not notification_log.ack_received:
+                    # ACK超时，标记为过期
+                    notification_log.status = NotificationStatus.EXPIRED
+                    notification_log.updated_at = datetime.utcnow()
+                    await db.commit()
+
+                    logger.warning(f"⏰ ACK超时: notification_id={notification_id}")
+
         except Exception as e:
             logger.error(f"❌ 检查ACK超时失败: {e}")
-            if db:
-                db.rollback()
-        finally:
-            if db:
-                db.close()
-    
+
     async def acknowledge_notification(self, notification_id: int, client_queue: asyncio.Queue) -> bool:
-        """📧 客户端确认通知接收"""
+        """📧 客户端确认通知接收（异步）"""
         try:
-            db = SessionLocal()
-            
-            notification_log = db.query(AlertNotificationLog).filter(
-                AlertNotificationLog.id == notification_id,
-                AlertNotificationLog.session_id == str(id(client_queue))
-            ).first()
-            
-            if notification_log:
-                notification_log.ack_received = True
-                notification_log.ack_time = datetime.utcnow()
-                notification_log.status = NotificationStatus.ACK_RECEIVED
-                notification_log.updated_at = datetime.utcnow()
-                db.commit()
-                
-                logger.info(f"📧 通知确认成功 [ID: {notification_id}]")
-                return True
-            else:
-                logger.warning(f"⚠️ 未找到对应的通知记录 [ID: {notification_id}]")
-                return False
-            
+            async with AsyncSessionLocal() as db:
+                from sqlalchemy import select
+
+                result = await db.execute(
+                    select(AlertNotificationLog).filter(
+                        AlertNotificationLog.id == notification_id,
+                        AlertNotificationLog.session_id == str(id(client_queue))
+                    )
+                )
+                notification_log = result.scalars().first()
+
+                if notification_log:
+                    notification_log.ack_received = True
+                    notification_log.ack_time = datetime.utcnow()
+                    notification_log.status = NotificationStatus.ACK_RECEIVED
+                    notification_log.updated_at = datetime.utcnow()
+                    await db.commit()
+
+                    logger.info(f"📧 通知确认成功 [ID: {notification_id}]")
+                    return True
+                else:
+                    logger.warning(f"⚠️ 未找到对应的通知记录 [ID: {notification_id}]")
+                    return False
+
         except Exception as e:
             logger.error(f"❌ 通知确认失败: {e}")
-            if db:
-                db.rollback()
             return False
-        finally:
-            if db:
-                db.close()
     
     async def send_to_client(self, client_queue: asyncio.Queue, message: Any, timeout: Optional[float] = None) -> bool:
         """🚀 高性能异步发送消息到客户端"""

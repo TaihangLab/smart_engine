@@ -7,8 +7,7 @@ RBAC模块基础模型和配置
 
 from typing import Optional, List, Any
 from datetime import datetime, date
-from pydantic import BaseModel, Field, EmailStr, validator, field_validator
-from pydantic import ConfigDict
+from pydantic import BaseModel, Field, EmailStr, field_validator, ConfigDict
 
 
 # ===========================================
@@ -52,7 +51,8 @@ class BaseResponse(BaseModel):
         populate_by_name=True
     )
 
-    @validator('create_time', 'update_time', pre=True, always=True)
+    @field_validator('create_time', 'update_time', mode='before')
+    @classmethod
     def parse_datetime(cls, v):
         """处理无效的日期时间值"""
         if v is None:
