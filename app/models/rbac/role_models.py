@@ -17,7 +17,7 @@ from .rbac_base import BaseResponse
 
 class RoleBase(BaseModel):
     """角色基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID（支持字符串类型）")
     role_name: str = Field(..., description="角色名称", max_length=64)
     role_code: str = Field(..., description="角色编码", max_length=64)
     status: int = Field(0, description="状态: 0(启用)、1(禁用)")
@@ -59,7 +59,7 @@ class RoleResponse(RoleBase, BaseResponse):
 class RoleListResponse(BaseModel):
     """角色列表响应模型"""
     id: int
-    tenant_id: int
+    tenant_id: str
     role_name: str
     role_code: str
     status: int

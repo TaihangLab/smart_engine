@@ -44,14 +44,14 @@ async def get_current_user(request: Request) -> UserInfo:
 
 async def get_current_user_tenant_id(
     current_user: UserInfo = Depends(get_current_user)
-) -> int:
+) -> str:
     """
     获取当前用户的租户ID（依赖注入）
 
     使用示例:
         @router.get("/users")
         async def get_users(
-            tenant_id: int = Depends(get_current_user_tenant_id)
+            tenant_id: str = Depends(get_current_user_tenant_id)
         ):
             # tenant_id 是当前用户的租户ID
             pass
@@ -60,7 +60,7 @@ async def get_current_user_tenant_id(
         current_user: 当前用户对象
 
     Returns:
-        租户ID
+        租户ID（字符串类型）
 
     Raises:
         HTTPException: 未找到租户信息

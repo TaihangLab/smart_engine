@@ -17,7 +17,7 @@ class BaseRbacService:
     """RBAC基础服务类（异步）"""
 
     @staticmethod
-    async def has_permission(db: AsyncSession, user_name: str, tenant_id: int, url: str, method: str) -> bool:
+    async def has_permission(db: AsyncSession, user_name: str, tenant_id: str, url: str, method: str) -> bool:
         """
         检查用户是否有权限访问指定URL和方法（异步）
 
@@ -53,7 +53,7 @@ class BaseRbacService:
             return False
 
     @staticmethod
-    async def get_user_permission_list(db: AsyncSession, user_name: str, tenant_id: int) -> list:
+    async def get_user_permission_list(db: AsyncSession, user_name: str, tenant_id: str) -> list:
         """
         获取用户权限列表（异步）
 

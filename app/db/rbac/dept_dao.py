@@ -200,7 +200,7 @@ class DeptDao:
         return result.scalars().first()
 
     @staticmethod
-    async def get_dept_by_name(db: AsyncSession, name: str, tenant_id: int) -> Optional[SysDept]:
+    async def get_dept_by_name(db: AsyncSession, name: str, tenant_id: str) -> Optional[SysDept]:
         """根据部门名称和租户ID获取部门（异步）"""
         result = await db.execute(
             select(SysDept).filter(
@@ -507,7 +507,7 @@ class DeptDao:
         return root_depts
 
     @staticmethod
-    async def get_depts_by_tenant_and_parent(db: AsyncSession, tenant_id: int, parent_id: Optional[int], skip: int = 0, limit: int = 100) -> List[SysDept]:
+    async def get_depts_by_tenant_and_parent(db: AsyncSession, tenant_id: str, parent_id: Optional[int], skip: int = 0, limit: int = 100) -> List[SysDept]:
         """根据租户和父部门ID获取部门列表（异步）
 
         Args:
@@ -541,7 +541,7 @@ class DeptDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_depts_by_filters(db: AsyncSession, tenant_id: int, name: str = None, parent_id: int = None, skip: int = 0, limit: int = 100) -> List[SysDept]:
+    async def get_depts_by_filters(db: AsyncSession, tenant_id: str, name: str = None, parent_id: int = None, skip: int = 0, limit: int = 100) -> List[SysDept]:
         """根据多种条件获取部门列表（异步）
 
         Args:
@@ -580,7 +580,7 @@ class DeptDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_depts_by_filters_with_sort(db: AsyncSession, tenant_id: int, name: str = None, parent_id: int = None, status: int = None, skip: int = 0, limit: int = 100) -> List[SysDept]:
+    async def get_depts_by_filters_with_sort(db: AsyncSession, tenant_id: str, name: str = None, parent_id: int = None, status: int = None, skip: int = 0, limit: int = 100) -> List[SysDept]:
         """根据多种条件获取部门列表，支持排序（异步）
 
         Args:
@@ -619,7 +619,7 @@ class DeptDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_dept_count_by_filters(db: AsyncSession, tenant_id: int, name: str = None, status: int = None) -> int:
+    async def get_dept_count_by_filters(db: AsyncSession, tenant_id: str, name: str = None, status: int = None) -> int:
         """根据多种条件获取部门数量（异步）
 
         Args:
@@ -662,7 +662,7 @@ class DeptDao:
         return result.scalar() or 0
 
     @staticmethod
-    async def get_dept_count_by_tenant(db: AsyncSession, tenant_id: int) -> int:
+    async def get_dept_count_by_tenant(db: AsyncSession, tenant_id: str) -> int:
         """获取租户下的部门数量（异步）
 
         Args:

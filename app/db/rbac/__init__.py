@@ -31,7 +31,7 @@ class RbacDao:
 
     # 保留一些核心的复合查询方法
     @staticmethod
-    def get_user_permissions(db: Session, user_name: str, tenant_id: int):
+    def get_user_permissions(db: Session, user_name: str, tenant_id: str):
         """获取用户所有权限"""
         from app.models.rbac import SysUser, SysRole, SysPermission, SysUserRole, SysRolePermission
 
@@ -52,7 +52,7 @@ class RbacDao:
         ).all()
 
     @staticmethod
-    def get_or_create_tenant(db: Session, tenant_id: int, tenant_name: str = ""):
+    def get_or_create_tenant(db: Session, tenant_id: str, tenant_name: str = ""):
         """获取或创建租户"""
         tenant = TenantDao.get_tenant_by_id(db, tenant_id)
         if not tenant:
@@ -67,7 +67,7 @@ class RbacDao:
         return tenant
 
     @staticmethod
-    def get_or_create_role(db: Session, role_code: str, role_name: str, tenant_id: int):
+    def get_or_create_role(db: Session, role_code: str, role_name: str, tenant_id: str):
         """获取或创建角色"""
         role = RoleDao.get_role_by_code_and_tenant_id(db, role_code, tenant_id)
         if not role:

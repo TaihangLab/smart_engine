@@ -17,7 +17,7 @@ from .rbac_base import BaseResponse, PaginatedResponse
 
 class UserBase(BaseModel):
     """用户基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID（支持字符串类型）")
     user_name: str = Field(..., description="用户名", max_length=64)
     dept_id: Optional[int] = Field(None, description="部门id")
     position_id: Optional[int] = Field(None, description="岗位id")
@@ -71,7 +71,7 @@ class UserResponse(UserBase, BaseResponse):
 class UserListResponse(BaseModel):
     """用户列表响应模型"""
     id: int
-    tenant_id: int
+    tenant_id: str
     user_name: str
     nick_name: str
     email: Optional[str] = None

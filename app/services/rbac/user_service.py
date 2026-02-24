@@ -41,10 +41,14 @@ class UserService:
         display_name = user_info.get("userName", user_name)
 
         # 获取或创建租户
-        await UserService.get_or_create_tenant(db, tenant_id, user_info.get("tenantName", tenant_id))
+        await UserService.get_or_create_tenant(
+            db, tenant_id, user_info.get("tenantName", tenant_id)
+        )
 
         # 检查用户是否存在
-        existing_user = await RbacDao.user.get_user_by_user_name(db, user_name, tenant_id)
+        existing_user = await RbacDao.user.get_user_by_user_name(
+            db, user_name, tenant_id
+        )
         if existing_user:
             logger.debug(f"用户已存在: {user_name}@{tenant_id}")
             return existing_user
@@ -56,7 +60,7 @@ class UserService:
             "tenant_id": tenant_id,
             "status": 0,
             "create_by": "system",
-            "update_by": "system"
+            "update_by": "system",
         }
 
         user = await RbacDao.user.create_user(db, user_data)
@@ -68,12 +72,14 @@ class UserService:
         return user
 
     @staticmethod
-    async def get_or_create_tenant(db: AsyncSession, tenant_id: int, tenant_name: str = ""):
+    async def get_or_create_tenant(
+        db: AsyncSession, tenant_id: str, tenant_name: str = ""
+    ):
         """获取或创建租户（异步）"""
         return await RbacDao.get_or_create_tenant(db, tenant_id, tenant_name)
 
     @staticmethod
-    async def assign_default_role(db: AsyncSession, user_id: int, tenant_id: int):
+    async def assign_default_role(db: AsyncSession, user_id: int, tenant_id: str):
         """为用户分配默认角色（异步）"""
         # 获取用户信息以获取用户名
         user = await RbacDao.user.get_user_by_id(db, user_id)
@@ -82,26 +88,42 @@ class UserService:
             return
 
         # 获取默认角色（例如：normal_user）
-        default_role = await RbacDao.get_or_create_role(db, "normal_user", "普通用户", tenant_id)
+        default_role = await RbacDao.get_or_create_role(
+            db, "normal_user", "普通用户", tenant_id
+        )
 
         # 检查是否已存在关联
-        existing_user_role = await RbacDao.user_role.get_user_role(db, user.user_name, default_role.role_code, tenant_id)
+        existing_user_role = await RbacDao.user_role.get_user_role(
+            db, user.user_name, default_role.role_code, tenant_id
+        )
         if not existing_user_role:
-            await RbacDao.user_role.assign_role_to_user(db, user.user_name, default_role.role_code, tenant_id)
-            logger.debug(f"为用户 {user.user_name} 分配默认角色: {default_role.role_code}")
+            await RbacDao.user_role.assign_role_to_user(
+                db, user.user_name, default_role.role_code, tenant_id
+            )
+            logger.debug(
+                f"为用户 {user.user_name} 分配默认角色: {default_role.role_code}"
+            )
 
     @staticmethod
-    async def get_user_by_user_name_and_tenant_id(db: AsyncSession, user_name: str, tenant_id: int) -> Optional[SysUser]:
+    async def get_user_by_user_name_and_tenant_id(
+        db: AsyncSession, user_name: str, tenant_id: str
+    ) -> Optional[SysUser]:
         """根据用户名和租户ID获取用户（异步）"""
-        return await RbacDao.user.get_user_by_user_name_and_tenant_id(db, user_name, tenant_id)
+        return await RbacDao.user.get_user_by_user_name_and_tenant_id(
+            db, user_name, tenant_id
+        )
 
     @staticmethod
-    async def get_user_by_user_name(db: AsyncSession, user_name: str, tenant_id: int) -> Optional[SysUser]:
+    async def get_user_by_user_name(
+        db: AsyncSession, user_name: str, tenant_id: str
+    ) -> Optional[SysUser]:
         """根据用户名和租户编码获取用户（异步）"""
         # 由于tenant_id字段已替换为tenant_id，需要先将tenant_id转换为tenant_id
         try:
             tenant_id = int(tenant_id)
-            return await RbacDao.user.get_user_by_user_name_and_tenant_id(db, user_name, tenant_id)
+            return await RbacDao.user.get_user_by_user_name_and_tenant_id(
+                db, user_name, tenant_id
+            )
         except ValueError:
             # 如果tenant_id不是数字，无法转换为ID，则返回None
             return None
@@ -112,7 +134,9 @@ class UserService:
         return await RbacDao.user.get_user_by_id(db, id)
 
     @staticmethod
-    async def get_user_by_user_id_and_tenant_id(db: AsyncSession, user_id: str, tenant_id: int) -> Optional[SysUser]:
+    async def get_user_by_user_id_and_tenant_id(
+        db: AsyncSession, user_id: str, tenant_id: str
+    ) -> Optional[SysUser]:
         """
         根据userId和tenantId获取用户（异步）
         文档要求：根据 tenantId + userId 检查用户
@@ -125,18 +149,24 @@ class UserService:
         Returns:
             用户对象或None
         """
-        return await RbacDao.user.get_user_by_user_id_and_tenant_id(db, user_id, tenant_id)
+        return await RbacDao.user.get_user_by_user_id_and_tenant_id(
+            db, user_id, tenant_id
+        )
 
     @staticmethod
     async def create_user(db: AsyncSession, user_data: Dict[str, Any]) -> SysUser:
         """创建用户（异步）"""
         # 检查用户是否已存在
-        existing_user = await RbacDao.user.get_user_by_user_name(db, user_data.get("user_name"), user_data.get("tenant_id"))
+        existing_user = await RbacDao.user.get_user_by_user_name(
+            db, user_data.get("user_name"), user_data.get("tenant_id")
+        )
         if existing_user:
-            raise ValueError(f"用户 {user_data.get('user_name')} 在租户 {user_data.get('tenant_id')} 中已存在")
+            raise ValueError(
+                f"用户 {user_data.get('user_name')} 在租户 {user_data.get('tenant_id')} 中已存在"
+            )
 
         # 获取tenant_id
-        tenant_id = user_data.get('tenant_id')
+        tenant_id = user_data.get("tenant_id")
         if tenant_id is None:
             raise ValueError("用户信息中缺少必需的 tenant_id 字段")
 
@@ -152,7 +182,9 @@ class UserService:
                     try:
                         tenant_id = int(tenant_id)
                     except ValueError:
-                        raise ValueError(f"tenant_id 字段值 '{tenant_id}' 无法转换为整数")
+                        raise ValueError(
+                            f"tenant_id 字段值 '{tenant_id}' 无法转换为整数"
+                        )
             else:
                 # 如果是其他类型，尝试转换为整数
                 try:
@@ -167,15 +199,19 @@ class UserService:
             raise ValueError(f"tenant_id 值 {tenant_id} 超出有效范围 (0-16383)")
 
         # 生成新的用户ID
-        user_id = generate_id(tenant_id, "user")  # tenant_id不再直接编码到ID中，但可用于其他用途
-        user_data['id'] = user_id
+        user_id = generate_id(
+            tenant_id, "user"
+        )  # tenant_id不再直接编码到ID中，但可用于其他用途
+        user_data["id"] = user_id
 
         user = await RbacDao.user.create_user(db, user_data)
         logger.info(f"创建用户成功: {user.user_name}@{user.tenant_id} (ID: {user.id})")
         return user
 
     @staticmethod
-    async def update_user(db: AsyncSession, tenant_id: int, user_name: str, update_data: Dict[str, Any]) -> Optional[SysUser]:
+    async def update_user(
+        db: AsyncSession, tenant_id: str, user_name: str, update_data: Dict[str, Any]
+    ) -> Optional[SysUser]:
         """更新用户信息（通过用户名）（异步）"""
         user = await RbacDao.user.get_user_by_user_name(db, user_name, tenant_id)
         if not user:
@@ -183,7 +219,9 @@ class UserService:
 
         # 如果更新用户名，需要检查是否与其他用户冲突
         if "user_name" in update_data:
-            existing = await RbacDao.user.get_user_by_user_name(db, update_data["user_name"], tenant_id)
+            existing = await RbacDao.user.get_user_by_user_name(
+                db, update_data["user_name"], tenant_id
+            )
             if existing and existing.user_name != user_name:
                 raise ValueError(f"用户名 {update_data['user_name']} 已存在")
 
@@ -193,7 +231,9 @@ class UserService:
         return updated_user
 
     @staticmethod
-    async def update_user_by_id(db: AsyncSession, id: int, update_data: Dict[str, Any]) -> Optional[SysUser]:
+    async def update_user_by_id(
+        db: AsyncSession, id: int, update_data: Dict[str, Any]
+    ) -> Optional[SysUser]:
         """更新用户信息（通过用户ID）（异步）"""
         user = await RbacDao.user.get_user_by_id(db, id)
         if not user:
@@ -205,7 +245,7 @@ class UserService:
         return updated_user
 
     @staticmethod
-    async def delete_user(db: AsyncSession, tenant_id: int, user_name: str) -> bool:
+    async def delete_user(db: AsyncSession, tenant_id: str, user_name: str) -> bool:
         """删除用户（通过用户名）（异步）"""
         user = await RbacDao.user.get_user_by_user_name(db, user_name, tenant_id)
         if not user:
@@ -229,56 +269,103 @@ class UserService:
         return success
 
     @staticmethod
-    async def get_users_by_tenant(db: AsyncSession, tenant_id: int, skip: int = 0, limit: int = 100) -> list:
+    async def get_users_by_tenant(
+        db: AsyncSession, tenant_id: str, skip: int = 0, limit: int = 100
+    ) -> list:
         """获取租户下的用户列表（异步）"""
         if tenant_id is None or tenant_id < 0:
             raise ValueError("tenant_id 必须是有效的正整数")
         return await RbacDao.user.get_users_by_tenant_id(db, tenant_id, skip, limit)
 
     @staticmethod
-    async def get_user_count_by_tenant(db: AsyncSession, tenant_id: int) -> int:
+    async def get_user_count_by_tenant(db: AsyncSession, tenant_id: str) -> int:
         """获取租户下的用户数量（异步）"""
         if tenant_id is None or tenant_id < 0:
             raise ValueError("tenant_id 必须是有效的正整数")
         return await RbacDao.user.get_user_count_by_tenant_id(db, tenant_id)
 
     @staticmethod
-    async def get_users_advanced_search(db: AsyncSession, tenant_id: int, user_name: str = None, nick_name: str = None,
-                                        phone: str = None, status: int = None, dept_id: int = None,
-                                        gender: int = None, position_code: str = None, role_code: str = None,
-                                        skip: int = 0, limit: int = 100):
+    async def get_users_advanced_search(
+        db: AsyncSession,
+        tenant_id: str,
+        user_name: str = None,
+        nick_name: str = None,
+        phone: str = None,
+        status: int = None,
+        dept_id: int = None,
+        gender: int = None,
+        position_code: str = None,
+        role_code: str = None,
+        skip: int = 0,
+        limit: int = 100,
+    ):
         """高级搜索用户（异步）"""
         if tenant_id is None or tenant_id < 0:
             raise ValueError("tenant_id 必须是有效的正整数")
         """高级搜索用户"""
         return await RbacDao.user.get_users_advanced_search(
-            db, tenant_id, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code, skip, limit
+            db,
+            tenant_id,
+            user_name,
+            nick_name,
+            phone,
+            status,
+            dept_id,
+            gender,
+            position_code,
+            role_code,
+            skip,
+            limit,
         )
 
     @staticmethod
-    async def get_user_count_advanced_search(db: AsyncSession, tenant_id: int, user_name: str = None, nick_name: str = None,
-                                             phone: str = None, status: int = None, dept_id: int = None,
-                                             gender: int = None, position_code: str = None, role_code: str = None):
+    async def get_user_count_advanced_search(
+        db: AsyncSession,
+        tenant_id: str,
+        user_name: str = None,
+        nick_name: str = None,
+        phone: str = None,
+        status: int = None,
+        dept_id: int = None,
+        gender: int = None,
+        position_code: str = None,
+        role_code: str = None,
+    ):
         """高级搜索用户数量统计（异步）"""
         if tenant_id is None or tenant_id < 0:
             raise ValueError("tenant_id 必须是有效的正整数")
         """高级搜索用户数量统计"""
         return await RbacDao.user.get_user_count_advanced_search(
-            db, tenant_id, user_name, nick_name, phone, status, dept_id, gender, position_code, role_code
+            db,
+            tenant_id,
+            user_name,
+            nick_name,
+            phone,
+            status,
+            dept_id,
+            gender,
+            position_code,
+            role_code,
         )
 
     @staticmethod
-    async def batch_delete_users(db: AsyncSession, tenant_id: int, user_names: List[str]):
+    async def batch_delete_users(
+        db: AsyncSession, tenant_id: str, user_names: List[str]
+    ):
         """批量删除用户（异步）"""
         deleted_count = 0
         for user_name in user_names:
-            success = await RbacDao.user.delete_user_by_username(db, tenant_id, user_name)
+            success = await RbacDao.user.delete_user_by_username(
+                db, tenant_id, user_name
+            )
             if success:
                 deleted_count += 1
         return deleted_count
 
     @staticmethod
-    async def batch_delete_users_by_ids(db: AsyncSession, accessible_tenant_ids: List[int], user_ids: List[int]):
+    async def batch_delete_users_by_ids(
+        db: AsyncSession, accessible_tenant_ids: List[int], user_ids: List[int]
+    ):
         """根据用户ID列表批量删除用户（异步）"""
         deleted_count = 0
         for user_id in user_ids:
@@ -292,14 +379,19 @@ class UserService:
                         deleted_count += 1
                 else:
                     # 用户存在但租户ID不在可访问列表中
-                    print(f"用户 {user_id} (租户: {user.tenant_id}) 不在可访问租户列表中: {accessible_tenant_ids}")
+                    print(
+                        f"用户 {user_id} (租户: {user.tenant_id}) 不在可访问租户列表中: {accessible_tenant_ids}"
+                    )
             else:
                 # 用户不存在或已被删除
                 print(f"用户 {user_id} 不存在或已被删除")
         return deleted_count
 
     @staticmethod
-    async def get_user_permission_list_by_id(db: AsyncSession, user_id: int, tenant_id: int):
+    async def get_user_permission_list_by_id(
+        db: AsyncSession, user_id: int, tenant_id: str
+    ):
         """根据用户ID获取用户权限列表（异步）"""
         from app.services.rbac.rbac_base_service import BaseRbacService
+
         return await BaseRbacService.get_user_permission_list(db, user_id, tenant_id)

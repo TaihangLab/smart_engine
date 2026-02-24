@@ -112,7 +112,7 @@ class PermissionDao:
         return result.scalar() or 0
 
     @staticmethod
-    async def get_permissions_advanced_search(db: AsyncSession, tenant_id: int, permission_name: str = None,
+    async def get_permissions_advanced_search(db: AsyncSession, tenant_id: str, permission_name: str = None,
                                       permission_code: str = None, permission_type: str = None,
                                       status: int = None, creator: str = None, skip: int = 0, limit: int = 100):
         """高级搜索权限（异步）
@@ -150,7 +150,7 @@ class PermissionDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_permission_count_advanced_search(db: AsyncSession, tenant_id: int, permission_name: str = None,
+    async def get_permission_count_advanced_search(db: AsyncSession, tenant_id: str, permission_name: str = None,
                                            permission_code: str = None, permission_type: str = None,
                                            status: int = None, creator: str = None):
         """高级搜索权限数量统计（异步）

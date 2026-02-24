@@ -64,7 +64,7 @@ class PositionDao:
         return result.scalars().first()
 
     @staticmethod
-    async def get_positions_by_tenant(db: AsyncSession, tenant_id: int, skip: int = 0, limit: int = 100) -> List[SysPosition]:
+    async def get_positions_by_tenant(db: AsyncSession, tenant_id: str, skip: int = 0, limit: int = 100) -> List[SysPosition]:
         """获取租户下的岗位列表（异步）
 
         Args:
@@ -150,7 +150,7 @@ class PositionDao:
         return True
 
     @staticmethod
-    async def get_position_count_by_tenant(db: AsyncSession, tenant_id: int) -> int:
+    async def get_position_count_by_tenant(db: AsyncSession, tenant_id: str) -> int:
         """获取租户下的岗位数量（异步）
 
         Args:
@@ -173,7 +173,7 @@ class PositionDao:
         return result.scalar() or 0
 
     @staticmethod
-    async def get_positions_by_name(db: AsyncSession, tenant_id: int, position_name: str, skip: int = 0, limit: int = 100) -> List[SysPosition]:
+    async def get_positions_by_name(db: AsyncSession, tenant_id: str, position_name: str, skip: int = 0, limit: int = 100) -> List[SysPosition]:
         """根据岗位名称模糊查询岗位列表（异步）
 
         Args:
@@ -198,7 +198,7 @@ class PositionDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_position_count_by_name(db: AsyncSession, tenant_id: int, position_name: str) -> int:
+    async def get_position_count_by_name(db: AsyncSession, tenant_id: str, position_name: str) -> int:
         """根据岗位名称模糊查询岗位数量（异步）
 
         Args:

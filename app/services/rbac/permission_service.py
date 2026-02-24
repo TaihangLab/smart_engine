@@ -439,7 +439,7 @@ class PermissionService:
         )
 
     @staticmethod
-    async def get_permissions_by_tenant(db: AsyncSession, tenant_id: int, skip: int = 0, limit: int = 100) -> List[SysPermission]:
+    async def get_permissions_by_tenant(db: AsyncSession, tenant_id: str, skip: int = 0, limit: int = 100) -> List[SysPermission]:
         """获取租户下的权限列表（注：权限表无租户字段，返回所有权限）（异步）"""
         result = await db.execute(
             select(SysPermission).filter(
@@ -449,7 +449,7 @@ class PermissionService:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_permission_count_by_tenant(db: AsyncSession, tenant_id: int) -> int:
+    async def get_permission_count_by_tenant(db: AsyncSession, tenant_id: str) -> int:
         """获取租户下的权限数量（注：权限表无租户字段，返回总数）（异步）"""
         result = await db.execute(
             select(func.count()).select_from(
@@ -461,7 +461,7 @@ class PermissionService:
         return result.scalar() or 0
 
     @staticmethod
-    async def get_permission_count_advanced_search(db: AsyncSession, tenant_id: int, permission_name: str = None,
+    async def get_permission_count_advanced_search(db: AsyncSession, tenant_id: str, permission_name: str = None,
                                                    permission_code: str = None, permission_type: str = None,
                                                    status: int = None, creator: str = None):
         """高级搜索权限数量统计（异步）"""

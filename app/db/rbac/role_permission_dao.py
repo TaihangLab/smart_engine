@@ -9,7 +9,7 @@ class RolePermissionDao:
     """角色权限关联数据访问对象（异步）"""
 
     @staticmethod
-    async def get_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: int):
+    async def get_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: str):
         """获取角色权限关联（异步）"""
         result = await db.execute(
             select(SysRolePermission).join(
@@ -24,7 +24,7 @@ class RolePermissionDao:
         return result.scalars().first()
 
     @staticmethod
-    async def create_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: int):
+    async def create_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: str):
         """创建角色权限关联（异步）"""
         # 首先获取角色和权限的ID
         result = await db.execute(
@@ -63,7 +63,7 @@ class RolePermissionDao:
         return role_permission
 
     @staticmethod
-    async def get_role_permissions(db: AsyncSession, role_code: str, tenant_id: int):
+    async def get_role_permissions(db: AsyncSession, role_code: str, tenant_id: str):
         """获取角色的权限列表（异步）"""
         result = await db.execute(
             select(SysPermission).join(
@@ -80,7 +80,7 @@ class RolePermissionDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_role_permissions_by_id(db: AsyncSession, role_id: int, tenant_id: int):
+    async def get_role_permissions_by_id(db: AsyncSession, role_id: int, tenant_id: str):
         """获取角色的权限列表（通过ID）（异步）"""
         result = await db.execute(
             select(SysPermission).join(
@@ -94,7 +94,7 @@ class RolePermissionDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_roles_by_permission(db: AsyncSession, permission_code: str, tenant_id: int):
+    async def get_roles_by_permission(db: AsyncSession, permission_code: str, tenant_id: str):
         """获取拥有指定权限的角色列表（异步）"""
         result = await db.execute(
             select(SysRole).join(
@@ -111,7 +111,7 @@ class RolePermissionDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def get_roles_by_permission_by_id(db: AsyncSession, permission_id: int, tenant_id: int):
+    async def get_roles_by_permission_by_id(db: AsyncSession, permission_id: int, tenant_id: str):
         """获取拥有指定权限的角色列表（通过ID）（异步）"""
         result = await db.execute(
             select(SysRole).join(
@@ -126,7 +126,7 @@ class RolePermissionDao:
         return list(result.scalars().all())
 
     @staticmethod
-    async def remove_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: int):
+    async def remove_role_permission(db: AsyncSession, role_code: str, permission_code: str, tenant_id: str):
         """移除角色的权限（异步）"""
         role_permission = await RolePermissionDao.get_role_permission(db, role_code, permission_code, tenant_id)
         if role_permission:
@@ -136,7 +136,7 @@ class RolePermissionDao:
         return False
 
     @staticmethod
-    async def assign_permission_to_role_by_id(db: AsyncSession, role_id: int, permission_id: int, tenant_id: int) -> bool:
+    async def assign_permission_to_role_by_id(db: AsyncSession, role_id: int, permission_id: int, tenant_id: str) -> bool:
         """为角色分配权限（通过ID）（异步）"""
         try:
             # 检查是否已存在
@@ -163,7 +163,7 @@ class RolePermissionDao:
             return False
 
     @staticmethod
-    async def remove_permission_from_role_by_id(db: AsyncSession, role_id: int, permission_id: int, tenant_id: int):
+    async def remove_permission_from_role_by_id(db: AsyncSession, role_id: int, permission_id: int, tenant_id: str):
         """移除角色的权限（通过ID）（异步）"""
         result = await db.execute(
             select(SysRolePermission).filter(
@@ -179,7 +179,7 @@ class RolePermissionDao:
         return False
 
     @staticmethod
-    async def assign_permission_to_role(db: AsyncSession, role_code: str, permission_code: str, tenant_id: int) -> bool:
+    async def assign_permission_to_role(db: AsyncSession, role_code: str, permission_code: str, tenant_id: str) -> bool:
         """为角色分配权限（异步）"""
         try:
             # 检查是否已存在

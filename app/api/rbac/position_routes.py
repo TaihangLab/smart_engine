@@ -62,7 +62,7 @@ async def get_position(
 
 @position_router.get("/positions", response_model=UnifiedResponse, summary="获取岗位列表")
 async def get_positions(
-    tenant_id: int = Query(1000000000000001, description="租户ID"),
+    tenant_id: str = Query("1000000000000001", description="租户ID（支持字符串类型）"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
     db: AsyncSession = Depends(get_async_db)

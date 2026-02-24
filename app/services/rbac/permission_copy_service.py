@@ -222,7 +222,7 @@ class PermissionCopyService:
         return role
 
     @staticmethod
-    async def sync_permissions_from_template(db: AsyncSession, tenant_id: int) -> bool:
+    async def sync_permissions_from_template(db: AsyncSession, tenant_id: str) -> bool:
         """从租户0同步权限到指定租户的ROLE_ACCESS角色
 
         Args:

@@ -88,7 +88,7 @@ class AuthenticationService:
             return None, "认证服务异常"
 
     @staticmethod
-    def get_user_roles(db: Session, user_id: int, user_name: str, tenant_id: int) -> List[str]:
+    def get_user_roles(db: Session, user_id: int, user_name: str, tenant_id: str) -> List[str]:
         """
         获取用户角色列表
 
@@ -96,7 +96,7 @@ class AuthenticationService:
             db: 数据库会话
             user_id: 用户ID
             user_name: 用户名
-            tenant_id: 租户ID
+            tenant_id: 租户ID（字符串类型）
 
         Returns:
             用户角色列表
@@ -111,7 +111,7 @@ class AuthenticationService:
             return []
 
     @staticmethod
-    def get_user_permissions(db: Session, user_id: int, user_name: str, tenant_id: int) -> List[str]:
+    def get_user_permissions(db: Session, user_id: int, user_name: str, tenant_id: str) -> List[str]:
         """
         获取用户权限列表
 

@@ -19,22 +19,22 @@ class RoleService:
     """角色管理服务（异步）"""
 
     @staticmethod
-    async def get_role_by_code(db: AsyncSession, role_code: str, tenant_id: int) -> Optional[SysRole]:
+    async def get_role_by_code(db: AsyncSession, role_code: str, tenant_id: str) -> Optional[SysRole]:
         """根据角色编码和租户ID获取角色（异步）"""
         return await RbacDao.role.get_role_by_code_and_tenant_id(db, role_code, tenant_id)
 
     @staticmethod
-    async def get_roles_by_tenant_id(db: AsyncSession, tenant_id: int, skip: int = 0, limit: int = 100) -> List[SysRole]:
+    async def get_roles_by_tenant_id(db: AsyncSession, tenant_id: str, skip: int = 0, limit: int = 100) -> List[SysRole]:
         """根据租户ID获取角色列表（异步）"""
         return await RbacDao.role.get_roles_by_tenant_id(db, tenant_id, skip, limit)
 
     @staticmethod
-    async def get_role_count_by_tenant_id(db: AsyncSession, tenant_id: int) -> int:
+    async def get_role_count_by_tenant_id(db: AsyncSession, tenant_id: str) -> int:
         """根据租户ID获取角色数量（异步）"""
         return await RbacDao.role.get_role_count_by_tenant_id(db, tenant_id)
 
     @staticmethod
-    async def get_roles_advanced_search_by_tenant_id(db: AsyncSession, tenant_id: int, role_name: str = None,
+    async def get_roles_advanced_search_by_tenant_id(db: AsyncSession, tenant_id: str, role_name: str = None,
                                                      role_code: str = None, status: int = None,
                                                      data_scope: int = None, skip: int = 0, limit: int = 100):
         """根据租户ID高级搜索角色（异步）"""
@@ -43,7 +43,7 @@ class RoleService:
         )
 
     @staticmethod
-    async def get_role_count_advanced_search_by_tenant_id(db: AsyncSession, tenant_id: int, role_name: str = None,
+    async def get_role_count_advanced_search_by_tenant_id(db: AsyncSession, tenant_id: str, role_name: str = None,
                                                           role_code: str = None, status: int = None,
                                                           data_scope: int = None):
         """根据租户ID高级搜索角色数量统计（异步）"""
@@ -96,7 +96,7 @@ class RoleService:
         return role
 
     @staticmethod
-    async def update_role(db: AsyncSession, tenant_id: int, role_code: str, update_data: Dict[str, Any]) -> Optional[SysRole]:
+    async def update_role(db: AsyncSession, tenant_id: str, role_code: str, update_data: Dict[str, Any]) -> Optional[SysRole]:
         """更新角色信息（通过角色编码）（异步）"""
         # 直接使用基于 role_code 的更新方法
         updated_role = await RbacDao.role.update_role_by_code(db, role_code, tenant_id, update_data)
@@ -113,7 +113,7 @@ class RoleService:
         return updated_role
 
     @staticmethod
-    async def delete_role(db: AsyncSession, tenant_id: int, role_code: str) -> bool:
+    async def delete_role(db: AsyncSession, tenant_id: str, role_code: str) -> bool:
         """删除角色（通过角色编码）（异步）"""
         success = await RbacDao.role.delete_role_by_code(db, role_code, tenant_id)
         if success:
@@ -133,17 +133,17 @@ class RoleService:
         return success
 
     @staticmethod
-    async def get_roles_by_tenant(db: AsyncSession, tenant_id: int, skip: int = 0, limit: int = 100) -> List[SysRole]:
+    async def get_roles_by_tenant(db: AsyncSession, tenant_id: str, skip: int = 0, limit: int = 100) -> List[SysRole]:
         """获取租户下的角色列表（异步）"""
         return await RbacDao.role.get_roles_by_tenant(db, tenant_id, skip, limit)
 
     @staticmethod
-    async def get_role_count_by_tenant(db: AsyncSession, tenant_id: int) -> int:
+    async def get_role_count_by_tenant(db: AsyncSession, tenant_id: str) -> int:
         """获取租户下的角色数量（异步）"""
         return await RbacDao.role.get_role_count_by_tenant(db, tenant_id)
 
     @staticmethod
-    async def get_roles_advanced_search(db: AsyncSession, tenant_id: int, role_name: str = None,
+    async def get_roles_advanced_search(db: AsyncSession, tenant_id: str, role_name: str = None,
                                         role_code: str = None, status: int = None,
                                         data_scope: int = None, skip: int = 0, limit: int = 100):
         """高级搜索角色（异步）"""
@@ -152,7 +152,7 @@ class RoleService:
         )
 
     @staticmethod
-    async def get_role_count_advanced_search(db: AsyncSession, tenant_id: int, role_name: str = None,
+    async def get_role_count_advanced_search(db: AsyncSession, tenant_id: str, role_name: str = None,
                                              role_code: str = None, status: int = None,
                                              data_scope: int = None):
         """高级搜索角色数量统计（异步）"""
@@ -161,6 +161,6 @@ class RoleService:
         )
 
     @staticmethod
-    async def get_roles_by_permission_by_id(db: AsyncSession, permission_id: int, tenant_id: int):
+    async def get_roles_by_permission_by_id(db: AsyncSession, permission_id: int, tenant_id: str):
         """根据权限ID获取角色列表（异步）"""
         return await RbacDao.role_permission.get_roles_by_permission_by_id(db, permission_id, tenant_id)

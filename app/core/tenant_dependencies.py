@@ -44,14 +44,14 @@ async def get_current_user(request: Request) -> UserInfo:
 
 async def get_current_user_tenant_id(
     current_user: UserInfo = Depends(get_current_user)
-) -> int:
+) -> str:
     """
     获取当前用户的租户ID（依赖注入）
 
     使用示例:
         @router.get("/users")
         async def get_users(
-            tenant_id: int = Depends(get_current_user_tenant_id)
+            tenant_id: str = Depends(get_current_user_tenant_id)
         ):
             # tenant_id 是当前用户的租户ID
             pass
@@ -76,25 +76,25 @@ async def get_current_user_tenant_id(
 async def get_validated_tenant_id(
     request: Request,
     current_user: UserInfo = Depends(get_current_user),
-    tenant_id: Optional[int] = Query(None, description="租户ID")
-) -> int:
+    tenant_id: Optional[str] = Query(None, description="租户ID")
+) -> str:
     """
     获取并验证租户ID（依赖注入）
 
     这是核心函数，用于替代所有 API 中的手动验证逻辑：
         ❌ 旧方式：tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
-        ✅ 新方式：tenant_id: int = Depends(get_validated_tenant_id)
+        ✅ 新方式：tenant_id: str = Depends(get_validated_tenant_id)
 
     使用示例:
         @router.get("/users")
         async def get_users(
-            tenant_id: int = Depends(get_validated_tenant_id),
-            db: Session = Depends(get_db)
+            tenant_id: str = Depends(get_validated_tenant_id),
+            db: AsyncSession = Depends(get_async_db)
         ):
             # tenant_id 已经是验证过的租户ID
             # 超管：返回请求中的 tenant_id
             # 普通用户：返回用户的 tenantId（如果请求中的不同会抛出403）
-            users = RbacService.get_users_by_tenant(db, tenant_id)
+            users = await RbacService.get_users_by_tenant(db, tenant_id)
             return users
 
     验证逻辑:
@@ -188,7 +188,7 @@ async def verify_tenant_access(
     return True
 
 
-def _extract_tenant_id_from_path(request: Request) -> Optional[int]:
+def _extract_tenant_id_from_path(request: Request) -> Optional[str]:
     """
     从请求路径中提取租户ID
 
@@ -200,7 +200,7 @@ def _extract_tenant_id_from_path(request: Request) -> Optional[int]:
         request: FastAPI 请求对象
 
     Returns:
-        租户ID，如果路径中不包含租户ID则返回None
+        租户ID（字符串类型），如果路径中不包含租户ID则返回None
     """
     path = request.url.path
 
@@ -210,7 +210,7 @@ def _extract_tenant_id_from_path(request: Request) -> Optional[int]:
         try:
             idx = parts.index('tenants')
             if idx + 1 < len(parts):
-                return int(parts[idx + 1])
+                return str(parts[idx + 1])
         except (ValueError, IndexError):
             pass
 

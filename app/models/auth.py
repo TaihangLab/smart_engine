@@ -49,7 +49,7 @@ class LoginResponse(BaseModel):
     expires_in: int = Field(..., description="过期时间（秒）")
     user_id: int = Field(..., description="用户ID")
     username: str = Field(..., description="用户名")
-    tenant_id: int = Field(..., description="租户ID")
+    tenant_id: str = Field(..., description="租户ID（字符串类型）")
 
 
 class TokenRefreshRequest(BaseModel):
@@ -61,7 +61,7 @@ class TokenData(BaseModel):
     """令牌数据模型"""
     username: Optional[str] = None
     user_id: Optional[int] = None
-    tenant_id: Optional[int] = None
+    tenant_id: Optional[str] = None
 
 
 class PasswordChangeRequest(BaseModel):

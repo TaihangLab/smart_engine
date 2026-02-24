@@ -312,11 +312,9 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
             db, int(existing_user.id), update_data
         )
 
-        updated_user = await RbacService.update_user_by_id(db, user_id, update_data)
-
         # 获取该用户所有的角色
         user_roles = await RelationService.get_user_roles_by_id(
-            db, updated_user.id, tenant_id_int
+            db, existing_user.id, tenant_id
         )
 
         # 获取该用户当前的部门
@@ -338,7 +336,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
 
         if not role_exists:
             success = await RelationService.assign_role_to_user(
-                db, user_name, role_code, tenant_id_int
+                db, user_name, role_code, tenant_id
             )
             if success:
                 logger.info(f"为已存在的用户 {user_name} 分配了 {role_code} 角色")
@@ -364,17 +362,8 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         )
 
         # 构建完整用户态
-        # 确保 dept_id 是整数类型
-        if isinstance(dept_id, str):
-            try:
-                dept_id = int(dept_id)
-            except ValueError:
-                dept_id = tenant_id_int
-        elif not isinstance(dept_id, int):
-            dept_id = int(dept_id)
-
         return await _build_user_state(
-            db, updated_user, role, dept_id, dept_name, tenant_id_int, user_info
+            db, existing_user, role, dept_id, dept_name, tenant_id, user_info
         )
 
     else:
@@ -438,7 +427,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
             logger.warning(f"为新用户 {user_name} 分配 {role_code} 角色失败")
 
         # 6. 获取用户角色，优先检查 ROLE_ALL（超管角色）
-        user_roles = RelationService.get_user_roles_by_id(
+        user_roles = await RelationService.get_user_roles_by_id(
             db, created_user.id, tenant_id
         )
         logger.info(
@@ -457,7 +446,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         )
 
         # 构建完整用户态
-        return _build_user_state(
+        return await _build_user_state(
             db, created_user, role, dept_id, dept_name, tenant_id, user_info
         )
 
@@ -631,7 +620,7 @@ def ensure_tenant_exists(tenant_info: Dict[str, Any], db):
         logger.info(f"租户 {tenant_id} 已存在")
 
 
-async def ensure_role_exists(tenant_id: int, db):
+async def ensure_role_exists(tenant_id: str, db):
     """
     确保租户的ROLE_ACCESS角色存在并有权限
     根据文档流程：
@@ -639,8 +628,8 @@ async def ensure_role_exists(tenant_id: int, db):
     - 不存在：创建角色，然后从租户0复制权限
 
     Args:
-        tenant_id: 租户ID
-        db: 数据库会话
+        tenant_id: 租户ID（字符串类型）
+        db: 异步数据库会话
     """
     from app.services.rbac.permission_copy_service import PermissionCopyService
     from app.models.rbac.rbac_constants import TenantConstants
@@ -657,13 +646,13 @@ async def ensure_role_exists(tenant_id: int, db):
     logger.info(f"租户 {tenant_id} 的ROLE_ACCESS角色已确保存在并有权限")
 
 
-def _get_or_create_role_all(db: Session, tenant_id: int):
+def _get_or_create_role_all(db: Session, tenant_id: str):
     """
     获取或创建 ROLE_ALL 超管角色
 
     Args:
         db: 数据库会话
-        tenant_id: 租户ID
+        tenant_id: 租户ID（字符串类型）
 
     Returns:
         SysRole: 超管角色对象
