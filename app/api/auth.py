@@ -212,7 +212,7 @@ async def change_password(
             except (ValueError, TypeError):
                 # 如果userId不是数字，尝试通过用户名查找
                 from app.services.rbac_service import RbacService
-                user = RbacService.get_user_by_user_name(db, current_user.userName, current_user.tenantId)
+                user = await RbacService.user.get_user_by_user_name(db, current_user.userName, current_user.tenantId)
                 if not user:
                     return UnifiedResponse(
                         success=False,
@@ -347,7 +347,7 @@ async def get_current_user_info(
 
         # 获取权限树（菜单结构）
         from app.services.rbac_service import RbacService
-        permission_tree = RbacService.get_permission_tree(db)
+        permission_tree = await RbacService.permission.get_permission_tree(db)
 
         # 构建用户信息响应
         user_info = {
@@ -415,7 +415,7 @@ async def get_current_user_info_simple(
         # 获取用户角色（返回完整的角色对象列表）
         from app.services.rbac.relation_service import RelationService
         from app.models.rbac import SysRole
-        role_objects: list[SysRole] = RelationService.get_user_roles_by_id(db, user.id, user.tenant_id)
+        role_objects: list[SysRole] = await RelationService.get_user_roles_by_id(db, user.id, user.tenant_id)
 
         # 构建角色信息列表（使用蛇形命名）
         roles = [
@@ -431,7 +431,7 @@ async def get_current_user_info_simple(
 
         # 获取用户权限码列表
         from app.services.rbac.rbac_base_service import BaseRbacService
-        permission_objects = BaseRbacService.get_user_permission_list(
+        permission_objects = await BaseRbacService.get_user_permission_list(
             db, user.user_name, user.tenant_id
         )
         permission_codes = [p.permission_code for p in permission_objects] if permission_objects else []
@@ -439,7 +439,7 @@ async def get_current_user_info_simple(
         # 获取租户列表
         from app.services.rbac.tenant_service import TenantService
         from app.models.rbac import SysTenant
-        tenant_objects: list[SysTenant] = TenantService.get_all_tenants(db, skip=0, limit=100)
+        tenant_objects: list[SysTenant] = await TenantService.get_all_tenants(db, skip=0, limit=100)
 
         # 构建租户信息列表（使用蛇形命名）
         tenants = [
@@ -523,7 +523,7 @@ async def get_user_permissions(
         if current_user.isSuperAdmin:
             # 超管用户：使用缓存获取所有权限码
             from app.services.cache_service import PermissionCacheService
-            all_permissions = PermissionCacheService.get_all_permissions(db)
+            all_permissions = await PermissionCacheService.get_all_permissions(db)
 
             permission_codes = [p.permission_code for p in all_permissions if p.permission_code] if all_permissions else []
 
@@ -556,7 +556,7 @@ async def get_user_permissions(
 
         # 使用缓存获取用户权限列表
         from app.services.cache_service import PermissionCacheService
-        permission_objects = PermissionCacheService.get_user_permissions(
+        permission_objects = await PermissionCacheService.get_user_permissions(
             db, user.id, user.tenant_id
         )
 
@@ -610,7 +610,7 @@ async def get_user_menu_tree(
         if current_user.isSuperAdmin:
             # 超管用户：使用缓存获取所有菜单
             from app.services.cache_service import MenuCacheService
-            menu_tree = MenuCacheService.get_all_menu_tree(db)
+            menu_tree = await MenuCacheService.get_all_menu_tree(db)
 
             menu_tree = menu_tree if menu_tree else []
 
@@ -643,7 +643,7 @@ async def get_user_menu_tree(
 
         # 使用缓存获取用户菜单树
         from app.services.cache_service import MenuCacheService
-        menu_tree = MenuCacheService.get_user_menu_tree(db, user.id, user.tenant_id)
+        menu_tree = await MenuCacheService.get_user_menu_tree(db, user.id, user.tenant_id)
 
         menu_tree = menu_tree if menu_tree else []
 
@@ -849,12 +849,12 @@ async def refresh_user_state(
 
         # 获取用户权限列表（使用缓存服务）
         from app.services.cache_service import PermissionCacheService
-        permission_objects = PermissionCacheService.get_user_permissions(db, user.id, user.tenant_id)
+        permission_objects = await PermissionCacheService.get_user_permissions(db, user.id, user.tenant_id)
         permission_codes = [p.permission_code for p in permission_objects] if permission_objects else []
 
         # 获取权限树（菜单结构）
         from app.services.rbac_service import RbacService
-        permission_tree = RbacService.get_permission_tree(db)
+        permission_tree = await RbacService.permission.get_permission_tree(db)
 
         # 构建用户信息响应
         user_info = {
