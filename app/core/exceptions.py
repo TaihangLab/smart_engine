@@ -8,7 +8,6 @@
 
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse
-from app.models.response import UnifiedResponse
 import logging
 
 logger = logging.getLogger(__name__)
