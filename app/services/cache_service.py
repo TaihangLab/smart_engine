@@ -13,7 +13,8 @@ import json
 import logging
 from typing import Optional, List, Set, Any, Dict
 from datetime import timedelta
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -194,7 +195,7 @@ class PermissionCacheService:
     _cache: Dict[str, tuple] = {}
 
     @classmethod
-    def get_user_permissions(cls, db: Session, user_id: int, tenant_id: str) -> Optional[List[Any]]:
+    async def get_user_permissions(cls, db: AsyncSession, user_id: int, tenant_id: str) -> Optional[List[Any]]:
         """
         获取用户权限（带缓存）
 
@@ -212,25 +213,34 @@ class PermissionCacheService:
         from app.models.rbac.sqlalchemy_models import SysRole, SysUserRole
         from app.models.rbac.rbac_constants import RoleConstants
 
-        role_all = db.query(SysRole).filter(
-            SysRole.role_code == RoleConstants.ROLE_ALL,
-            SysRole.tenant_id == tenant_id
-        ).first()
+        result = await db.execute(
+            select(SysRole).filter(
+                SysRole.role_code == RoleConstants.ROLE_ALL,
+                SysRole.tenant_id == tenant_id
+            )
+        )
+        role_all = result.scalars().first()
 
         if role_all:
             # 检查用户是否拥有此角色
-            has_role_all = db.query(SysUserRole).filter(
-                SysUserRole.user_id == user_id,
-                SysUserRole.role_id == role_all.id
-            ).first()
+            result = await db.execute(
+                select(SysUserRole).filter(
+                    SysUserRole.user_id == user_id,
+                    SysUserRole.role_id == role_all.id
+                )
+            )
+            has_role_all = result.scalars().first()
 
             if has_role_all:
                 # 租户管理员：直接返回所有权限
                 from app.models.rbac import SysPermission
-                all_permissions = db.query(SysPermission).filter(
-                    SysPermission.is_deleted == False,
-                    SysPermission.status == 0
-                ).all()
+                result = await db.execute(
+                    select(SysPermission).filter(
+                        SysPermission.is_deleted == False,
+                        SysPermission.status == 0
+                    )
+                )
+                all_permissions = list(result.scalars().all())
 
                 logger.debug(f"租户管理员权限: user_id={user_id}, tenant_id={tenant_id}, {len(all_permissions)} 条权限")
                 return all_permissions
@@ -252,9 +262,12 @@ class PermissionCacheService:
         # 从数据库查询
         from app.db.rbac import RbacDao
         from app.models.rbac import SysUser
-        user = db.query(SysUser).filter(SysUser.id == user_id).first()
+        result = await db.execute(
+            select(SysUser).filter(SysUser.id == user_id)
+        )
+        user = result.scalars().first()
         if user:
-            permission_objects = RbacDao.get_user_permissions(db, user.user_name, tenant_id)
+            permission_objects = await RbacDao.get_user_permissions(db, user.user_name, tenant_id)
         else:
             permission_objects = []
 
@@ -269,7 +282,7 @@ class PermissionCacheService:
         return permission_objects
 
     @classmethod
-    def get_all_permissions(cls, db: Session) -> Optional[List[Any]]:
+    async def get_all_permissions(cls, db: AsyncSession) -> Optional[List[Any]]:
         """
         获取所有权限（带缓存）
         用于超管用户
@@ -295,10 +308,13 @@ class PermissionCacheService:
 
         # 从数据库查询
         from app.models.rbac import SysPermission
-        all_permissions = db.query(SysPermission).filter(
-            SysPermission.is_deleted == False,
-            SysPermission.status == 0
-        ).all()
+        result = await db.execute(
+            select(SysPermission).filter(
+                SysPermission.is_deleted == False,
+                SysPermission.status == 0
+            )
+        )
+        all_permissions = list(result.scalars().all())
 
         # 存入缓存
         import time
@@ -379,7 +395,7 @@ class MenuCacheService:
     _cache: Dict[str, tuple] = {}
 
     @classmethod
-    def get_user_menu_tree(cls, db: Session, user_id: int, tenant_id: str) -> Optional[List[Dict]]:
+    async def get_user_menu_tree(cls, db: AsyncSession, user_id: int, tenant_id: str) -> Optional[List[Dict]]:
         """
         获取用户菜单树（带缓存）
 
@@ -409,21 +425,27 @@ class MenuCacheService:
         from app.models.rbac import SysPermission, SysUser
         from app.models.rbac.rbac_constants import TenantConstants
 
-        user = db.query(SysUser).filter(SysUser.id == user_id).first()
+        result = await db.execute(
+            select(SysUser).filter(SysUser.id == user_id)
+        )
+        user = result.scalars().first()
         if not user:
             return []
 
         # 检查是否为租户0
         is_template_tenant = (tenant_id == str(TenantConstants.TEMPLATE_TENANT_ID))
 
-        permission_objects = RbacDao.get_user_permissions(db, user.user_name, tenant_id)
+        permission_objects = await RbacDao.get_user_permissions(db, user.user_name, tenant_id)
         permission_codes = {p.permission_code for p in permission_objects} if permission_objects else set()
 
         # 获取所有菜单权限
-        all_menu_permissions = db.query(SysPermission).filter(
-            SysPermission.is_deleted == False,
-            SysPermission.permission_type.in_(["folder", "menu"])
-        ).order_by(SysPermission.sort_order, SysPermission.id).all()
+        result = await db.execute(
+            select(SysPermission).filter(
+                SysPermission.is_deleted == False,
+                SysPermission.permission_type.in_(["folder", "menu"])
+            ).order_by(SysPermission.sort_order, SysPermission.id)
+        )
+        all_menu_permissions = list(result.scalars().all())
 
         # 构建菜单树
         menu_dict = {}
@@ -488,7 +510,7 @@ class MenuCacheService:
         return menu_tree
 
     @classmethod
-    def get_all_menu_tree(cls, db: Session) -> Optional[List[Dict]]:
+    async def get_all_menu_tree(cls, db: AsyncSession) -> Optional[List[Dict]]:
         """
         获取所有菜单树（带缓存）
         用于超管用户
@@ -514,10 +536,13 @@ class MenuCacheService:
 
         # 从数据库查询并构建菜单树
         from app.models.rbac import SysPermission
-        all_menu_permissions = db.query(SysPermission).filter(
-            SysPermission.is_deleted == False,
-            SysPermission.permission_type.in_(["folder", "menu"])
-        ).order_by(SysPermission.sort_order, SysPermission.id).all()
+        result = await db.execute(
+            select(SysPermission).filter(
+                SysPermission.is_deleted == False,
+                SysPermission.permission_type.in_(["folder", "menu"])
+            ).order_by(SysPermission.sort_order, SysPermission.id)
+        )
+        all_menu_permissions = list(result.scalars().all())
 
         # 构建菜单树
         menu_dict = {}
