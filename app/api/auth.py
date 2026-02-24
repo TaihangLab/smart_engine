@@ -7,12 +7,12 @@
 """
 
 from fastapi import APIRouter, Depends, HTTPException, status, Request
-from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 import logging
 from datetime import datetime
 
-from app.db.session import get_db
+from app.db.async_session import get_async_db
 from app.models.auth import LoginRequest, LoginResponse, TokenRefreshRequest, PasswordChangeRequest, NewLoginResponse
 from app.services.auth_service import AuthenticationService
 from app.models.rbac import UnifiedResponse
@@ -28,7 +28,7 @@ auth_router = APIRouter()
 async def login(
     login_request: LoginRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     用户登录接口
@@ -105,7 +105,7 @@ async def login(
 @auth_router.post("/logout", response_model=UnifiedResponse, summary="用户登出")
 async def logout(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     用户登出接口
@@ -138,7 +138,7 @@ async def logout(
 async def refresh_token(
     token_refresh: TokenRefreshRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     刷新访问令牌接口
@@ -171,7 +171,7 @@ async def refresh_token(
 async def change_password(
     password_change: PasswordChangeRequest,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     更改密码接口
@@ -269,7 +269,7 @@ async def reset_password(
     username: str,
     new_password: str,
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     重置密码接口
@@ -317,7 +317,7 @@ async def reset_password(
 @auth_router.get("/user-info", response_model=UnifiedResponse, summary="获取当前用户信息")
 async def get_current_user_info(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     获取当前登录用户的完整信息
@@ -391,7 +391,7 @@ async def get_current_user_info(
 @auth_router.get("/info", response_model=UnifiedResponse, summary="获取当前用户权限信息")
 async def get_current_user_info_simple(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     获取当前登录用户的权限信息
@@ -507,7 +507,7 @@ async def get_current_user_info_simple(
 @auth_router.get("/permissions", response_model=UnifiedResponse, summary="获取当前用户权限码列表")
 async def get_user_permissions(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     获取当前登录用户的权限码列表
@@ -593,7 +593,7 @@ async def get_user_permissions(
 @auth_router.get("/menu", response_model=UnifiedResponse, summary="获取当前用户菜单树")
 async def get_user_menu_tree(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     获取当前登录用户的菜单树结构
@@ -731,7 +731,7 @@ def _count_tree_nodes(tree: list) -> int:
 @auth_router.get("/cache/stats", response_model=UnifiedResponse, summary="获取缓存统计信息")
 async def get_cache_stats(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     获取缓存统计信息
@@ -761,7 +761,7 @@ async def get_cache_stats(
 @auth_router.post("/cache/clear", response_model=UnifiedResponse, summary="清除指定缓存")
 async def clear_cache(
     request: Request,
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     user_id: Optional[int] = None,
     tenant_id: Optional[str] = None,
     clear_all: bool = False
@@ -815,7 +815,7 @@ async def clear_cache(
 @auth_router.post("/user-info/refresh", response_model=UnifiedResponse, summary="刷新当前用户态")
 async def refresh_user_state(
     request: Request,
-    db: Session = Depends(get_db)
+    db: AsyncSession = Depends(get_async_db)
 ):
     """
     刷新当前用户态
