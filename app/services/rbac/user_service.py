@@ -226,8 +226,6 @@ class UserService:
                 raise ValueError(f"用户名 {update_data['user_name']} 已存在")
 
         updated_user = await RbacDao.user.update_user(db, user.id, update_data)
-        if updated_user:
-            logger.info(f"更新用户成功: {updated_user.user_name}")
         return updated_user
 
     @staticmethod
@@ -240,8 +238,6 @@ class UserService:
             return None
 
         updated_user = await RbacDao.user.update_user(db, id, update_data)
-        if updated_user:
-            logger.info(f"更新用户成功: {updated_user.user_name}")
         return updated_user
 
     @staticmethod
