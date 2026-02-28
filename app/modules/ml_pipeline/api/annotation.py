@@ -48,6 +48,100 @@ async def label_studio_status():
     }
 
 
+@router.get("/label-studio/credentials")
+async def label_studio_credentials():
+    """返回 Label Studio 登录凭据（供前端自动复制密码用）"""
+    from app.core.config import settings
+    return {
+        "success": True,
+        "data": {
+            "username": settings.LABEL_STUDIO_USERNAME,
+            "password": settings.LABEL_STUDIO_PASSWORD,
+            "url": settings.LABEL_STUDIO_URL,
+        }
+    }
+    ls_url = settings.LABEL_STUDIO_URL.rstrip("/")
+    csrf_token = ""
+    try:
+        s = req.Session()
+        resp = s.get(login_url, timeout=10)
+        csrf_token = s.cookies.get("csrftoken", "")
+    except Exception as e:
+        logger.warning(f"获取 LS CSRF token 失败: {e}")
+
+    target_url = f"{ls_url}{next}" if next.startswith("/") else next
+
+    html = f"""<!DOCTYPE html>
+<html>
+<head><meta charset="utf-8"><title>Label Studio 登录</title></head>
+<body style="display:flex;align-items:center;justify-content:center;height:100vh;
+  font-family:-apple-system,BlinkMacSystemFont,sans-serif;background:#f0f2f5;margin:0;">
+<div style="text-align:center;background:#fff;padding:40px 50px;border-radius:8px;
+  box-shadow:0 2px 12px rgba(0,0,0,0.1);max-width:420px;">
+  <h2 style="margin:0 0 8px;color:#303133;">Label Studio</h2>
+  <p id="statusText" style="color:#909399;font-size:14px;margin:0 0 20px;">正在尝试自动登录...</p>
+
+  <div id="credentialBox" style="display:none;text-align:left;background:#f5f7fa;
+    padding:14px 18px;border-radius:6px;margin-bottom:20px;font-size:13px;line-height:2;">
+    <div>账号：<code style="background:#e6effb;padding:2px 8px;border-radius:3px;
+      user-select:all;">{username}</code></div>
+    <div>密码：<code style="background:#e6effb;padding:2px 8px;border-radius:3px;
+      user-select:all;">{password}</code></div>
+  </div>
+
+  <a id="manualBtn" href="{login_url}?next={next}" style="display:none;
+    padding:10px 28px;font-size:14px;background:#409EFF;color:#fff;
+    text-decoration:none;border-radius:4px;">
+    前往登录页
+  </a>
+</div>
+
+<iframe id="lsFrame" src="{login_url}" style="display:none;"></iframe>
+
+<script>
+var targetUrl = "{target_url}";
+var loginUrl = "{login_url}";
+
+// iframe 加载完成后，尝试用 fetch 检查是否已登录（可能之前的 session 还在）
+document.getElementById('lsFrame').onload = function() {{
+  // 尝试直接访问 LS 页面，检查是否已登录
+  var img = new Image();
+  img.onload = function() {{ window.location.href = targetUrl; }};
+  img.onerror = function() {{
+    // 未登录或检测失败，显示手动登录入口
+    document.getElementById('statusText').textContent =
+      '请使用以下凭据登录，登录后将自动跳转到项目页面';
+    document.getElementById('credentialBox').style.display = 'block';
+    document.getElementById('manualBtn').style.display = 'inline-block';
+  }};
+  img.src = "{ls_url}/api/health?" + Date.now();
+  setTimeout(function() {{
+    // 超时也显示手动入口
+    document.getElementById('statusText').textContent =
+      '请使用以下凭据登录，登录后将自动跳转到项目页面';
+    document.getElementById('credentialBox').style.display = 'block';
+    document.getElementById('manualBtn').style.display = 'inline-block';
+  }}, 3000);
+}};
+
+// 如果 iframe 加载失败
+document.getElementById('lsFrame').onerror = function() {{
+  document.getElementById('statusText').textContent = 'Label Studio 无法连接';
+  document.getElementById('manualBtn').style.display = 'inline-block';
+  document.getElementById('manualBtn').textContent = '打开 Label Studio';
+}};
+</script>
+</body>
+</html>"""
+    return HTMLResponse(content=html)
+
+
+    username = settings.LABEL_STUDIO_USERNAME
+    password = settings.LABEL_STUDIO_PASSWORD
+    login_url = f"{ls_url}/user/login"
+    target_url = f"{ls_url}{next}" if next.startswith("/") else next
+
+
 # ------------------------------------------------------------------
 # 数据集 CRUD
 # ------------------------------------------------------------------
