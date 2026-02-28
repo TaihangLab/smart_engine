@@ -1,13 +1,27 @@
 """
-基于LangGraph的智能代理工作流编排器
+基于LangGraph的智能代理工作流编排器（v2 - 三阶段架构）
 
-使用LangGraph构建7层分析流程的状态机：
+架构说明：
+原v1版本每帧执行完整7层图，导致B2路径帧缓冲区状态丢失。
+v2版本将7层拆分为可独立调用的阶段，由AgentSkillBase管理调用时机。
+
+三个阶段：
+1. 发现阶段 (run_discovery): L1(YOLO)→L2(场景理解)→L3(决策) — 确定监控策略
+2. 时序分析阶段 (run_temporal_analysis): L5(时序分析) — 分析帧序列
+3. 推理处置阶段 (run_reasoning_and_disposal): L6(综合推理)→L7(自动处置) — 最终判定
+
+调用模式：
+- B1路径(单帧判断): run_discovery → run_reasoning_and_disposal
+- B2路径(时序分析): run_discovery → [收集帧] → run_temporal_analysis → [可能多轮] → run_reasoning_and_disposal
+- 纯YOLO(高频): run_yolo_only — 仅检测目标，不调LLM
+
+各层说明：
 1. YOLO快速检测
-2. 场景理解（煤矿多模态LLM）
-3. 智能决策（思考LLM + RAG）
-4. 帧收集
-5. 时序分析（煤矿多模态LLM）
-6. 综合推理（思考LLM）
+2. 场景理解（多模态LLM）
+3. 智能决策（推理LLM + RAG）
+4. 帧收集（由AgentSkillBase在内存中管理，不再是图节点）
+5. 时序分析（多模态LLM）
+6. 综合推理（推理LLM）
 7. 自动处置
 """
 import logging
@@ -17,9 +31,8 @@ import base64
 import cv2
 from operator import add
 
-# LangGraph imports
-from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
+# LangChain/LangGraph imports
+# v2架构中Layer类仍使用BaseMessage/AIMessage记录LLM交互
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
 
 logger = logging.getLogger(__name__)
@@ -844,175 +857,103 @@ class Layer7AutoDisposal:
             }
 
 
-# ==================== 条件边（决策分支）====================
+# ==================== 编排器（v2 - 三阶段架构）====================
 
-def should_skip(state: AgentState) -> str:
-    """判断是否跳过后续处理"""
-    if not state.get("has_target"):
-        return "skip"
-    return "scene_understanding"
+def _build_initial_state(frame: np.ndarray, task_id: int, camera_id: int,
+                         task_config: Dict[str, Any], **overrides) -> Dict[str, Any]:
+    """
+    构建工作流状态字典
+    
+    Layer类的__call__方法接收AgentState(TypedDict)，实际上就是dict。
+    此函数构建包含所有必需字段的状态字典。
+    """
+    state = {
+        "frame": frame,
+        "task_id": task_id,
+        "camera_id": camera_id,
+        "task_config": task_config,
+        "has_target": False,
+        "buffer_full": False,
+        "task_completed": False,
+        "violation_detected": False,
+        "severity_level": 0,
+        "current_batch": 0,
+        "frame_buffer": [],
+        "batch_analyses": [],
+        "messages": [],
+    }
+    state.update(overrides)
+    return state
 
-
-def decision_router(state: AgentState) -> str:
-    """根据决策类型路由"""
-    decision = state.get("decision_type", "A")
-    if decision == "A":
-        return "skip"
-    elif decision == "B1":
-        return "final_reasoning"
-    else:  # B2
-        return "frame_collection"
-
-
-def collection_router(state: AgentState) -> str:
-    """帧收集路由"""
-    if state.get("buffer_full"):
-        return "temporal_analysis"
-    else:
-        return "collect_more"  # 需要继续收集
-
-
-def temporal_router(state: AgentState) -> str:
-    """时序分析路由"""
-    if state.get("task_completed"):
-        return "final_reasoning"
-    else:
-        return "frame_collection"  # 继续收集下一批次
-
-
-def disposal_router(state: AgentState) -> str:
-    """处置路由"""
-    if state.get("violation_detected"):
-        return "disposal"
-    else:
-        return END
-
-
-# ==================== 构建LangGraph ====================
 
 class AgentOrchestratorLangGraph:
     """
-    基于LangGraph的智能代理编排器（通用）
+    基于LangGraph的智能代理编排器（v2 - 三阶段架构）
     
-    使用LangGraph的StateGraph构建完整的7层工作流
-    编排器本身保持通用，所有具体配置由技能提供
+    不再构建一个完整的StateGraph让每帧从头跑到尾，
+    而是将7层拆分为独立的Layer实例，由AgentSkillBase按阶段调用。
+    
+    提供的方法：
+    - run_yolo_only()         — 高频：仅YOLO检测（每帧调用）
+    - run_discovery()         — 低频：L1→L2→L3 发现+决策（首次/冷却后调用）
+    - run_temporal_analysis() — 低频：L5 时序分析（帧攒满时调用）
+    - run_reasoning_and_disposal() — 低频：L6→L7 推理+处置（分析完成时调用）
     """
     
-    def __init__(self, config: Dict[str, Any], knowledge_base=None, disposal_executor=None, skill=None):
+    def __init__(self, config: Dict[str, Any], knowledge_base=None, 
+                 disposal_executor=None, skill=None):
         """
-        初始化编排器
+        初始化编排器 - 创建各Layer实例
         
         Args:
-            config: 配置字典
-            knowledge_base: 知识库服务
-            disposal_executor: 处置执行器
-            skill: 技能实例（提供层级配置）
+            config: 技能配置字典
+            knowledge_base: 知识库服务（用于RAG）
+            disposal_executor: 处置执行服务
+            skill: 技能实例（提供各层配置方法）
         """
         self.config = config
         self.knowledge_base = knowledge_base
         self.disposal_executor = disposal_executor
         self.skill = skill
         
-        # 构建工作流图
-        self.graph = self._build_graph()
-        
-        logger.info("LangGraph工作流编排器初始化完成")
-    
-    def _build_graph(self) -> StateGraph:
-        """构建LangGraph工作流"""
-        
-        # 创建StateGraph
-        workflow = StateGraph(AgentState)
-        
         # 从技能获取各层配置
         if self.skill:
-            yolo_config = self.skill.get_yolo_config() if hasattr(self.skill, 'get_yolo_config') else {}
-            scene_config = self.skill.get_scene_understanding_config() if hasattr(self.skill, 'get_scene_understanding_config') else {}
-            decision_config = self.skill.get_decision_config() if hasattr(self.skill, 'get_decision_config') else {}
-            frame_config = self.skill.get_frame_collection_config() if hasattr(self.skill, 'get_frame_collection_config') else {}
-            temporal_config = self.skill.get_temporal_analysis_config() if hasattr(self.skill, 'get_temporal_analysis_config') else {}
-            reasoning_config = self.skill.get_final_reasoning_config() if hasattr(self.skill, 'get_final_reasoning_config') else {}
+            yolo_config = getattr(self.skill, 'get_yolo_config', lambda: {})()
+            scene_config = getattr(self.skill, 'get_scene_understanding_config', lambda: {})()
+            decision_config = getattr(self.skill, 'get_decision_config', lambda: {})()
+            temporal_config = getattr(self.skill, 'get_temporal_analysis_config', lambda: {})()
+            reasoning_config = getattr(self.skill, 'get_final_reasoning_config', lambda: {})()
         else:
-            # 使用默认配置
-            yolo_config = {}
-            scene_config = {}
-            decision_config = {}
-            frame_config = {}
-            temporal_config = {}
-            reasoning_config = {}
+            yolo_config = scene_config = decision_config = {}
+            temporal_config = reasoning_config = {}
         
-        # 添加节点（每一层）
-        workflow.add_node("yolo_detection", Layer1YOLODetection(yolo_config))
-        workflow.add_node("scene_understanding", Layer2SceneUnderstanding(scene_config))
-        workflow.add_node("decision_engine", Layer3DecisionEngine(
+        # 创建各层实例（独立对象，可按需调用）
+        self.layer1_yolo = Layer1YOLODetection(yolo_config)
+        self.layer2_scene = Layer2SceneUnderstanding(scene_config)
+        self.layer3_decision = Layer3DecisionEngine(
             config=decision_config,
             knowledge_base=self.knowledge_base,
             skill=self.skill
-        ))
-        workflow.add_node("frame_collection", Layer4FrameCollection(frame_config))
-        workflow.add_node("temporal_analysis", Layer5TemporalAnalysis(temporal_config))
-        workflow.add_node("final_reasoning", Layer6FinalReasoning(reasoning_config))
-        workflow.add_node("disposal", Layer7AutoDisposal(
+        )
+        self.layer5_temporal = Layer5TemporalAnalysis(temporal_config)
+        self.layer6_reasoning = Layer6FinalReasoning(reasoning_config)
+        self.layer7_disposal = Layer7AutoDisposal(
             disposal_executor=self.disposal_executor
-        ))
+        )
         
-        # 添加边（工作流）
-        workflow.add_edge(START, "yolo_detection")
-        workflow.add_conditional_edges(
-            "yolo_detection",
-            should_skip,
-            {
-                "skip": END,
-                "scene_understanding": "scene_understanding"
-            }
-        )
-        workflow.add_edge("scene_understanding", "decision_engine")
-        workflow.add_conditional_edges(
-            "decision_engine",
-            decision_router,
-            {
-                "skip": END,
-                "final_reasoning": "final_reasoning",
-                "frame_collection": "frame_collection"
-            }
-        )
-        workflow.add_conditional_edges(
-            "frame_collection",
-            collection_router,
-            {
-                "temporal_analysis": "temporal_analysis",
-                "collect_more": END  # 退出，等待下一帧
-            }
-        )
-        workflow.add_conditional_edges(
-            "temporal_analysis",
-            temporal_router,
-            {
-                "final_reasoning": "final_reasoning",
-                "frame_collection": "frame_collection"
-            }
-        )
-        workflow.add_conditional_edges(
-            "final_reasoning",
-            disposal_router,
-            {
-                "disposal": "disposal",
-                END: END
-            }
-        )
-        workflow.add_edge("disposal", END)
-        
-        # 编译图（可以添加checkpointer用于持久化）
-        # memory = MemorySaver()  # 内存checkpointer
-        # graph = workflow.compile(checkpointer=memory)
-        graph = workflow.compile()
-        
-        return graph
+        logger.info("LangGraph工作流编排器(v2)初始化完成 - 三阶段架构")
     
-    def execute_workflow(self, frame: np.ndarray, task_id: int, camera_id: int,
-                        task_config: Dict[str, Any]) -> Dict[str, Any]:
+    # ==================== 高频方法：每帧调用 ====================
+    
+    def run_yolo_only(self, frame: np.ndarray, task_id: int, 
+                      camera_id: int, task_config: Dict[str, Any]) -> Dict[str, Any]:
         """
-        执行工作流
+        仅运行YOLO检测（高频，每帧调用）
+        
+        用于两级帧率设计中的"高频层"：
+        - 每帧都跑，耗时~50ms
+        - 返回是否检测到目标、目标列表
+        - 不调用任何LLM
         
         Args:
             frame: 当前帧
@@ -1021,62 +962,302 @@ class AgentOrchestratorLangGraph:
             task_config: 任务配置
             
         Returns:
-            执行结果
+            {
+                "has_target": bool,
+                "yolo_result": {"detections": [...], "processing_time": float},
+                "target_count": int
+            }
         """
         try:
-            # 初始化状态
-            initial_state = {
-                "frame": frame,
-                "task_id": task_id,
-                "camera_id": camera_id,
-                "task_config": task_config,
-                "has_target": False,
-                "buffer_full": False,
-                "task_completed": False,
-                "violation_detected": False,
-                "severity_level": 0,
-                "current_batch": 0,
-                "frame_buffer": [],
-                "batch_analyses": [],
-                "messages": []
-            }
+            state = _build_initial_state(frame, task_id, camera_id, task_config)
+            yolo_update = self.layer1_yolo(state)
             
-            # 执行图
-            result = self.graph.invoke(initial_state)
-            
-            # 提取关键结果
-            output = {
+            detections = yolo_update.get("yolo_result", {}).get("detections", [])
+            return {
                 "success": True,
-                "decision_type": result.get("decision_type"),
-                "violation_detected": result.get("violation_detected", False),
-                "violation_type": result.get("violation_type"),
-                "severity_level": result.get("severity_level", 0),
-                "disposal_result": result.get("disposal_result"),
-                "task_completed": result.get("task_completed", False)
+                "has_target": yolo_update.get("has_target", False),
+                "yolo_result": yolo_update.get("yolo_result", {}),
+                "target_count": len(detections)
             }
-            
-            logger.info(f"工作流执行完成: {output}")
-            
-            return output
-            
         except Exception as e:
-            logger.error(f"工作流执行失败: {str(e)}", exc_info=True)
+            logger.error(f"YOLO检测失败: {str(e)}")
             return {
                 "success": False,
+                "has_target": True,
+                "yolo_result": {"error": str(e)},
+                "target_count": 0
+            }
+    
+    # ==================== 低频方法：按事件/冷却触发 ====================
+    
+    def run_discovery(self, frame: np.ndarray, task_id: int,
+                      camera_id: int, task_config: Dict[str, Any],
+                      existing_yolo_result: Dict[str, Any] = None) -> Dict[str, Any]:
+        """
+        发现阶段: L1(YOLO) → L2(场景理解) → L3(智能决策)
+        
+        低频调用：首次发现目标 或 LLM冷却时间到 时触发。
+        确定当前场景和监控策略（A/B1/B2）。
+        
+        Args:
+            frame: 当前帧
+            task_id: 任务ID
+            camera_id: 摄像头ID
+            task_config: 任务配置
+            existing_yolo_result: 已有的YOLO结果（跳过L1避免重复检测）
+            
+        Returns:
+            {
+                "success": bool,
+                "decision_type": "A" | "B1" | "B2",
+                "has_target": bool,
+                "scene_description": str,
+                "task_type": str | None,
+                "checklist": list,
+                "expected_duration": int | None,
+                "risk_level": str
+            }
+        """
+        try:
+            state = _build_initial_state(frame, task_id, camera_id, task_config)
+            
+            # Layer 1: YOLO检测（如果调用方已有结果则复用，避免重复推理）
+            if existing_yolo_result and existing_yolo_result.get("has_target"):
+                state["has_target"] = True
+                state["yolo_result"] = existing_yolo_result.get("yolo_result", {})
+                yolo_reused = True
+            else:
+                yolo_update = self.layer1_yolo(state)
+                state.update(yolo_update)
+                yolo_reused = False
+            
+            if not state.get("has_target", False):
+                logger.info(f"[发现阶段] 任务{task_id}: 无目标，决策A")
+                return {
+                    "success": True,
+                    "decision_type": "A",
+                    "has_target": False,
+                    "scene_description": None,
+                    "task_type": None,
+                    "checklist": [],
+                    "expected_duration": None,
+                    "risk_level": "none",
+                    "yolo_result": state.get("yolo_result", {})
+                }
+            
+            # Layer 2: 场景理解（LLM调用）
+            scene_update = self.layer2_scene(state)
+            state.update(scene_update)
+            
+            # Layer 3: 智能决策（LLM调用 + RAG）
+            decision_update = self.layer3_decision(state)
+            state.update(decision_update)
+            
+            decision_type = state.get("decision_type", "A")
+            logger.info(f"[发现阶段] 任务{task_id}: 决策={decision_type}, "
+                       f"场景={state.get('scene_description', '')[:40]}...")
+            
+            return {
+                "success": True,
+                "decision_type": decision_type,
+                "has_target": True,
+                "scene_description": state.get("scene_description"),
+                "task_type": state.get("task_type"),
+                "checklist": state.get("checklist", []),
+                "expected_duration": state.get("expected_duration"),
+                "risk_level": state.get("risk_level", "medium"),
+                "yolo_result": state.get("yolo_result", {})
+            }
+            
+        except Exception as e:
+            logger.error(f"[发现阶段] 任务{task_id}失败: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "decision_type": "A",
+                "has_target": False,
                 "error": str(e)
             }
     
-    def get_graph_visualization(self) -> str:
+    def run_temporal_analysis(self, frames: List[np.ndarray], task_id: int,
+                              camera_id: int, task_config: Dict[str, Any],
+                              checklist: List[Dict[str, Any]] = None,
+                              batch_analyses: List[Dict[str, Any]] = None,
+                              current_batch: int = 0) -> Dict[str, Any]:
         """
-        获取图的可视化（Mermaid格式）
+        时序分析阶段: L5(时序动作分析)
         
+        低频调用：帧缓冲区攒满时触发。
+        将收集的帧序列发送给多模态LLM进行时序分析。
+        
+        Args:
+            frames: 收集的帧列表
+            task_id: 任务ID
+            camera_id: 摄像头ID
+            task_config: 任务配置
+            checklist: 检查清单（来自发现阶段）
+            batch_analyses: 之前批次的分析结果（用于增量分析上下文）
+            current_batch: 当前批次编号
+            
         Returns:
-            Mermaid图定义
+            {
+                "success": bool,
+                "task_completed": bool,
+                "batch_analysis": dict (本批次分析结果),
+                "current_stage": str,
+                "completion_rate": int
+            }
         """
         try:
-            # LangGraph提供了图可视化功能
-            return self.graph.get_graph().draw_mermaid()
+            # 用第一帧作为state的frame字段（L5主要用frame_buffer）
+            frame = frames[0] if frames else np.zeros((1, 1, 3), dtype=np.uint8)
+            
+            state = _build_initial_state(
+                frame, task_id, camera_id, task_config,
+                frame_buffer=frames,
+                checklist=checklist or [],
+                batch_analyses=batch_analyses or [],
+                current_batch=current_batch,
+                buffer_full=True
+            )
+            
+            # Layer 5: 时序分析（LLM调用）
+            temporal_update = self.layer5_temporal(state)
+            
+            # 提取本批次分析结果
+            new_analyses = temporal_update.get("batch_analyses", [])
+            batch_analysis = new_analyses[0] if new_analyses else {}
+            
+            task_completed = temporal_update.get("task_completed", False)
+            logger.info(f"[时序分析] 任务{task_id}: 批次{current_batch + 1}, "
+                       f"完成={task_completed}, "
+                       f"阶段={temporal_update.get('current_stage', 'N/A')}")
+            
+            return {
+                "success": True,
+                "task_completed": task_completed,
+                "batch_analysis": batch_analysis,
+                "current_stage": temporal_update.get("current_stage"),
+                "completion_rate": batch_analysis.get("completion_rate", 0),
+                "current_batch": temporal_update.get("current_batch", current_batch + 1)
+            }
+            
         except Exception as e:
-            logger.error(f"图可视化失败: {str(e)}")
-            return ""
+            logger.error(f"[时序分析] 任务{task_id}失败: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "task_completed": False,
+                "batch_analysis": {"error": str(e)},
+                "current_stage": "分析异常",
+                "completion_rate": 0,
+                "current_batch": current_batch + 1
+            }
+    
+    def run_reasoning_and_disposal(self, decision_type: str,
+                                    scene_description: str,
+                                    batch_analyses: List[Dict[str, Any]],
+                                    task_id: int, camera_id: int,
+                                    task_config: Dict[str, Any],
+                                    frame: np.ndarray = None) -> Dict[str, Any]:
+        """
+        推理处置阶段: L6(综合推理) → L7(自动处置)
+        
+        B1路径：发现阶段之后直接调用（用scene_description做单帧推理）
+        B2路径：时序分析完成后调用（用batch_analyses做综合推理）
+        
+        Args:
+            decision_type: "B1" 或 "B2"
+            scene_description: 场景描述（B1用）
+            batch_analyses: 批次分析结果列表（B2用）
+            task_id: 任务ID
+            camera_id: 摄像头ID
+            task_config: 任务配置
+            frame: 当前帧（可选，用于构建state）
+            
+        Returns:
+            {
+                "success": bool,
+                "violation_detected": bool,
+                "violation_type": str | None,
+                "severity_level": int,
+                "disposal_plan": dict,
+                "disposal_result": dict | None
+            }
+        """
+        try:
+            if frame is None:
+                frame = np.zeros((1, 1, 3), dtype=np.uint8)
+            
+            state = _build_initial_state(
+                frame, task_id, camera_id, task_config,
+                decision_type=decision_type,
+                scene_description=scene_description or "",
+                batch_analyses=batch_analyses or []
+            )
+            
+            # Layer 6: 综合推理（LLM调用）
+            reasoning_update = self.layer6_reasoning(state)
+            state.update(reasoning_update)
+            
+            violation_detected = state.get("violation_detected", False)
+            disposal_result = None
+            
+            # Layer 7: 自动处置（仅在检测到违规时执行）
+            if violation_detected:
+                disposal_update = self.layer7_disposal(state)
+                state.update(disposal_update)
+                disposal_result = state.get("disposal_result")
+            
+            logger.info(f"[推理处置] 任务{task_id}: 违规={violation_detected}, "
+                       f"类型={state.get('violation_type', 'N/A')}, "
+                       f"等级={state.get('severity_level', 0)}")
+            
+            return {
+                "success": True,
+                "violation_detected": violation_detected,
+                "violation_type": state.get("violation_type"),
+                "severity_level": state.get("severity_level", 0),
+                "disposal_plan": state.get("disposal_plan", {}),
+                "disposal_result": disposal_result
+            }
+            
+        except Exception as e:
+            logger.error(f"[推理处置] 任务{task_id}失败: {str(e)}", exc_info=True)
+            return {
+                "success": False,
+                "violation_detected": False,
+                "violation_type": None,
+                "severity_level": 0,
+                "disposal_plan": {},
+                "disposal_result": None,
+                "error": str(e)
+            }
+    
+    # ==================== 工具方法 ====================
+    
+    def get_architecture_description(self) -> str:
+        """返回架构描述（Mermaid图格式），用于文档和可视化"""
+        return """
+graph TD
+    START([每帧输入]) --> YOLO[L1: YOLO检测<br/>高频/每帧]
+    YOLO -->|无目标| NO_TARGET([返回: no_target])
+    YOLO -->|有目标+需要LLM| DISCOVERY{是否触发LLM?<br/>冷却机制}
+    YOLO -->|有目标+冷却中| COLLECT_ONLY([B2: 仅攒帧])
+    
+    DISCOVERY -->|首次/冷却到| L2[L2: 场景理解<br/>多模态LLM]
+    L2 --> L3[L3: 智能决策<br/>推理LLM+RAG]
+    
+    L3 -->|决策A| SKIP([无需监控])
+    L3 -->|决策B1| L6_B1[L6: 综合推理<br/>单帧判断]
+    L3 -->|决策B2| COLLECTING([开始收集帧])
+    
+    COLLECTING -->|帧攒满| L5[L5: 时序分析<br/>多模态LLM]
+    L5 -->|未完成| COLLECTING
+    L5 -->|已完成| L6_B2[L6: 综合推理<br/>时序判断]
+    
+    L6_B1 -->|违规| L7[L7: 自动处置]
+    L6_B1 -->|无违规| DONE([完成])
+    L6_B2 -->|违规| L7
+    L6_B2 -->|无违规| DONE
+    L7 --> DONE
+"""
 

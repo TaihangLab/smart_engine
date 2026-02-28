@@ -2,6 +2,7 @@
 API包，提供REST API接口
 """
 from fastapi import APIRouter
+from app.core.config import settings
 from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, task_review, chat_assistant, wvp_proxy, alert_archives, review_records, local_videos, realtime_monitor, realtime_detection
 
 api_router = APIRouter()
@@ -23,6 +24,11 @@ api_router.include_router(wvp_proxy.router, prefix="", tags=["wvp_proxy"])
 api_router.include_router(local_videos.router, prefix="/local-videos", tags=["local_videos"])
 api_router.include_router(realtime_monitor.router, prefix="/realtime-monitor", tags=["realtime_monitor"])
 api_router.include_router(realtime_detection.router, prefix="/realtime-detection", tags=["realtime_detection"])
+
+# 可选模块：标注-训练-推理-服务化（ML_PIPELINE_ENABLED=true 时启用）
+if settings.ML_PIPELINE_ENABLED:
+    from app.modules.ml_pipeline.router import ml_pipeline_router
+    api_router.include_router(ml_pipeline_router, prefix="/ml-pipeline", tags=["ml_pipeline"])
 
 __all__ = ["api_router"]
 

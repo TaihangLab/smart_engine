@@ -2,7 +2,7 @@
 AI任务API端点，负责AI任务的管理
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Path, Body
+from fastapi import APIRouter, Depends, HTTPException, status as http_status, Query, Path, Body
 from sqlalchemy.orm import Session
 import logging
 from pydantic import BaseModel, Field
@@ -206,7 +206,7 @@ async def get_all_tasks(
     except Exception as e:
         logger.error(f"获取AI任务失败: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取AI任务失败: {str(e)}"
         )
 
@@ -227,14 +227,13 @@ def get_skill_classes(
         limit: 每页数量
         query_name: 按技能名称过滤
         query_type: 按技能类型过滤
-        status: 技能状态过滤，默认只返回启用的技能
+        skill_status: 技能状态过滤，默认只返回启用的技能
         db: 数据库会话
         
     Returns:
         SkillClassListResponse: 技能类列表及分页信息
     """
     try:
-        # 调用SkillClassService获取技能类列表
         result = SkillClassService.get_all_paginated(
             db, 
             page=page, 
@@ -245,7 +244,6 @@ def get_skill_classes(
             is_detail=False
         )
         
-        # 转换为响应模型
         return SkillClassListResponse(
             skill_classes=[
                 SkillClassBasic(
@@ -266,7 +264,7 @@ def get_skill_classes(
     except Exception as e:
         logger.error(f"获取可用技能类失败: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取可用技能类失败: {str(e)}"
         )
 
@@ -290,7 +288,7 @@ def get_skill_class_by_id(
         skill_class = SkillClassService.get_by_id(skill_class_id, db, is_detail=False)
         if not skill_class:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"技能类不存在: id={skill_class_id}"
             )
         
@@ -310,7 +308,7 @@ def get_skill_class_by_id(
     except Exception as e:
         logger.error(f"获取技能类详情失败: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取技能类详情失败: {str(e)}"
         )
 
@@ -330,7 +328,7 @@ def get_task_by_id(task_id: int = Path(..., description="任务ID"), db: Session
         task = AITaskService.get_task_by_id(task_id, db)
         if not task:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"AI任务不存在: id={task_id}"
             )
         return task
@@ -339,7 +337,7 @@ def get_task_by_id(task_id: int = Path(..., description="任务ID"), db: Session
     except Exception as e:
         logger.error(f"获取AI任务失败: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取AI任务失败: {str(e)}"
         )
 
@@ -368,7 +366,7 @@ def create_task(task_data: TaskCreate = Body(..., description="AI任务创建数
         task = AITaskService.create_task(task_dict, db)
         if not task:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="创建AI任务失败，请检查输入数据"
             )
         return task
@@ -377,7 +375,7 @@ def create_task(task_data: TaskCreate = Body(..., description="AI任务创建数
     except Exception as e:
         logger.error(f"创建AI任务失败: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"创建AI任务失败: {str(e)}"
         )
 
@@ -403,7 +401,7 @@ def update_task(
         existing = AITaskService.get_task_by_id(task_id, db)
         if not existing:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"AI任务不存在: id={task_id}"
             )
         
@@ -415,7 +413,7 @@ def update_task(
         updated = AITaskService.update_task(task_id, task_dict, db)
         if not updated:
             raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
+                status_code=http_status.HTTP_400_BAD_REQUEST,
                 detail="更新AI任务失败，请检查输入数据"
             )
         return updated
@@ -424,7 +422,7 @@ def update_task(
     except Exception as e:
         logger.error(f"更新AI任务失败: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"更新AI任务失败: {str(e)}"
         )
 
@@ -445,7 +443,7 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
         existing = AITaskService.get_task_by_id(task_id, db)
         if not existing:
             raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
+                status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"AI任务不存在: id={task_id}"
             )
         
@@ -470,7 +468,7 @@ def delete_task(task_id: int, db: Session = Depends(get_db)):
     except Exception as e:
         logger.error(f"删除AI任务失败: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"删除AI任务失败: {str(e)}"
         )
 
@@ -555,6 +553,6 @@ def get_tasks_by_camera_id(
     except Exception as e:
         logger.error(f"获取摄像头任务失败: {str(e)}", exc_info=True)
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"获取摄像头任务失败: {str(e)}"
         ) 

@@ -165,15 +165,17 @@ class BaseSkill(ABC):
         return True
         
     @abstractmethod
-    def process(self, input_data: Any) -> Any:
+    def process(self, input_data: Any, context: Any = None, **kwargs) -> Any:
         """
         处理输入数据
         
         Args:
-            input_data: 输入数据
+            input_data: 输入数据（图像帧/路径/字典）
+            context: 上下文信息（普通技能传fence_config，Agent技能传task_context）
+            **kwargs: 额外参数
             
         Returns:
-            处理结果
+            处理结果 (SkillResult)
         """
         pass
         

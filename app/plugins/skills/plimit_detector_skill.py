@@ -70,13 +70,9 @@ class PlimitDetectorSkill(BaseSkill):
             },
             {
                 "level": 4,
-                "description": f"当检测到 LEVEL_4 × person_limit = {params['LEVEL_3_THRESHOLD'] * person_limit} 及以上人员超限时触发。"
+                "description": f"当检测到 LEVEL_4 × person_limit = {params['LEVEL_4_THRESHOLD'] * person_limit} 及以上人员超限时触发。"
             }
         ]
-
-        # 调用一次初始化
-        PlimitDetectorSkill.init_alert_definitions()
-
 
     def _initialize(self) -> None:
         """初始化技能"""
@@ -434,6 +430,9 @@ class PlimitDetectorSkill(BaseSkill):
             return (center_x, center_y)
         return None
 
+
+# 类定义完成后，初始化动态告警定义
+PlimitDetectorSkill.init_alert_definitions()
 
 # 测试代码
 if __name__ == "__main__":

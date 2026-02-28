@@ -54,8 +54,16 @@ class PaintGogglesMonitorSkill(AgentSkillBase):
         # 依赖的Triton模型列表（Agent技能不直接依赖Triton）
         "required_models": [],
         
-        # ==================== 7层工作流参数配置 ====================
+        # ==================== 两级帧率控制 ====================
+        # LLM冷却时间（秒）：IDLE阶段两次LLM发现之间的最小间隔
+        # 护目镜佩戴状态相对稳定，30秒重新检查一次
         "params": {
+            "llm_cooldown": 30,
+            # YOLO目标数量变化阈值：变化超过此值立即触发LLM（不等冷却）
+            "target_change_threshold": 2,
+            # COLLECTING阶段连续无目标帧数阈值：超过则重置回IDLE
+            "no_target_reset_threshold": 10,
+            
             # ---------- 第1层：YOLO快速检测配置 ----------
             "fast_detection": {
                 "enabled": True,                    # 是否启用YOLO检测层

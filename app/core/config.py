@@ -20,6 +20,30 @@ class Settings(BaseSettings):
     # 服务配置
     DEBUG: bool = Field(default=True, description="是否启用调试模式")
     LOG_LEVEL: str = Field(default="DEBUG", description="日志级别")
+
+    # ==================== 可选模块配置 ====================
+    ML_PIPELINE_ENABLED: bool = Field(
+        default=True,
+        description="是否启用标注-训练-推理-服务化模块（.env: ML_PIPELINE_ENABLED=true）"
+    )
+    
+    # ==================== Label Studio 配置 ====================
+    LABEL_STUDIO_URL: str = Field(
+        default="http://172.18.1.1:8888",
+        description="Label Studio 服务地址"
+    )
+    LABEL_STUDIO_API_KEY: str = Field(
+        default="",
+        description="Label Studio API Token（留空则自动通过账号密码登录获取）"
+    )
+    LABEL_STUDIO_USERNAME: str = Field(
+        default="admin@admin.com",
+        description="Label Studio 登录账号（邮箱格式）"
+    )
+    LABEL_STUDIO_PASSWORD: str = Field(
+        default="admin123456",
+        description="Label Studio 登录密码"
+    )
     
     # 线程池配置
     ALERT_GENERATION_POOL_SIZE: int = Field(default=10, description="预警生成线程池大小")
@@ -94,7 +118,7 @@ class Settings(BaseSettings):
     DB_AUTOFLUSH: bool = Field(default=False, description="数据库自动刷新")
     
     # WVP配置
-    WVP_API_URL: str = Field(default="http://192.168.0.14:18080", description="WVP API地址")
+    WVP_API_URL: str = Field(default="http://172.18.1.1:18978", description="WVP API地址")
     WVP_USERNAME: str = Field(default="admin", description="WVP用户名")
     WVP_PASSWORD: str = Field(default="admin", description="WVP密码")
     
@@ -102,8 +126,8 @@ class Settings(BaseSettings):
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
     
     # MinIO配置
-    MINIO_ENDPOINT: str = Field(default="192.168.0.14", description="MinIO服务器地址")
-    MINIO_PORT: int = Field(default=9000, description="MinIO端口")
+    MINIO_ENDPOINT: str = Field(default="172.18.1.1", description="MinIO服务器地址")
+    MINIO_PORT: int = Field(default=9300, description="MinIO端口")
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", description="MinIO访问密钥")
     MINIO_SECRET_KEY: str = Field(default="minioadmin", description="MinIO秘密密钥")
     MINIO_SECURE: bool = Field(default=False, description="MinIO是否使用HTTPS")
@@ -362,7 +386,7 @@ class Settings(BaseSettings):
     RTSP_STREAMING_ENABLED: bool = Field(default=True, description="是否全局启用RTSP推流功能")
     RTSP_STREAMING_BACKEND: str = Field(default="ffmpeg", description="推流后端选择: 'ffmpeg'(推荐，NVENC硬件编码), 'pyav'(软件编码)")
     RTSP_STREAMING_CODEC: str = Field(default="h265", description="视频编码格式: 'h264'(兼容性好), 'h265'/'hevc'(压缩率高)")
-    RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://192.168.0.14/detection", description="RTSP推流基础地址")
+    RTSP_STREAMING_BASE_URL: str = Field(default="rtsp://172.18.1.1:5540/detection", description="RTSP推流基础地址")
     RTSP_STREAMING_SIGN: str = Field(default="a9b7ba70783b617e9998dc4dd82eb3c5", description="RTSP推流验证签名")
     RTSP_STREAMING_DEFAULT_FPS: float = Field(default=30.0, description="RTSP推流默认帧率")
     RTSP_STREAMING_MAX_FPS: float = Field(default=30.0, description="RTSP推流最大帧率")

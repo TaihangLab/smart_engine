@@ -2136,3 +2136,145 @@ false     false     true      true      false
 - **新创建的技能**：`status = false`（默认未发布状态，不可用于创建任务）
 - **发布后的技能**：`status = true`（可用状态，可以创建任务使用）
 - **下线后的技能**：`status = false`（不可用状态，停止使用但保留配置）
+
+---
+
+## 🆕 ML Pipeline 模块（标注-训练-推理-服务化）
+
+> 可选模块，通过环境变量 `ML_PIPELINE_ENABLED=true` 启用。
+
+### 功能概述
+
+- **数据标注**：集成 Label Studio，支持创建数据集 → 推送图片 → 在线标注 → 同步结果
+- **数据导出**：将标注结果导出为 YOLO 格式 ZIP（含 images/labels/data.yaml）
+- **模型训练**：基于 Ultralytics YOLO 的训练任务管理，后台线程执行
+- **模型部署**：训练产出上传到 MinIO，可手动或通过 API 部署到 Triton
+
+### 启用方式
+
+```bash
+# .env 添加以下配置
+ML_PIPELINE_ENABLED=true
+LABEL_STUDIO_URL=http://localhost:8080
+LABEL_STUDIO_API_KEY=你的Token
+```
+
+### 依赖服务
+
+| 服务 | 用途 | 必需 |
+|------|------|------|
+| **Label Studio** | 数据标注工具 | 是 |
+| **MinIO** | 图片存储 / 数据集 / 模型存储 | 是（已有） |
+| **ultralytics + torch** | YOLO 模型训练 | 仅训练时需要 |
+
+#### 快速部署 Label Studio
+
+```bash
+docker run -d -p 8080:8080 \
+  --name label-studio \
+  -v label-studio-data:/label-studio/data \
+  heartexlabs/label-studio:latest
+```
+
+启动后访问 `http://localhost:8080` 注册账号，在个人设置中获取 API Token。
+
+#### 安装训练依赖（可选）
+
+```bash
+pip install ultralytics torch
+```
+
+### 模块目录结构
+
+```
+app/modules/ml_pipeline/
+├── __init__.py
+├── router.py                    # 路由聚合
+├── startup.py                   # 模块启动/关闭逻辑
+├── api/
+│   ├── annotation.py            # 标注 API（10 个接口）
+│   └── training.py              # 训练 API（5 个接口）
+├── models/
+│   └── annotation.py            # ORM：4 张表
+├── services/
+│   ├── label_studio_client.py   # Label Studio API 客户端
+│   ├── annotation_service.py    # 标注业务编排
+│   ├── dataset_export_service.py # YOLO 数据集导出
+│   └── training_service.py      # 训练任务管理
+└── db/
+```
+
+### 核心流程
+
+```
+创建数据集 → Label Studio 创建项目
+      ↓
+添加图片（MinIO路径）→ 推送到 Label Studio
+      ↓
+用户在 Label Studio 中标注
+      ↓
+同步标注结果 → 写入本地数据库
+      ↓
+导出 YOLO 格式 ZIP → 上传 MinIO
+      ↓
+创建训练任务 → 后台线程执行 YOLO 训练
+      ↓
+训练产出 best.pt → 上传 MinIO → 可部署到 Triton
+```
+
+### API 接口一览
+
+#### 标注 API（`/api/v1/ml-pipeline/annotation/`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/label-studio/status` | 检查 Label Studio 连接状态 |
+| GET | `/datasets` | 数据集列表 |
+| POST | `/datasets` | 创建数据集（自动创建 LS 项目） |
+| GET | `/datasets/{id}` | 数据集详情 |
+| DELETE | `/datasets/{id}` | 删除数据集 |
+| POST | `/datasets/{id}/images` | 添加图片（自动推送到 LS） |
+| GET | `/datasets/{id}/images` | 图片列表 |
+| POST | `/datasets/{id}/sync` | 从 LS 同步标注结果 |
+| POST | `/datasets/{id}/export` | 导出 YOLO 格式 ZIP |
+
+#### 训练 API（`/api/v1/ml-pipeline/training/`）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/tasks` | 训练任务列表 |
+| POST | `/tasks` | 创建训练任务 |
+| GET | `/tasks/{id}` | 任务详情（含进度、指标） |
+| POST | `/tasks/{id}/start` | 启动训练 |
+| POST | `/tasks/{id}/cancel` | 取消训练 |
+
+### 使用示例
+
+```bash
+# 1. 检查 Label Studio 连接
+curl http://localhost:8000/api/v1/ml-pipeline/annotation/label-studio/status
+
+# 2. 创建数据集
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets \
+  -H "Content-Type: application/json" \
+  -d '{"name":"安全帽数据集","label_names":["helmet","no_helmet"],"skill_type":"helmet_detector"}'
+
+# 3. 添加图片
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets/1/images \
+  -H "Content-Type: application/json" \
+  -d '{"minio_paths":["alert-images/1/img001.jpg","alert-images/1/img002.jpg"]}'
+
+# 4. 用户在 Label Studio 中完成标注后，同步结果
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets/1/sync
+
+# 5. 导出 YOLO 格式
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets/1/export
+
+# 6. 创建训练任务
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/training/tasks \
+  -H "Content-Type: application/json" \
+  -d '{"name":"安全帽训练v1","dataset_id":1,"base_model":"yolo11n.pt","epochs":100}'
+
+# 7. 启动训练
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/training/tasks/1/start
+```

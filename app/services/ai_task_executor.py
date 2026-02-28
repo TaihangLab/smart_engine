@@ -39,7 +39,8 @@ class OptimizedAsyncProcessor:
         
         # 使用更高效的数据结构
         self.frame_buffer = queue.Queue(maxsize=max_queue_size)  # 统一帧缓冲区
-        self.result_buffer = queue.Queue(maxsize=2)  # 检测结果缓冲区（更小）
+        self.result_buffer = queue.Queue(maxsize=2)  # 推流/OSD用的结果缓冲区
+        self.alert_buffer = queue.Queue(maxsize=8)   # 告警专用缓冲区，与推流隔离
         
         # 线程控制
         self.running = False
@@ -51,7 +52,7 @@ class OptimizedAsyncProcessor:
         self.latest_annotated_frame = None
         self.latest_raw_frame = None
         self.frame_timestamp = 0
-        self.result_lock = threading.RLock()  # 可重入锁
+        self.result_lock = threading.RLock()
         
         # 动态统计信息
         self.stats = {
@@ -65,9 +66,10 @@ class OptimizedAsyncProcessor:
             "memory_usage_mb": 0.0
         }
         
-        # 性能监控
+        # 性能监控：存储检测完成的时间戳（而非耗时），用于计算FPS
         self.detection_times = []
         self.last_stats_update = time.time()
+        self.start_time = time.time()
         
     def start(self, skill_instance, task_config, rtsp_streamer=None):
         """启动异步处理"""
@@ -168,13 +170,20 @@ class OptimizedAsyncProcessor:
                 # 记录检测开始时间
                 detection_start = time.time()
                 
-                # 执行检测
-                fence_config = self.task_config.get("fence_config", {})
-                result = self.skill_instance.process(frame, fence_config)
+                # 执行检测：根据技能类型传递不同参数
+                skill_config = self.skill_instance.config if hasattr(self.skill_instance, 'config') else {}
+                if skill_config.get('type') == 'agent':
+                    # Agent技能：传完整task_context（含task_id, camera_id, fence_config）
+                    result = self.skill_instance.process(frame, self.task_config)
+                else:
+                    # 普通技能（YOLO等）：只传fence_config
+                    fence_config = self.task_config.get("fence_config", {})
+                    result = self.skill_instance.process(frame, fence_config)
                 
-                # 记录检测耗时
-                detection_time = time.time() - detection_start
-                self.detection_times.append(detection_time)
+                # 记录检测耗时和完成时间戳
+                detection_end = time.time()
+                detection_duration = detection_end - detection_start
+                self.detection_times.append(detection_end)
                 
                 # 保持检测时间列表大小合理
                 if len(self.detection_times) > 100:
@@ -183,28 +192,36 @@ class OptimizedAsyncProcessor:
                 if result.success:
                     # 根据是否启用推流决定是否绘制检测框
                     if self.rtsp_streamer:
-                        # 启用推流时才绘制检测框，优先使用技能的自定义绘制函数
                         annotated_frame = self._draw_detections_with_skill(frame, result.data)
                     else:
-                        # 未启用推流时直接使用原始帧
                         annotated_frame = frame
                     
                     # 原子更新共享状态
                     with self.result_lock:
                         self.latest_detection_result = result
                         self.latest_annotated_frame = annotated_frame
+                        self._latest_detection_duration = detection_duration
                     
-                    # 高效投递结果
+                    result_data = {
+                        "result": result,
+                        "frame": annotated_frame,
+                        "timestamp": detection_end,
+                        "frame_timestamp": frame_timestamp
+                    }
+                    
+                    # 投递到推流/OSD缓冲区
                     try:
                         if self.result_buffer.full():
-                            self.result_buffer.get_nowait()  # 丢弃旧结果
-                        
-                        self.result_buffer.put({
-                            "result": result,
-                            "frame": annotated_frame,  # 直接引用
-                            "timestamp": time.time(),
-                            "frame_timestamp": frame_timestamp
-                        }, block=False)
+                            self.result_buffer.get_nowait()
+                        self.result_buffer.put(result_data, block=False)
+                    except queue.Full:
+                        pass
+                    
+                    # 投递到告警专用缓冲区（独立于推流，确保告警不丢失）
+                    try:
+                        if self.alert_buffer.full():
+                            self.alert_buffer.get_nowait()
+                        self.alert_buffer.put(result_data, block=False)
                     except queue.Full:
                         pass
                     
@@ -292,19 +309,10 @@ class OptimizedAsyncProcessor:
         logger.info(f"任务 {self.task_id} 推流线程已停止")
     
     def _get_optimal_streaming_frame(self):
-        """智能获取最优推流帧"""
-        # 优先获取最新检测结果
-        try:
-            result_data = self.result_buffer.get_nowait()
-            return result_data["frame"]
-        except queue.Empty:
-            pass
-        
-        # 其次使用共享状态中的最新帧
+        """智能获取最优推流帧 — 使用共享状态，不消费队列"""
         with self.result_lock:
             if self.latest_annotated_frame is not None:
                 return self.latest_annotated_frame
-        
         return None
     
     def _update_stats(self):
@@ -315,22 +323,24 @@ class OptimizedAsyncProcessor:
         if current_time - self.last_stats_update < 2.0:
             return
         
-        # 计算平均检测时间
-        if self.detection_times:
-            self.stats["avg_detection_time"] = sum(self.detection_times) / len(self.detection_times)
+        # 计算平均检测耗时（从共享状态获取）
+        with self.result_lock:
+            avg_duration = getattr(self, '_latest_detection_duration', 0)
+        self.stats["avg_detection_time"] = avg_duration
         
-        # 计算检测FPS
-        time_window = current_time - self.last_stats_update
-        if time_window > 0:
-            frames_in_window = len([t for t in self.detection_times if current_time - t <= time_window])
-            self.stats["detection_fps"] = frames_in_window / time_window
+        # 计算检测FPS：统计最近5秒内完成的检测次数
+        fps_window = 5.0
+        cutoff = current_time - fps_window
+        recent = [t for t in self.detection_times if t >= cutoff]
+        self.stats["detection_fps"] = len(recent) / fps_window if recent else 0.0
         
-        # 估算内存使用（简单估算）
+        # 估算内存使用
         queue_sizes = (
             self.frame_buffer.qsize() + 
-            self.result_buffer.qsize()
+            self.result_buffer.qsize() +
+            self.alert_buffer.qsize()
         )
-        self.stats["memory_usage_mb"] = queue_sizes * 2.0  # 粗略估算
+        self.stats["memory_usage_mb"] = queue_sizes * 2.0
         
         self.last_stats_update = current_time
         
@@ -343,9 +353,20 @@ class OptimizedAsyncProcessor:
                        f"丢帧率={self.stats['frames_dropped']/(self.stats['frames_captured']+1)*100:.1f}%")
     
     def get_latest_result(self):
-        """获取最新的检测结果"""
+        """获取最新的检测结果（非破坏性读取，供OSD/API使用）"""
+        with self.result_lock:
+            if self.latest_detection_result is not None:
+                return {
+                    "result": self.latest_detection_result,
+                    "frame": self.latest_annotated_frame,
+                    "timestamp": self.frame_timestamp
+                }
+        return None
+    
+    def get_alert_result(self):
+        """获取告警专用的检测结果（破坏性读取，每个结果只消费一次）"""
         try:
-            return self.result_buffer.get_nowait()
+            return self.alert_buffer.get_nowait()
         except queue.Empty:
             return None
     
@@ -438,6 +459,7 @@ class OptimizedAsyncProcessor:
         # 清空队列
         self._clear_queue(self.frame_buffer)
         self._clear_queue(self.result_buffer)
+        self._clear_queue(self.alert_buffer)
         
         # 输出最终统计
         logger.info(f"任务 {self.task_id} 最终统计: "
@@ -464,7 +486,7 @@ class OptimizedAsyncProcessor:
     def get_performance_report(self):
         """获取详细性能报告"""
         current_time = time.time()
-        uptime = current_time - (self.last_stats_update - 2.0) if self.last_stats_update > 0 else 0
+        uptime = current_time - self.start_time
         
         return {
             "task_id": self.task_id,
@@ -487,6 +509,9 @@ class AITaskExecutor:
     """基于精确调度的AI任务执行器"""
     
     def __init__(self):
+        # 线程安全锁，保护所有共享字典的并发访问
+        self._state_lock = threading.Lock()
+        
         self.running_tasks = {}  # 存储正在运行的任务 {task_id: thread}
         self.stop_event = {}     # 存储任务停止事件 {task_id: threading.Event}
         self.task_jobs = {}      # 存储任务的调度作业 {task_id: [start_job_id, stop_job_id]}
@@ -654,23 +679,20 @@ class AITaskExecutor:
     
     def _start_task_thread(self, task_id: int):
         """启动任务线程"""
-        # 如果任务线程已存在且在运行，不做任何操作
-        if task_id in self.running_tasks and self.running_tasks[task_id].is_alive():
-            logger.info(f"任务 {task_id} 线程已在运行")
-            return
+        with self._state_lock:
+            if task_id in self.running_tasks and self.running_tasks[task_id].is_alive():
+                logger.info(f"任务 {task_id} 线程已在运行")
+                return
             
         logger.info(f"开始启动任务 {task_id} 线程")
         
-        # 创建新的数据库会话
         db = next(get_db())
         try:
-            # 获取任务详情
             task_data = AITaskService.get_task_by_id(task_id, db)
             if not task_data:
                 logger.error(f"未找到任务: {task_id}")
                 return
                 
-            # 创建任务对象（从dict转为对象）
             task = AITask(
                 id=task_data["id"],
                 name=task_data["name"],
@@ -686,18 +708,19 @@ class AITaskExecutor:
                 skill_class_id=task_data["skill_class_id"],
                 skill_config=json.dumps(task_data["skill_config"]) if isinstance(task_data["skill_config"], dict) else task_data["skill_config"]
             )
-                
-            # 创建停止事件
-            self.stop_event[task_id] = threading.Event()
             
-            # 创建并启动任务线程
+            stop_evt = threading.Event()
             thread = threading.Thread(
                 target=self._execute_task,
-                args=(task, self.stop_event[task_id]),
+                args=(task, stop_evt),
                 daemon=True,
                 name=f"Task-{task_id}"
             )
-            self.running_tasks[task_id] = thread
+            
+            with self._state_lock:
+                self.stop_event[task_id] = stop_evt
+                self.running_tasks[task_id] = thread
+            
             thread.start()
             
             logger.info(f"任务 {task_id} 线程已启动")
@@ -708,24 +731,25 @@ class AITaskExecutor:
     
     def _stop_task_thread(self, task_id: int):
         """停止任务线程"""
-        if task_id in self.stop_event:
+        with self._state_lock:
+            stop_evt = self.stop_event.get(task_id)
+            thread = self.running_tasks.get(task_id)
+        
+        if stop_evt:
             logger.info(f"发送停止信号给任务 {task_id}")
-            self.stop_event[task_id].set()
+            stop_evt.set()
             
-            # 等待线程结束
-            if task_id in self.running_tasks:
-                self.running_tasks[task_id].join(timeout=10)
-                if self.running_tasks[task_id].is_alive():
-                    logger.warning(f"任务 {task_id} 未能在超时时间内停止")
+            if thread:
+                thread.join(timeout=10)
+                if thread.is_alive():
+                    logger.warning(f"任务 {task_id} 未能在超时时间内停止，保留线程引用以防重复启动")
                 else:
                     logger.info(f"任务 {task_id} 已停止")
-                    
-                # 移除任务线程引用
-                del self.running_tasks[task_id]
+                    with self._state_lock:
+                        self.running_tasks.pop(task_id, None)
                 
-            # 清理停止事件
-            if task_id in self.stop_event:
-                del self.stop_event[task_id]
+            with self._state_lock:
+                self.stop_event.pop(task_id, None)
                 
             # 🧹 清理预警合并管理器中的任务资源
             try:
@@ -736,66 +760,75 @@ class AITaskExecutor:
         else:
             logger.warning(f"任务 {task_id} 不在运行状态")
     
-    def _pause_task_on_failure(self, task_id: int, db: Session, reason: str):
+    def _pause_task_on_failure(self, task_id: int, reason: str, db: Session = None):
         """
-        任务启动失败时自动暂停任务
+        任务启动失败时自动暂停任务（自动创建新的DB会话，避免使用长生命周期的会话）
         
         Args:
             task_id: 任务ID
-            db: 数据库会话
             reason: 暂停原因
+            db: 可选的数据库会话，若为None则自行创建
         """
+        own_db = False
         try:
-            # 更新任务状态为禁用
+            if db is None:
+                db = next(get_db())
+                own_db = True
             AITaskService.update_task(task_id, {"status": False}, db)
             logger.warning(f"⚠️ 任务 {task_id} 已自动暂停，原因: {reason}")
             
-            # 清理调度作业
             self._clear_task_jobs(task_id)
             logger.info(f"已清理任务 {task_id} 的调度作业")
             
         except Exception as e:
             logger.error(f"暂停任务 {task_id} 时出错: {str(e)}")
+        finally:
+            if own_db and db:
+                db.close()
     
     def _execute_task(self, task: AITask, stop_event: threading.Event):
         """执行AI任务"""
         logger.info(f"开始执行任务 {task.id}: {task.name}")
         
+        frame_reader = None
+        frame_processor = None
+        rtsp_streamer = None
+        
+        # ===== 初始化阶段：使用短生命周期DB会话 =====
         try:
-            # 创建新的数据库会话
             db = next(get_db())
-            
-            # 检查摄像头通道是否存在
-            _, should_delete = self._get_stream_url(task.camera_id)
-            if should_delete:
-                logger.warning(f"摄像头 {task.camera_id} 通道不存在，将自动删除任务 {task.id}")
-                # 删除任务
-                try:
-                    AITaskService.delete_task(task.id, db)
-                    logger.info(f"已删除任务 {task.id}，因为关联的摄像头 {task.camera_id} 不存在")
+            try:
+                # 检查摄像头通道是否存在
+                _, should_delete = self._get_stream_url(task.camera_id)
+                if should_delete:
+                    logger.warning(f"摄像头 {task.camera_id} 通道不存在，将自动删除任务 {task.id}")
+                    try:
+                        AITaskService.delete_task(task.id, db)
+                        self._clear_task_jobs(task.id)
+                        logger.info(f"已删除任务 {task.id}，关联的摄像头 {task.camera_id} 不存在")
+                    except Exception as e:
+                        logger.error(f"删除任务 {task.id} 时出错: {str(e)}")
+                    return
                     
-                    # 清理调度作业
-                    self._clear_task_jobs(task.id)
-                    logger.info(f"已清理任务 {task.id} 的调度作业")
-                except Exception as e:
-                    logger.error(f"删除任务 {task.id} 时出错: {str(e)}")
-                return
+                # 加载技能实例
+                skill_instance = self._load_skill_for_task(task, db)
+                if not skill_instance:
+                    logger.error(f"加载任务 {task.id} 的技能实例失败，自动暂停任务")
+                    self._pause_task_on_failure(task.id, "技能实例加载失败", db)
+                    return
+            finally:
+                db.close()
+        except Exception as e:
+            logger.error(f"任务 {task.id} 初始化阶段出错: {str(e)}", exc_info=True)
+            return
                 
-            # 加载技能实例
-            skill_instance = self._load_skill_for_task(task, db)
-            if not skill_instance:
-                logger.error(f"加载任务 {task.id} 的技能实例失败，自动暂停任务")
-                self._pause_task_on_failure(task.id, db, "技能实例加载失败")
-                return
-                
-            # 使用智能自适应帧读取器
+        # ===== 资源创建阶段 =====
+        try:
             from app.services.adaptive_frame_reader import AdaptiveFrameReader
             from app.core.config import settings
             
-            # 计算帧间隔
             frame_interval = 1.0 / task.frame_rate if task.frame_rate > 0 else 1.0
             
-            # 创建自适应帧读取器
             frame_reader = AdaptiveFrameReader(
                 camera_id=task.camera_id,
                 frame_interval=frame_interval,
@@ -804,186 +837,109 @@ class AITaskExecutor:
             
             if not frame_reader.start():
                 logger.error(f"无法启动自适应帧读取器，摄像头: {task.camera_id}，自动暂停任务")
-                self._pause_task_on_failure(task.id, db, f"无法获取摄像头 {task.camera_id} 视频流")
+                self._pause_task_on_failure(task.id, f"无法获取摄像头 {task.camera_id} 视频流")
                 return
             
-            # 初始化优化的异步帧处理器
             frame_processor = OptimizedAsyncProcessor(task.id, max_queue_size=2)
             
-            # 保存帧处理器引用和任务-摄像头映射
-            self.frame_processors[task.id] = frame_processor
-            self.task_camera_mapping[task.id] = task.camera_id
+            with self._state_lock:
+                self.frame_processors[task.id] = frame_processor
+                self.task_camera_mapping[task.id] = task.camera_id
             
-            # 检查是否需要启用RTSP推流
-            rtsp_streamer = None
+            # RTSP推流初始化
             task_config = json.loads(task.config) if isinstance(task.config, str) else (task.config or {})
             
-            # 从全局配置和任务配置中确定是否启用推流
-            from app.core.config import settings
             global_rtsp_enabled = settings.RTSP_STREAMING_ENABLED
             task_rtsp_enabled = task_config.get("rtsp_streaming", {}).get("enabled", False)
 
-
             if global_rtsp_enabled and task_rtsp_enabled:
-                # 获取技能名称用于构建推流地址
-                from app.services.skill_class_service import SkillClassService
-                skill_class = SkillClassService.get_by_id(task.skill_class_id, db, is_detail=False)
-                skill_name = skill_class["name"] if skill_class else "unknown"
-                
-                # 从全局配置读取参数
-                rtsp_base_url = settings.RTSP_STREAMING_BASE_URL
-                rtsp_sign = settings.RTSP_STREAMING_SIGN
-                rtsp_url = f"{rtsp_base_url}/{skill_name}_{task.id}?sign={rtsp_sign}"
-                
-                # 获取视频流分辨率
-                stream_width, stream_height = frame_reader.get_resolution()
-                
-                # 获取推流帧率
-                # 使用任务帧率和全局默认帧率中的最大值
-                if task.frame_rate > 0:
-                    base_fps = max(task.frame_rate, settings.RTSP_STREAMING_DEFAULT_FPS)
-                    logger.info(f"任务 {task.id} 推流帧率: max({task.frame_rate}, {settings.RTSP_STREAMING_DEFAULT_FPS}) = {base_fps}")
-                else:
-                    # 使用全局默认帧率
-                    base_fps = settings.RTSP_STREAMING_DEFAULT_FPS
-                    logger.info(f"任务 {task.id} 帧率无效({task.frame_rate})，使用默认帧率: {base_fps}")
-                
-                # 限制在合理范围内
-                stream_fps = min(max(base_fps, settings.RTSP_STREAMING_MIN_FPS), settings.RTSP_STREAMING_MAX_FPS)
-                
-                if stream_fps != base_fps:
-                    logger.info(f"任务 {task.id} 推流帧率已调整: {base_fps} -> {stream_fps} (限制范围: {settings.RTSP_STREAMING_MIN_FPS}-{settings.RTSP_STREAMING_MAX_FPS})")
-                
-                # 🚀 根据配置选择推流器类型 - 支持PyAV和FFmpeg两种后端
-                rtsp_backend = getattr(settings, 'RTSP_STREAMING_BACKEND', 'pyav').lower()
-                
-                if rtsp_backend == "pyav":
-                    # 🚀 PyAV推流器（高性能实时推流）
-                    rtsp_streamer = PyAVFrameStreamer(
-                        rtsp_url=rtsp_url,
-                        fps=stream_fps,
-                        width=stream_width,
-                        height=stream_height
-                    )
-                else:
-                    # 使用FFmpeg推流器（默认选择）
-                    rtsp_streamer = FFmpegFrameStreamer(
-                        rtsp_url=rtsp_url, 
-                        fps=stream_fps, 
-                        width=stream_width, 
-                        height=stream_height,
-                        crf=settings.RTSP_STREAMING_QUALITY_CRF,
-                        bitrate=settings.RTSP_STREAMING_MAX_BITRATE,
-                        buffer_size=settings.RTSP_STREAMING_BUFFER_SIZE,
-                        codec=settings.RTSP_STREAMING_CODEC
-                    )
-                if rtsp_streamer.start():
-                    backend_name = {
-                        "pyav": "PyAV", 
-                        "ffmpeg": "FFmpeg"
-                    }.get(rtsp_backend, rtsp_backend)
-                    logger.info(f"任务 {task.id} RTSP推流已启动({backend_name}): {rtsp_url} ({stream_width}x{stream_height}@{stream_fps}fps)")
-                else:
-                    logger.error(f"任务 {task.id} RTSP推流启动失败({rtsp_backend}后端)")
-                    rtsp_streamer = None
+                rtsp_streamer = self._init_rtsp_streamer(task, frame_reader, settings)
             
             # 启动异步帧处理器
-            # 根据技能类型决定配置内容
             skill_config = skill_instance.config if hasattr(skill_instance, 'config') else {}
             skill_type = skill_config.get('type', 'yolo')
             
             if skill_type == 'agent':
-                # Agent技能：需要完整的任务上下文
                 task_processor_config = {
                     "fence_config": self._parse_fence_config(task),
                     "task_id": task.id,
                     "camera_id": task.camera_id
                 }
             else:
-                # 普通技能（YOLO等）：只需要围栏配置
                 task_processor_config = {
                     "fence_config": self._parse_fence_config(task)
                 }
             
             frame_processor.start(skill_instance, task_processor_config, rtsp_streamer)
             
-            # 设置视频采集帧率控制
+            # ===== 主循环阶段 =====
             frame_interval = 1.0 / task.frame_rate if task.frame_rate > 0 else 1.0
             last_frame_time = 0
-            
-            # 连续无帧计数器
             consecutive_no_frame = 0
-            max_consecutive_no_frame = 20  # 连续20次无帧（约2秒）后暂停任务
+            max_consecutive_no_frame = 20
             
-            # 主视频采集循环（只负责读取和投递帧）
             while not stop_event.is_set():
-                # 帧率控制
                 current_time = time.time()
                 if current_time - last_frame_time < frame_interval:
-                    # 计算精确的睡眠时间，最小1ms
                     sleep_time = max(0.001, frame_interval - (current_time - last_frame_time))
                     time.sleep(sleep_time)
                     continue
                     
                 last_frame_time = current_time
                 
-                # 自适应模式：获取最新帧
                 frame = frame_reader.get_latest_frame()
                 if frame is None:
                     consecutive_no_frame += 1
                     if consecutive_no_frame <= 3 or consecutive_no_frame % 20 == 0:
                         logger.warning(f"任务 {task.id} 自适应读取器无帧可用 (连续{consecutive_no_frame}次)")
                     
-                    # 连续无帧达到阈值，暂停任务
                     if consecutive_no_frame >= max_consecutive_no_frame:
                         logger.error(f"任务 {task.id} 连续{consecutive_no_frame}次无法获取帧，自动暂停任务")
-                        self._pause_task_on_failure(task.id, db, f"视频流断开，连续{consecutive_no_frame}次无法获取帧")
+                        self._pause_task_on_failure(task.id, f"视频流断开，连续{consecutive_no_frame}次无法获取帧")
                         break
                     
                     time.sleep(0.1)
                     continue
                 
-                # 获取到帧，重置计数器
                 consecutive_no_frame = 0
                 
-                # 将原始帧投递到优化的异步处理器
-                # 注意：这里frame会被直接引用，不进行拷贝
                 if not frame_processor.put_raw_frame(frame):
-                    # 队列满了，继续采集下一帧（智能丢帧策略已内置）
                     continue
                 
-                # 检查是否有检测结果需要处理（用于预警生成）
-                detection_result = frame_processor.get_latest_result()
+                # 从告警专用缓冲区获取结果（不与推流线程竞争）
+                detection_result = frame_processor.get_alert_result()
                 if detection_result:
                     result = detection_result["result"]
                     if result.success:
-                        # 处理技能返回的结果（主要是生成预警）
-                        # 注意：这里使用原始帧而不是标注帧来生成预警截图
-                        self._handle_skill_result(result, task, frame, db)
-            
-            # 停止异步处理器
-            frame_processor.stop()
-            
-            # 清理帧处理器引用
-            if task.id in self.frame_processors:
-                del self.frame_processors[task.id]
-            if task.id in self.task_camera_mapping:
-                del self.task_camera_mapping[task.id]
-                
-            # 释放资源
-            if frame_reader:
-                frame_reader.stop()
-                
-            # 停止RTSP推流器
-            if rtsp_streamer:
-                rtsp_streamer.stop()
-                
-            logger.info(f"任务 {task.id} 执行已停止")
+                        self._handle_skill_result(result, task, frame)
             
         except Exception as e:
             logger.error(f"执行任务 {task.id} 时出错: {str(e)}", exc_info=True)
         finally:
-            db.close()
+            # 确保所有资源都被释放，无论是正常退出还是异常
+            try:
+                if frame_processor:
+                    frame_processor.stop()
+            except Exception as e:
+                logger.error(f"停止帧处理器出错: {str(e)}")
+            
+            with self._state_lock:
+                self.frame_processors.pop(task.id, None)
+                self.task_camera_mapping.pop(task.id, None)
+            
+            try:
+                if frame_reader:
+                    frame_reader.stop()
+            except Exception as e:
+                logger.error(f"停止帧读取器出错: {str(e)}")
+                
+            try:
+                if rtsp_streamer:
+                    rtsp_streamer.stop()
+            except Exception as e:
+                logger.error(f"停止RTSP推流器出错: {str(e)}")
+                
+            logger.info(f"任务 {task.id} 执行已停止，资源已释放")
     
     def _get_video_resolution(self, frame_reader) -> Tuple[int, int]:
         """获取视频流的分辨率
@@ -1013,6 +969,15 @@ class AITaskExecutor:
     
 
     
+    def _check_camera_exists(self, camera_id: int) -> bool:
+        """仅检查摄像头通道是否存在（不触发播放）"""
+        try:
+            channel_info = wvp_client.get_channel_one(camera_id)
+            return channel_info is not None
+        except Exception as e:
+            logger.error(f"检查摄像头 {camera_id} 是否存在时出错: {str(e)}")
+            return True  # 异常时认为存在，避免误删
+    
     def _get_stream_url(self, camera_id: int) -> Tuple[Optional[str], bool]:
         """获取摄像头流地址
         
@@ -1023,34 +988,76 @@ class AITaskExecutor:
             - 当成功获取流地址时，返回 (stream_url, False)
         """
         try:
-            # 首先检查通道是否存在
-            channel_info = wvp_client.get_channel_one(camera_id)
-            if not channel_info:
+            if not self._check_camera_exists(camera_id):
                 logger.warning(f"摄像头通道 {camera_id} 不存在")
-                return None, True  # 通道不存在，应该删除任务
+                return None, True
             
-            # 调用WVP客户端获取通道播放地址
             play_info = wvp_client.play_channel(camera_id)
             if not play_info:
                 logger.error(f"获取摄像头 {camera_id} 播放信息失败")
-                return None, False  # 通道存在但播放信息获取失败，不删除任务
+                return None, False
                 
-            # 优先使用RTSP流
-            if play_info.get("rtsp"):
-                return play_info["rtsp"], False
-            elif play_info.get("flv"):
-                return play_info["flv"], False
-            elif play_info.get("hls"):
-                return play_info["hls"], False
-            elif play_info.get("rtmp"):
-                return play_info["rtmp"], False
-            else:
-                logger.error(f"摄像头 {camera_id} 无可用的流地址")
-                return None, False  # 通道存在但无流地址，不删除任务
+            for protocol in ("rtsp", "flv", "hls", "rtmp"):
+                if play_info.get(protocol):
+                    return play_info[protocol], False
+            
+            logger.error(f"摄像头 {camera_id} 无可用的流地址")
+            return None, False
                 
         except Exception as e:
             logger.error(f"获取摄像头 {camera_id} 流地址时出错: {str(e)}")
-            return None, False  # 异常情况，不删除任务
+            return None, False
+    
+    def _init_rtsp_streamer(self, task: AITask, frame_reader, settings):
+        """初始化RTSP推流器（提取自_execute_task，减少主方法复杂度）"""
+        try:
+            db = next(get_db())
+            try:
+                from app.services.skill_class_service import SkillClassService
+                skill_class = SkillClassService.get_by_id(task.skill_class_id, db, is_detail=False)
+                skill_name = skill_class["name"] if skill_class else "unknown"
+            finally:
+                db.close()
+            
+            rtsp_base_url = settings.RTSP_STREAMING_BASE_URL
+            rtsp_sign = settings.RTSP_STREAMING_SIGN
+            rtsp_url = f"{rtsp_base_url}/{skill_name}_{task.id}?sign={rtsp_sign}"
+            
+            stream_width, stream_height = frame_reader.get_resolution()
+            
+            if task.frame_rate > 0:
+                base_fps = max(task.frame_rate, settings.RTSP_STREAMING_DEFAULT_FPS)
+            else:
+                base_fps = settings.RTSP_STREAMING_DEFAULT_FPS
+            
+            stream_fps = min(max(base_fps, settings.RTSP_STREAMING_MIN_FPS), settings.RTSP_STREAMING_MAX_FPS)
+            
+            rtsp_backend = getattr(settings, 'RTSP_STREAMING_BACKEND', 'pyav').lower()
+            
+            if rtsp_backend == "pyav":
+                streamer = PyAVFrameStreamer(
+                    rtsp_url=rtsp_url, fps=stream_fps,
+                    width=stream_width, height=stream_height
+                )
+            else:
+                streamer = FFmpegFrameStreamer(
+                    rtsp_url=rtsp_url, fps=stream_fps,
+                    width=stream_width, height=stream_height,
+                    crf=settings.RTSP_STREAMING_QUALITY_CRF,
+                    bitrate=settings.RTSP_STREAMING_MAX_BITRATE,
+                    buffer_size=settings.RTSP_STREAMING_BUFFER_SIZE,
+                    codec=settings.RTSP_STREAMING_CODEC
+                )
+            
+            if streamer.start():
+                logger.info(f"任务 {task.id} RTSP推流已启动({rtsp_backend}): {rtsp_url} ({stream_width}x{stream_height}@{stream_fps}fps)")
+                return streamer
+            else:
+                logger.error(f"任务 {task.id} RTSP推流启动失败({rtsp_backend}后端)")
+                return None
+        except Exception as e:
+            logger.error(f"任务 {task.id} 初始化RTSP推流器出错: {str(e)}")
+            return None
     
     def _load_skill_for_task(self, task: AITask, db: Session) -> Optional[Any]:
         """根据任务配置直接创建技能对象（只支持传统技能）"""
@@ -1161,48 +1168,123 @@ class AITaskExecutor:
             start_time = start_h * 60 + start_m
             end_time = end_h * 60 + end_m
             
-            # 判断当前时间是否在时段内
-            if start_time <= current_time <= end_time:
-                return True
+            # 判断当前时间是否在时段内（支持跨午夜时段如 22:00-06:00）
+            if start_time <= end_time:
+                if start_time <= current_time <= end_time:
+                    return True
+            else:
+                # 跨午夜：如22:00-06:00，当前时间>=22:00 或 <=06:00均在范围内
+                if current_time >= start_time or current_time <= end_time:
+                    return True
                 
         return False
     
-    def _handle_skill_result(self, result, task: AITask, frame, db: Session):
-        """处理技能结果"""
+    def _handle_skill_result(self, result, task: AITask, frame):
+        """处理技能结果（支持普通检测技能和Agent技能两种格式）"""
         try:
-            # 提取结果数据
             data = result.data
+            if not data:
+                return
             
-            # 根据任务类型和报警级别处理结果
-            if task.task_type == "detection":
-                # 检测类任务
-                detections = data.get("detections", [])
-                if not detections:
-                    return
-                
-                # 获取安全分析结果（技能已经处理了电子围栏过滤）
-                safety_metrics = data.get("safety_metrics", {})
-                
-                # 判断是否需要生成报警
-                if task.alert_level > 0:
-                    # 检查技能返回的预警信息
-                    alert_info_data = safety_metrics.get("alert_info", {})
-                    alert_triggered = alert_info_data.get("alert_triggered", False)
-                    # skill_alert_level = alert_info_data.get("alert_level", 0)
-                    alert_level = task.alert_level
-
-                    if alert_triggered:  #and skill_alert_level <= task.alert_level:
-                        # 🚀 异步生成预警，不阻塞视频处理
-                        # 传递完整的data，包含detections数据
-                        self._schedule_alert_generation(task, data, frame.copy(), alert_level)
-                        logger.info(f"任务 {task.id} 触发预警（异步处理中）: 任务预警等级阈值={task.alert_level}")
-                    elif alert_triggered:
-                        logger.debug(f"任务 {task.id} 预警被过滤")
+            # 判断是Agent技能结果还是普通检测技能结果
+            with self._state_lock:
+                processor = self.frame_processors.get(task.id)
+            skill_config = {}
+            if processor and hasattr(processor, 'skill_instance'):
+                si = processor.skill_instance
+                skill_config = si.config if hasattr(si, 'config') else {}
             
-            # 可以添加其他类型任务的处理逻辑
+            if skill_config.get('type') == 'agent' or data.get('phase') is not None:
+                self._handle_agent_skill_result(data, task, frame)
+            else:
+                self._handle_detection_skill_result(data, task, frame)
             
         except Exception as e:
-            logger.error(f"处理技能结果时出错: {str(e)}")
+            logger.error(f"处理技能结果时出错: {str(e)}", exc_info=True)
+    
+    def _handle_detection_skill_result(self, data: Dict, task: AITask, frame):
+        """处理普通检测技能（YOLO）的结果"""
+        detections = data.get("detections", [])
+        if not detections:
+            return
+        
+        safety_metrics = data.get("safety_metrics", {})
+        
+        if task.alert_level > 0:
+            alert_info_data = safety_metrics.get("alert_info", {})
+            alert_triggered = alert_info_data.get("alert_triggered", False)
+            alert_level = task.alert_level
+
+            if alert_triggered:
+                self._schedule_alert_generation(task, data, frame.copy(), alert_level)
+                logger.info(f"任务 {task.id} 触发预警（异步处理中）: 任务预警等级阈值={task.alert_level}")
+    
+    def _handle_agent_skill_result(self, data: Dict, task: AITask, frame):
+        """
+        处理Agent技能的结果
+        
+        Agent技能返回的data格式：
+        {
+            "action": "violation_detected" | "compliant" | "collecting" | ...,
+            "phase": "idle" | "collecting" | "analyzing",
+            "violation_detected": bool,
+            "violation_type": str,
+            "severity_level": int (0-4),
+            "disposal_plan": dict,
+            "disposal_result": dict,
+            "scene_description": str,
+            ...
+        }
+        """
+        action = data.get("action", "")
+        
+        # 只有检测到违规时才生成告警
+        if not data.get("violation_detected", False):
+            return
+        
+        if task.alert_level <= 0:
+            return
+        
+        # 将Agent结果转换为告警系统可识别的格式
+        # 预警等级统一使用用户在任务中配置的 task.alert_level，不由LLM决定
+        alert_level = task.alert_level
+        violation_type = data.get("violation_type", "未知违规")
+        scene_description = data.get("scene_description", "")
+        disposal_plan = data.get("disposal_plan", {})
+        decision_type = data.get("decision_type", "")
+        
+        alert_description = f"{violation_type}"
+        if scene_description:
+            alert_description += f"。场景：{scene_description[:100]}"
+        
+        agent_alert_data = {
+            "detections": [],
+            "safety_metrics": {
+                "alert_info": {
+                    "alert_triggered": True,
+                    "alert_name": violation_type,
+                    "alert_type": "智能代理预警",
+                    "alert_description": alert_description,
+                    "alert_level": alert_level,
+                }
+            },
+            "_agent_data": {
+                "violation_type": violation_type,
+                "severity_level": data.get("severity_level", 0),
+                "disposal_plan": disposal_plan,
+                "disposal_result": data.get("disposal_result"),
+                "decision_type": decision_type,
+                "scene_description": scene_description,
+                "action": action,
+            }
+        }
+        
+        self._schedule_alert_generation(task, agent_alert_data, frame.copy(), alert_level)
+        logger.info(
+            f"任务 {task.id} Agent检测到违规（异步处理中）: "
+            f"类型={violation_type}, 预警等级={alert_level}(用户配置), "
+            f"决策路径={decision_type}"
+        )
     
     def _schedule_alert_generation(self, task: AITask, alert_data: Dict, frame: np.ndarray, level: int):
         """异步调度预警生成
@@ -1412,78 +1494,24 @@ class AITaskExecutor:
             logger.error(f"生成报警时出错: {str(e)}")
             return None
     
-    # 🚀 性能优化：数据库查询缓存
-    _camera_info_cache = {}
-    _skill_info_cache = {}
-    _cache_expire_time = 300  # 缓存5分钟
-    
-    def _get_cached_camera_info(self, camera_id: int, db: Session) -> Dict:
-        """获取缓存的摄像头信息，减少数据库查询"""
-        import time
-        current_time = time.time()
-        cache_key = f"camera_{camera_id}"
-        
-        # 检查缓存是否存在且未过期
-        if cache_key in self._camera_info_cache:
-            cached_data, cache_time = self._camera_info_cache[cache_key]
-            if current_time - cache_time < self._cache_expire_time:
-                return cached_data
-        
-        # 缓存不存在或已过期，从数据库查询
-        try:
-            from app.services.camera_service import CameraService
-            camera_info = CameraService.get_ai_camera_by_id(camera_id, db)
-            if camera_info:
-                # 更新缓存
-                self._camera_info_cache[cache_key] = (camera_info, current_time)
-                return camera_info
-        except Exception as e:
-            logger.warning(f"获取摄像头信息失败: {e}")
-        
-        return {}
-    
-    def _get_cached_skill_info(self, skill_class_id: int, db: Session) -> Dict:
-        """获取缓存的技能信息，减少数据库查询"""
-        import time
-        current_time = time.time()
-        cache_key = f"skill_{skill_class_id}"
-        
-        # 检查缓存是否存在且未过期
-        if cache_key in self._skill_info_cache:
-            cached_data, cache_time = self._skill_info_cache[cache_key]
-            if current_time - cache_time < self._cache_expire_time:
-                return cached_data
-        
-        # 缓存不存在或已过期，从数据库查询
-        try:
-            from app.services.skill_class_service import SkillClassService
-            skill_info = SkillClassService.get_by_id(skill_class_id, db, is_detail=False)
-            if skill_info:
-                # 更新缓存
-                self._skill_info_cache[cache_key] = (skill_info, current_time)
-                return skill_info
-        except Exception as e:
-            logger.warning(f"获取技能信息失败: {e}")
-        
-        return {}
     
 
     def _draw_alert_detections_with_skill(self, task: AITask, frame: np.ndarray, alert_data: Dict) -> np.ndarray:
-        """为预警截图绘制检测框，优先使用技能的自定义绘制函数"""
+        """为预警截图绘制检测框，优先使用已缓存的技能实例的自定义绘制函数"""
         try:
-            # 尝试创建技能实例以使用其自定义绘制函数
-            db = next(get_db())
-            try:
-                skill_instance = self._load_skill_for_task(task, db)
-                if skill_instance and hasattr(skill_instance, 'draw_detections_on_frame'):
-                    detections = alert_data.get("detections", [])
-                    logger.debug(f"预警截图使用技能 {task.skill_class_id} 的自定义绘制函数")
-                    return skill_instance.draw_detections_on_frame(frame, detections)
-                else:
-                    logger.debug(f"技能 {task.skill_class_id} 无自定义绘制函数，使用默认方法")
-                    return self._draw_detections_on_frame(frame, alert_data)
-            finally:
-                db.close()
+            # 从已运行的帧处理器中获取技能实例（避免重复创建DB会话和加载技能）
+            with self._state_lock:
+                processor = self.frame_processors.get(task.id)
+            
+            skill_instance = None
+            if processor and hasattr(processor, 'skill_instance'):
+                skill_instance = processor.skill_instance
+            
+            if skill_instance and hasattr(skill_instance, 'draw_detections_on_frame'):
+                detections = alert_data.get("detections", [])
+                return skill_instance.draw_detections_on_frame(frame, detections)
+            else:
+                return self._draw_detections_on_frame(frame, alert_data)
         except Exception as e:
             logger.error(f"使用技能绘制预警截图时出错: {str(e)}，回退到默认绘制")
             return self._draw_detections_on_frame(frame, alert_data)
@@ -1575,15 +1603,29 @@ class AITaskExecutor:
             return frame
     
     def _format_detection_results(self, alert_data: Dict) -> List[Dict]:
-        """格式化检测结果为指定格式"""
+        """格式化检测结果为指定格式（支持普通YOLO检测和Agent技能）"""
         try:
+            # Agent技能结果：没有YOLO检测框，用_agent_data构建结果
+            agent_data = alert_data.get("_agent_data")
+            if agent_data:
+                return [{
+                    "score": 1.0,
+                    "name": agent_data.get("violation_type", "智能代理检测"),
+                    "type": "agent_violation",
+                    "severity_level": agent_data.get("severity_level", 1),
+                    "decision_type": agent_data.get("decision_type", ""),
+                    "scene_description": agent_data.get("scene_description", ""),
+                    "disposal_plan": agent_data.get("disposal_plan"),
+                    "disposal_result": agent_data.get("disposal_result"),
+                }]
+            
+            # 普通YOLO检测结果
             detections = alert_data.get("detections", [])
             formatted_results = []
             
             for detection in detections:
                 bbox = detection.get("bbox", [])
                 if len(bbox) >= 4:
-                    # bbox格式: [x1, y1, x2, y2]
                     x1, y1, x2, y2 = bbox
                     
                     formatted_result = {
@@ -1653,10 +1695,8 @@ class AITaskExecutor:
                 task_status = task_dict.get("status", 0)
                 
                 try:
-                    # 检查摄像头是否存在
-                    _, should_delete = self._get_stream_url(camera_id)
-                    
-                    if should_delete:
+                    # 仅检查摄像头是否存在（不触发play_channel，避免不必要的视频流启动）
+                    if not self._check_camera_exists(camera_id):
                         logger.warning(f"检测到任务 {task_id}({task_name}, status={task_status}) 关联的摄像头 {camera_id} 不存在，将删除任务")
                         
                         # 删除任务
@@ -1799,7 +1839,10 @@ class AITaskExecutor:
                 # 查找该摄像头的所有运行中任务
                 running_tasks = []
                 
-                for task_id, camera_id_mapped in self.task_camera_mapping.items():
+                with self._state_lock:
+                    mapping_snapshot = dict(self.task_camera_mapping)
+                
+                for task_id, camera_id_mapped in mapping_snapshot.items():
                     if camera_id_mapped == camera_id:
                         # 获取任务详情
                         task_data = AITaskService.get_task_by_id(task_id, db)
@@ -1829,40 +1872,28 @@ class AITaskExecutor:
             return []
     
     def shutdown(self):
-        """优雅关闭AI任务执行器 - 停止所有任务并更新数据库状态为禁用"""
-        logger.info("🛑 开始关闭AI任务执行器...")
+        """优雅关闭AI任务执行器 - 停止所有运行中的任务线程（不修改数据库状态，重启后自动恢复）"""
+        logger.info("开始关闭AI任务执行器...")
         
         try:
-            # 获取所有正在运行的任务ID
-            running_task_ids = list(self.running_tasks.keys())
+            with self._state_lock:
+                running_task_ids = list(self.running_tasks.keys())
             
             if running_task_ids:
-                logger.info(f"🔍 发现 {len(running_task_ids)} 个正在执行的任务: {running_task_ids}")
+                logger.info(f"发现 {len(running_task_ids)} 个正在执行的任务: {running_task_ids}")
                 
-                # 更新数据库中任务状态为禁用，确保下次启动不会自动运行
-                db = next(get_db())
-                try:
-                    for task_id in running_task_ids:
-                        try:
-                            # 更新任务状态为禁用
-                            AITaskService.update_task(task_id, {"status": False}, db)
-                            logger.info(f"📝 已将任务 {task_id} 状态更新为禁用")
-                        except Exception as e:
-                            logger.error(f"❌ 更新任务 {task_id} 状态失败: {str(e)}")
-                finally:
-                    db.close()
-                
-                # 停止所有正在运行的任务线程
+                # 只停止线程，不修改数据库中的status字段
+                # 下次启动时 schedule_all_tasks 会根据 status=True 自动恢复
                 for task_id in running_task_ids:
                     try:
                         self._stop_task_thread(task_id)
-                        logger.info(f"✅ 已停止任务 {task_id}")
+                        logger.info(f"已停止任务 {task_id}")
                     except Exception as e:
-                        logger.error(f"❌ 停止任务 {task_id} 失败: {str(e)}")
+                        logger.error(f"停止任务 {task_id} 失败: {str(e)}")
                 
-                logger.info(f"📊 已停止并禁用 {len(running_task_ids)} 个任务，下次启动时不会自动运行")
+                logger.info(f"已停止 {len(running_task_ids)} 个任务，下次启动时将自动恢复")
             else:
-                logger.info("ℹ️ 当前没有正在执行的任务")
+                logger.info("当前没有正在执行的任务")
             
             # 停止调度器
             if hasattr(self, 'scheduler') and self.scheduler.running:

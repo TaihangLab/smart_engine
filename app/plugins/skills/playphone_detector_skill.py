@@ -14,7 +14,7 @@ logger = logging.getLogger(__name__)
 class AlertThreshold():
     """预警阈值枚举"""
     playPhonePersonCount = 1  # 玩手机人数阈值
-class CallPlayDetectorSkill(BaseSkill):
+class PlayPhoneDetectorSkill(BaseSkill):
     """玩手机检测技能
 
     使用YOLO模型检测人员和玩手机行为，基于triton_client全局单例
@@ -23,7 +23,7 @@ class CallPlayDetectorSkill(BaseSkill):
     # 默认配置
     DEFAULT_CONFIG = {
         "type": "detection",  # 技能类型：检测类
-        "name": "callplay_detector",  # 技能唯一标识符
+        "name": "playphone_detector",  # 技能唯一标识符
         "name_zh": "玩手机检测",  # 技能中文名称
         "version": "1.0",  # 技能版本
         "description": "使用YOLO模型检测人员玩手机行为",  # 技能描述
@@ -334,7 +334,7 @@ class CallPlayDetectorSkill(BaseSkill):
 # 测试代码
 if __name__ == "__main__":
     # 创建检测器 - 传入配置参数会自动调用_initialize()
-    detector = CallPlayDetectorSkill(CallPlayDetectorSkill.DEFAULT_CONFIG)
+    detector = PlayPhoneDetectorSkill(PlayPhoneDetectorSkill.DEFAULT_CONFIG)
 
     # 测试图像检测
     # test_image = np.zeros((640, 640, 3), dtype=np.uint8)

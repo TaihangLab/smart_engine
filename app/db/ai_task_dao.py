@@ -83,14 +83,35 @@ class AITaskDAO:
             Optional[AITask]: 新创建的任务对象，如果创建失败则返回None
         """
         try:
-            # 处理JSON字段
-            running_period = json.dumps(task_data.get('running_period', {})) if isinstance(task_data.get('running_period'), dict) else task_data.get('running_period', '{}')
-            electronic_fence = json.dumps(task_data.get('electronic_fence', {})) if isinstance(task_data.get('electronic_fence'), dict) else task_data.get('electronic_fence', '{}')
-            config = json.dumps(task_data.get('config', {})) if isinstance(task_data.get('config'), dict) else task_data.get('config', '{}')
+            # JSON字段直接传dict，SQLAlchemy Column(JSON) 会自动序列化
+            # 如果传入的已经是字符串（兼容旧调用方），尝试解析为dict
+            running_period = task_data.get('running_period', {})
+            if isinstance(running_period, str):
+                try:
+                    running_period = json.loads(running_period)
+                except (json.JSONDecodeError, TypeError):
+                    running_period = {}
             
-            # 处理技能配置
+            electronic_fence = task_data.get('electronic_fence', {})
+            if isinstance(electronic_fence, str):
+                try:
+                    electronic_fence = json.loads(electronic_fence)
+                except (json.JSONDecodeError, TypeError):
+                    electronic_fence = {}
+            
+            config = task_data.get('config', {})
+            if isinstance(config, str):
+                try:
+                    config = json.loads(config)
+                except (json.JSONDecodeError, TypeError):
+                    config = {}
+            
             skill_config = task_data.get('skill_config', {})
-            skill_config_json = json.dumps(skill_config) if isinstance(skill_config, dict) else '{}'
+            if isinstance(skill_config, str):
+                try:
+                    skill_config = json.loads(skill_config)
+                except (json.JSONDecodeError, TypeError):
+                    skill_config = {}
             
             # 创建新任务
             new_task = AITask(
@@ -105,7 +126,7 @@ class AITaskDAO:
                 config=config,
                 camera_id=task_data.get('camera_id'),
                 skill_class_id=task_data.get('skill_class_id'),
-                skill_config=skill_config_json
+                skill_config=skill_config
             )
             
             db.add(new_task)
@@ -154,19 +175,39 @@ class AITaskDAO:
             if 'skill_class_id' in task_data:
                 task.skill_class_id = task_data['skill_class_id']
             
-            # 更新JSON字段
+            # 更新JSON字段 — 直接赋dict，Column(JSON)自动处理序列化
             if 'running_period' in task_data:
-                running_period = json.dumps(task_data['running_period']) if isinstance(task_data['running_period'], dict) else task_data['running_period']
-                task.running_period = running_period
+                val = task_data['running_period']
+                if isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                task.running_period = val
             if 'electronic_fence' in task_data:
-                electronic_fence = json.dumps(task_data['electronic_fence']) if isinstance(task_data['electronic_fence'], dict) else task_data['electronic_fence']
-                task.electronic_fence = electronic_fence
+                val = task_data['electronic_fence']
+                if isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                task.electronic_fence = val
             if 'config' in task_data:
-                config = json.dumps(task_data['config']) if isinstance(task_data['config'], dict) else task_data['config']
-                task.config = config
+                val = task_data['config']
+                if isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                task.config = val
             if 'skill_config' in task_data:
-                skill_config = json.dumps(task_data['skill_config']) if isinstance(task_data['skill_config'], dict) else task_data['skill_config']
-                task.skill_config = skill_config
+                val = task_data['skill_config']
+                if isinstance(val, str):
+                    try:
+                        val = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                task.skill_config = val
             
             db.commit()
             db.refresh(task)

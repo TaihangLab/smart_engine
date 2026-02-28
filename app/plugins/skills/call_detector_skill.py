@@ -331,9 +331,9 @@ class CallPlayDetectorSkill(BaseSkill):
 
         if len(bbox) >= 4:
             # bbox格式: [x1, y1, x2, y2]
-            center_x = bbox[0]
-            # 使用底部中心点（人员脚部位置）
-            key_y = (bbox[0] + bbox[2]) / 2
+            center_x = (bbox[0] + bbox[2]) / 2
+            # 使用顶部中心点（人员头部位置，适用于打电话检测）
+            key_y = bbox[1]
             return (center_x, key_y)
         return None
 

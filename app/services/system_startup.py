@@ -83,6 +83,15 @@ class SystemStartupService:
                 "enabled": settings.COMPENSATION_AUTO_START,
                 "critical": True,
                 "startup_order": 2
+            },
+            {
+                "name": "ml_pipeline",
+                "display_name": "标注-训练-推理-服务化模块",
+                "start_func": self._initialize_ml_pipeline,
+                "stop_func": self._shutdown_ml_pipeline,
+                "enabled": settings.ML_PIPELINE_ENABLED,
+                "critical": False,
+                "startup_order": 10
             }
         ]
         
@@ -302,6 +311,29 @@ class SystemStartupService:
             
         except Exception as e:
             logger.error(f"❌ 关闭企业级MinIO服务集群时出错: {str(e)}")
+
+    async def _initialize_ml_pipeline(self):
+        """初始化标注-训练-推理-服务化模块"""
+        if not getattr(settings, "ML_PIPELINE_ENABLED", False):
+            logger.info("⚪ ML Pipeline 模块未启用，跳过")
+            return
+        try:
+            from app.modules.ml_pipeline.startup import initialize_ml_pipeline
+            await initialize_ml_pipeline()
+            logger.info("✅ ML Pipeline 模块初始化完成")
+        except Exception as e:
+            logger.error(f"❌ ML Pipeline 模块初始化失败: {str(e)}", exc_info=True)
+            raise
+
+    async def _shutdown_ml_pipeline(self):
+        """关闭标注-训练-推理-服务化模块"""
+        if not getattr(settings, "ML_PIPELINE_ENABLED", False):
+            return
+        try:
+            from app.modules.ml_pipeline.startup import shutdown_ml_pipeline
+            await shutdown_ml_pipeline()
+        except Exception as e:
+            logger.error(f"❌ ML Pipeline 模块关闭失败: {str(e)}")
 
     async def startup_system(self):
         """系统启动入口 - 零配置自动启动"""
