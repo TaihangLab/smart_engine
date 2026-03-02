@@ -180,6 +180,7 @@ datasets/
 *.yml
 !config/*.yml
 !config/*.yaml
+!**/docker-compose.yml
 
 # Media files
 *.jpg

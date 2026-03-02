@@ -441,7 +441,6 @@ class Settings(BaseSettings):
     MULTIMODAL_LLM_BASE_URL: str = Field(default="http://172.18.1.1:22002/v1", description="多模态LLM服务地址（千问3VL vllm）")
     MULTIMODAL_LLM_API_KEY: str = Field(default="EMPTY", description="多模态LLM API密钥")
     MULTIMODAL_LLM_MODEL: str = Field(default="Qwen3-VL-30B-A3B-Instruct", description="多模态模型（千问3VL-30B）")
-    
     # 🔄 备用模型配置（自动降级容错）
     BACKUP_TEXT_LLM_BASE_URL: str = Field(default="http://172.18.1.1:11434/v1", description="备用纯文本服务地址")
     BACKUP_TEXT_LLM_MODEL: str = Field(default="qwen3:14b", description="备用纯文本模型（千问3-14B）")
