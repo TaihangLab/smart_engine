@@ -1,0 +1,13 @@
+services:
+  labelstudio:
+    image: heartexlabs/label-studio:latest
+    container_name: labelstudio
+    ports:
+      - "8888:8080"
+    volumes:
+      - ./mydata:/label-studio/data
+    environment:
+      - SECRET_KEY=my-super-secret-key-123456
+      - LABEL_STUDIO_USERNAME=admin@admin.com
+      - LABEL_STUDIO_PASSWORD=admin123456
+    restart: unless-stopped
