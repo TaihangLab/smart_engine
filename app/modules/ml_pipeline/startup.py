@@ -1,13 +1,31 @@
 """
 ML Pipeline 模块启动逻辑
 - 创建标注/训练相关数据库表
-- 启动训练任务队列（后续扩展）
+- 启动时将残留的 running 任务标记为 interrupted
 """
 import logging
-from app.db.session import engine
+from app.db.session import engine, SessionLocal
 from app.db.base import Base
 
 logger = logging.getLogger(__name__)
+
+
+def _recover_interrupted_tasks() -> int:
+    """将上次未正常结束的 running 任务标记为 interrupted，返回受影响行数"""
+    from app.modules.ml_pipeline.models.annotation import TrainingTask
+
+    db = SessionLocal()
+    try:
+        stuck = db.query(TrainingTask).filter(TrainingTask.status == "running").all()
+        for task in stuck:
+            task.status = "interrupted"
+            task.error_message = "服务重启导致训练中断，可重新启动继续训练"
+            logger.warning(f"训练任务 {task.id}「{task.name}」标记为 interrupted")
+        if stuck:
+            db.commit()
+        return len(stuck)
+    finally:
+        db.close()
 
 
 async def initialize_ml_pipeline() -> None:
@@ -23,6 +41,11 @@ async def initialize_ml_pipeline() -> None:
         # 创建本模块相关表
         Base.metadata.create_all(bind=engine)
         logger.info("✅ ML Pipeline 模块数据库表初始化完成")
+
+        # 恢复因服务重启而中断的训练任务
+        count = _recover_interrupted_tasks()
+        if count:
+            logger.info(f"⚠️ 已将 {count} 个残留 running 任务标记为 interrupted")
 
         # 检查 Label Studio 连接
         from app.modules.ml_pipeline.services.label_studio_client import get_label_studio_client

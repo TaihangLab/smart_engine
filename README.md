@@ -2147,8 +2147,13 @@ false     false     true      true      false
 
 - **数据标注**：集成 Label Studio，支持创建数据集 → 推送图片 → 在线标注 → 同步结果
 - **数据导出**：将标注结果导出为 YOLO 格式 ZIP（含 images/labels/data.yaml）
-- **模型训练**：基于 Ultralytics YOLO 的训练任务管理，后台线程执行
-- **模型部署**：训练产出上传到 MinIO，可手动或通过 API 部署到 Triton
+- **模型训练**：支持 5 种任务类型（目标检测/实例分割/图像分类/姿态估计/旋转检测），覆盖 YOLO11/YOLOv8/YOLOv5 共 40+ 预训练模型，训练过程实时进度回调
+- **模型导出**：训练完成后可异步导出为 8 种部署格式（ONNX/TensorRT/OpenVINO/TorchScript/NCNN/CoreML/TFLite/PaddlePaddle），前端实时通知导出结果
+- **模型下载**：支持通过浏览器直接下载训练产出（best.pt）或导出模型，目录类格式自动打包为 ZIP
+- **GPU 检测**：自动检测 CUDA 设备信息，前端显示 GPU 状态
+- **训练控制**：支持中断/恢复训练（断点续训）、取消训练、重新训练，服务重启后自动检测中断任务
+- **训练日志**：实时训练日志查看 + TensorBoard 可视化集成
+- **模型部署**：训练产出可手动或通过 API 部署到 Triton
 
 ### 启用方式
 
@@ -2193,7 +2198,7 @@ app/modules/ml_pipeline/
 ├── startup.py                   # 模块启动/关闭逻辑
 ├── api/
 │   ├── annotation.py            # 标注 API（10 个接口）
-│   └── training.py              # 训练 API（5 个接口）
+│   └── training.py              # 训练 API（16 个接口）
 ├── models/
 │   └── annotation.py            # ORM：4 张表
 ├── services/
@@ -2217,9 +2222,9 @@ app/modules/ml_pipeline/
       ↓
 导出 YOLO 格式 ZIP → 上传 MinIO
       ↓
-创建训练任务 → 后台线程执行 YOLO 训练
+创建训练任务（选择任务类型 + 模型）→ 后台线程执行训练（实时进度）
       ↓
-训练产出 best.pt → 上传 MinIO → 可部署到 Triton
+训练产出 best.pt → 异步导出为 ONNX/TensorRT 等 → 下载模型 / 部署到 Triton
 ```
 
 ### API 接口一览
@@ -2242,11 +2247,46 @@ app/modules/ml_pipeline/
 
 | 方法 | 路径 | 说明 |
 |------|------|------|
+| GET | `/models` | 支持的模型列表（按任务类型分组） |
+| GET | `/export-formats` | 支持的导出格式列表 |
+| GET | `/gpu-info` | GPU 设备检测 |
 | GET | `/tasks` | 训练任务列表 |
 | POST | `/tasks` | 创建训练任务 |
 | GET | `/tasks/{id}` | 任务详情（含进度、指标） |
-| POST | `/tasks/{id}/start` | 启动训练 |
-| POST | `/tasks/{id}/cancel` | 取消训练 |
+| GET | `/tasks/{id}/log` | 训练日志（实时） |
+| POST | `/tasks/{id}/start` | 启动/恢复训练 |
+| POST | `/tasks/{id}/cancel` | 取消训练（从头重来） |
+| POST | `/tasks/{id}/interrupt` | 中断训练（可恢复） |
+| DELETE | `/tasks/{id}` | 删除训练任务（含模型文件清理） |
+| POST | `/tasks/{id}/export` | 提交模型导出任务（异步） |
+| GET | `/tasks/{id}/export-status` | 查询导出进度 |
+| GET | `/tasks/{id}/download` | 下载模型文件（支持 type=best/export） |
+| POST | `/tensorboard/start` | 启动 TensorBoard |
+| POST | `/tensorboard/stop` | 停止 TensorBoard |
+| GET | `/tensorboard/status` | TensorBoard 运行状态 |
+
+#### 支持的模型
+
+| 任务类型 | 模型家族 | 可选模型 |
+|---------|---------|---------|
+| 目标检测 (detect) | YOLO26 / YOLO11 | n/s/m/l/x 共 10 种 |
+| 实例分割 (segment) | YOLO26 / YOLO11 | n/s/m/l/x-seg 共 10 种 |
+| 图像分类 (classify) | YOLO26 / YOLO11 | n/s/m/l/x-cls 共 10 种 |
+| 姿态估计 (pose) | YOLO26 / YOLO11 | n/s/m/l/x-pose 共 10 种 |
+| 旋转检测 (obb) | YOLO26 / YOLO11 | n/s/m/l/x-obb 共 10 种 |
+
+#### 支持的导出格式
+
+| 格式 | 后缀 | 说明 |
+|------|------|------|
+| ONNX | .onnx | 跨平台通用，CPU 推理提速 3x |
+| TensorRT | .engine | NVIDIA GPU 部署，推理提速 5x |
+| OpenVINO | _openvino_model/ | Intel CPU/GPU/VPU 加速 |
+| TorchScript | .torchscript | PyTorch 原生序列化 |
+| NCNN | _ncnn_model/ | 移动端/嵌入式设备 |
+| CoreML | .mlpackage | Apple 设备 (iOS/macOS) |
+| TFLite | .tflite | 移动端 TensorFlow Lite |
+| PaddlePaddle | _paddle_model/ | 百度飞桨框架 |
 
 ### 使用示例
 
@@ -2257,12 +2297,11 @@ curl http://localhost:8000/api/v1/ml-pipeline/annotation/label-studio/status
 # 2. 创建数据集
 curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets \
   -H "Content-Type: application/json" \
-  -d '{"name":"安全帽数据集","label_names":["helmet","no_helmet"],"skill_type":"helmet_detector"}'
+  -d '{"name":"安全帽数据集"}'
 
-# 3. 添加图片
-curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets/1/images \
-  -H "Content-Type: application/json" \
-  -d '{"minio_paths":["alert-images/1/img001.jpg","alert-images/1/img002.jpg"]}'
+# 3. 上传图片
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets/1/upload \
+  -F "files=@img001.jpg" -F "files=@img002.jpg"
 
 # 4. 用户在 Label Studio 中完成标注后，同步结果
 curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets/1/sync
@@ -2270,11 +2309,38 @@ curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets/1/sync
 # 5. 导出 YOLO 格式
 curl -X POST http://localhost:8000/api/v1/ml-pipeline/annotation/datasets/1/export
 
-# 6. 创建训练任务
+# 6. 查看支持的模型和 GPU 信息
+curl http://localhost:8000/api/v1/ml-pipeline/training/models
+curl http://localhost:8000/api/v1/ml-pipeline/training/gpu-info
+
+# 7. 创建训练任务（实例分割）
 curl -X POST http://localhost:8000/api/v1/ml-pipeline/training/tasks \
   -H "Content-Type: application/json" \
-  -d '{"name":"安全帽训练v1","dataset_id":1,"base_model":"yolo11n.pt","epochs":100}'
+  -d '{"name":"安全帽训练v1","dataset_id":1,"task_type":"detect","base_model":"yolo11n.pt","epochs":100}'
 
-# 7. 启动训练
+# 8. 启动训练
 curl -X POST http://localhost:8000/api/v1/ml-pipeline/training/tasks/1/start
+
+# 9. 训练完成后异步导出为 ONNX（立即返回）
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/training/tasks/1/export \
+  -H "Content-Type: application/json" \
+  -d '{"format":"onnx"}'
+
+# 10. 查询导出进度
+curl http://localhost:8000/api/v1/ml-pipeline/training/tasks/1/export-status
+
+# 11. 下载导出模型（浏览器直接访问即可下载）
+curl -OJ http://localhost:8000/api/v1/ml-pipeline/training/tasks/1/download?type=export
+
+# 12. 下载训练产出 best.pt
+curl -OJ http://localhost:8000/api/v1/ml-pipeline/training/tasks/1/download?type=best
+
+# 13. 中断训练（可稍后恢复）
+curl -X POST http://localhost:8000/api/v1/ml-pipeline/training/tasks/1/interrupt
+
+# 14. 查看训练日志
+curl http://localhost:8000/api/v1/ml-pipeline/training/tasks/1/log
+
+# 15. 删除训练任务
+curl -X DELETE http://localhost:8000/api/v1/ml-pipeline/training/tasks/1
 ```

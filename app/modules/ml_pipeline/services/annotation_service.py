@@ -326,11 +326,7 @@ def sync_annotations(db: Session, dataset_id: int) -> Dict[str, Any]:
         if has_labels:
             labeled_image_ids.add(img_record.id)
 
-    dataset.labeled_count = (
-        db.query(AnnotationImage)
-        .filter(AnnotationImage.dataset_id == dataset_id, AnnotationImage.is_labeled == True)
-        .count()
-    )
+    dataset.labeled_count = len(labeled_image_ids)
     if dataset.labeled_count >= (dataset.image_count or 0) and (dataset.image_count or 0) > 0:
         dataset.status = "completed"
     elif dataset.image_count and dataset.image_count > 0:
