@@ -204,11 +204,11 @@ async def create_review_skill(
         description=skill.description,
         skill_tags=json.dumps(skill.skill_tags) if skill.skill_tags else "[]",
         
-        # 使用系统默认配置
-        provider="ollama",  # 使用Ollama
-        model_name=settings.REVIEW_LLM_MODEL,
-        api_base=settings.PRIMARY_LLM_BASE_URL,
-        api_key=settings.PRIMARY_LLM_API_KEY,
+        # 使用系统默认配置（多模态模型配置）
+        provider=settings.MULTIMODAL_LLM_PROVIDER,
+        model_name=settings.MULTIMODAL_LLM_MODEL,
+        api_base=settings.MULTIMODAL_LLM_BASE_URL,
+        api_key=settings.MULTIMODAL_LLM_API_KEY,
         
         # 系统默认提示词（包含角色定义和输出格式要求）
         system_prompt=_build_system_prompt(),
@@ -302,26 +302,19 @@ async def preview_test_review_skill(
         smart_config = _get_smart_default_config(task_type)
         
         try:
-            # 创建临时的LLM配置用于测试（使用智能配置）
-            test_api_config = {
-                "api_key": settings.PRIMARY_LLM_API_KEY or "ollama",
-                "base_url": settings.PRIMARY_LLM_BASE_URL,
-                "temperature": smart_config["temperature"],
-                "max_tokens": smart_config["max_tokens"],
-                "top_p": smart_config["top_p"],
-                "timeout": settings.LLM_TIMEOUT
-            }
-        
-            # 使用现代化LLM服务进行测试
-            # 使用多模态链进行测试
-            chain = llm_service.create_multimodal_chain(
+            # 使用LLMService.acall_llm进行异步多模态测试（智能路由到多模态模型）
+            result = await llm_service.acall_llm(
+                prompt=user_prompt_clean,
                 system_prompt=system_prompt,
+                image_data=frame,
                 temperature=smart_config["temperature"],
                 max_tokens=smart_config["max_tokens"]
             )
             
-            # 调用链
-            response_text = await llm_service.ainvoke_chain(chain, {"text": user_prompt_clean, "image": frame})
+            if not result.success:
+                raise Exception(result.error_message or "LLM调用失败")
+            
+            response_text = result.response
             
             # 解析响应并提取True/False判断
             analysis_result, review_result = _parse_review_response(response_text)

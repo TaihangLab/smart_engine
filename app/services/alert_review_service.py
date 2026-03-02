@@ -187,33 +187,23 @@ class AlertReviewService:
             LLM调用结果
         """
         try:
-            # 调用LLM服务进行复判（使用复判技能的配置）
-            result = llm_service.call_llm(
-                skill_type="multimodal_review",  # 复判技能统一类型
+            # 异步调用LLM服务进行复判（使用复判技能的配置）
+            result = await llm_service.acall_llm(
+                prompt=prompt,
                 system_prompt=llm_skill_class.system_prompt or "你是专业的安全预警复判专家。",
-                user_prompt=prompt,
-                user_prompt_template=llm_skill_class.prompt_template,
-                response_format=None,  # ReviewSkillClass 不使用 response_format
-                image_data=image_data,
-                context={"task": "alert_review"},
-                use_backup=False
+                image_data=image_data
             )
             
             return result
             
         except Exception as e:
             self.logger.error(f"LLM复判调用失败: {str(e)}")
-            # 尝试备用配置
+            # acall_llm 已内置自动降级，这里无需重复
             try:
-                result = llm_service.call_llm(
-                    skill_type="multimodal_review",  # 复判技能统一类型
+                result = await llm_service.acall_llm(
+                    prompt=prompt,
                     system_prompt=llm_skill_class.system_prompt or "你是专业的安全预警复判专家。",
-                    user_prompt=prompt,
-                    user_prompt_template=llm_skill_class.prompt_template,
-                    response_format=None,  # ReviewSkillClass 不使用 response_format
-                    image_data=image_data,
-                    context={"task": "alert_review"},
-                    use_backup=True
+                    image_data=image_data
                 )
                 return result
             except Exception as backup_e:

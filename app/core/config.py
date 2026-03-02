@@ -438,7 +438,7 @@ class Settings(BaseSettings):
     
     # 🖼️ 多模态模型配置（图片/视频分析）
     MULTIMODAL_LLM_PROVIDER: str = Field(default="vllm", description="多模态LLM提供商")
-    MULTIMODAL_LLM_BASE_URL: str = Field(default="http://172.18.1.1:8000/v1", description="多模态LLM服务地址（千问3VL vllm）")
+    MULTIMODAL_LLM_BASE_URL: str = Field(default="http://172.18.1.1:22002/v1", description="多模态LLM服务地址（千问3VL vllm）")
     MULTIMODAL_LLM_API_KEY: str = Field(default="EMPTY", description="多模态LLM API密钥")
     MULTIMODAL_LLM_MODEL: str = Field(default="Qwen3-VL-30B-A3B-Instruct", description="多模态模型（千问3VL-30B）")
     

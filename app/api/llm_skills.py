@@ -140,7 +140,7 @@ def _build_llm_system_prompt(base_system_prompt: str, output_parameters: Optiona
     
     # 检测模型类型并调整提示词策略
     from app.core.config import settings
-    model_name = getattr(settings, 'PRIMARY_LLM_MODEL', 'llava:latest').lower()
+    model_name = getattr(settings, 'MULTIMODAL_LLM_MODEL', 'qwen3-vl').lower()
     
     # 根据模型类型调整提示词强度
     if 'llava' in model_name or 'multimodal' in model_name:
@@ -620,11 +620,11 @@ def create_llm_skill_class(
             output_parameters=output_parameters_dict,
             alert_conditions=alert_conditions_dict,
             
-            # 系统内部字段（使用智能优化配置）
+            # 系统内部字段（使用智能优化配置 - 多模态模型配置）
             type=LLMSkillType.MULTIMODAL_ANALYSIS,
             provider=LLMProviderType.CUSTOM,
-            model_name=settings.PRIMARY_LLM_MODEL,
-            api_base=settings.PRIMARY_LLM_BASE_URL,
+            model_name=settings.MULTIMODAL_LLM_MODEL,
+            api_base=settings.MULTIMODAL_LLM_BASE_URL,
             system_prompt="你是一个专业的AI助手，擅长分析图像内容并提供准确的判断。",
 
             # 使用智能配置而不是硬编码默认值
@@ -1038,24 +1038,29 @@ async def preview_test_llm_skill(
         smart_config = _get_smart_default_config(task_type)
         
         try:
-            # 创建临时的LLM配置用于测试
+            # 创建临时的LLM配置用于测试（多模态模型配置）
             test_api_config = {
-                "api_key": settings.PRIMARY_LLM_API_KEY or "ollama",
-                "base_url": settings.PRIMARY_LLM_BASE_URL,
+                "api_key": settings.MULTIMODAL_LLM_API_KEY or "ollama",
+                "base_url": settings.MULTIMODAL_LLM_BASE_URL,
                 "temperature": smart_config["temperature"],
                 "max_tokens": smart_config["max_tokens"],
                 "top_p": smart_config["top_p"],
                 "timeout": settings.LLM_TIMEOUT
             }
             
-            # 使用现代化多模态链
-            chain = llm_service.create_multimodal_chain(
+            # 使用LLMService.acall_llm进行异步多模态测试（智能路由到多模态模型）
+            result = await llm_service.acall_llm(
+                prompt=user_prompt_clean,
                 system_prompt=enhanced_system_prompt,
+                image_data=frame,
                 temperature=smart_config["temperature"],
                 max_tokens=smart_config["max_tokens"]
             )
-            # 调用链
-            response_text = await llm_service.ainvoke_chain(chain, {"text": user_prompt_clean, "image": frame})
+            
+            if not result.success:
+                raise Exception(result.error_message or "LLM调用失败")
+            
+            response_text = result.response
             # 解析响应并提取输出参数
             analysis_result, extracted_params = _parse_json_response(response_text, parsed_output_params)
             
@@ -1142,31 +1147,34 @@ async def test_llm_connection(
         task_type = _detect_task_type(test_prompt, None)
         smart_config = _get_smart_default_config(task_type)
         
-        # 创建测试用的LLM配置
+        # 创建测试用的LLM配置（纯文本测试使用文本模型配置）
         test_api_config = {
-            "api_key": settings.PRIMARY_LLM_API_KEY or "ollama",
-            "base_url": settings.PRIMARY_LLM_BASE_URL,
+            "api_key": settings.TEXT_LLM_API_KEY or "ollama",
+            "base_url": settings.TEXT_LLM_BASE_URL,
             "temperature": smart_config["temperature"],
             "max_tokens": smart_config["max_tokens"],
             "top_p": smart_config["top_p"],
             "timeout": settings.LLM_TIMEOUT
         }
         
-        # 使用现代化简单链进行文本测试
-        chain = llm_service.create_simple_chain(
+        # 使用LLMService.acall_llm进行异步纯文本测试
+        import time
+        start_time = time.time()
+        
+        result = await llm_service.acall_llm(
+            prompt=test_prompt,
             system_prompt=system_prompt,
             temperature=smart_config["temperature"],
             max_tokens=smart_config["max_tokens"]
         )
         
-        # 调用链
-        import time
-        start_time = time.time()
-        
-        response_text = await llm_service.ainvoke_chain(chain, {"input": test_prompt})
-        
         end_time = time.time()
         response_time = round((end_time - start_time) * 1000, 2)  # 毫秒
+        
+        if not result.success:
+            raise Exception(result.error_message or "LLM调用失败")
+        
+        response_text = result.response
         
         logger.info(f"LLM连接测试成功，响应时间: {response_time}ms")
         
@@ -1178,9 +1186,9 @@ async def test_llm_connection(
                 "response_text": response_text,
                 "response_time_ms": response_time,
                 "service_config": {
-                    "provider": settings.PRIMARY_LLM_PROVIDER,
-                    "model": settings.PRIMARY_LLM_MODEL,
-                    "base_url": settings.PRIMARY_LLM_BASE_URL
+                    "provider": settings.TEXT_LLM_PROVIDER,
+                    "model": settings.TEXT_LLM_MODEL,
+                    "base_url": settings.TEXT_LLM_BASE_URL
                 },
                 "test_config": {
                     "system_prompt": system_prompt,
@@ -1204,9 +1212,9 @@ async def test_llm_connection(
                 "test_type": "connection",
                 "error_details": str(e),
                 "service_config": {
-                    "provider": settings.PRIMARY_LLM_PROVIDER,
-                    "model": settings.PRIMARY_LLM_MODEL,
-                    "base_url": settings.PRIMARY_LLM_BASE_URL
+                    "provider": settings.TEXT_LLM_PROVIDER,
+                    "model": settings.TEXT_LLM_MODEL,
+                    "base_url": settings.TEXT_LLM_BASE_URL
                 },
                 "test_timestamp": datetime.now().isoformat()
             }

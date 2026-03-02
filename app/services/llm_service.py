@@ -1,11 +1,11 @@
 """
-现代化LLM服务 - 基于LangChain 1.0.7 + OpenAI兼容API
+现代化LLM服务 - 基于LangChain 1.2+ OpenAI兼容API
 ===========================================================
 设计理念：
 1. 配置驱动：所有模型配置在config.py中统一管理
 2. 智能路由：根据输入类型（纯文本/图片/视频）自动选择模型
 3. 视频支持：使用OpenAI frame_list格式处理视频序列
-4. 现代API：基于LangChain 1.0.7最新特性
+4. 官方组件：使用langchain-community官方RedisChatMessageHistory
 
 路由规则：
 - 纯文本输入 → TEXT_LLM_* (千问3)
@@ -21,20 +21,15 @@ from io import BytesIO
 from PIL import Image
 import numpy as np
 
-# LangChain 1.0.7+
+# LangChain 1.2+
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
-from langchain_core.prompts import ChatPromptTemplate
-from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
-from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.language_models import BaseChatModel
 from langchain_openai import ChatOpenAI
 
-# 注意：vllm的OpenAI兼容API直接支持视频帧列表，无需qwen_vl_utils
-# qwen_vl_utils仅用于本地transformers模型加载
+# 官方 Redis 消息历史实现
+from langchain_community.chat_message_histories import RedisChatMessageHistory
 
 # 项目模块
 from app.core.config import settings
-from app.services.redis_client import redis_client
 
 logger = logging.getLogger(__name__)
 
@@ -59,113 +54,57 @@ class LLMServiceResult:
         }
 
 
-class RedisMemoryStore:
-    """基于Redis的消息历史存储"""
-    
-    def __init__(self, redis_client, ttl: int = 7 * 24 * 3600):
-        self.redis_client = redis_client
-        self.ttl = ttl
-        self.prefix = "llm_chat_history:"
-    
-    def get_messages(self, session_id: str) -> List[BaseMessage]:
-        """获取会话消息历史"""
-        try:
-            key = f"{self.prefix}{session_id}"
-            messages_data = self.redis_client.lrange(key, 0, -1)
-            
-            messages = []
-            for message_json in messages_data:
-                try:
-                    message_dict = json.loads(message_json)
-                    message_type = message_dict.get('type', 'human')
-                    content = message_dict.get('content', '')
-                    
-                    if message_type == 'human':
-                        messages.append(HumanMessage(content=content))
-                    elif message_type == 'ai':
-                        messages.append(AIMessage(content=content))
-                    elif message_type == 'system':
-                        messages.append(SystemMessage(content=content))
-                except (json.JSONDecodeError, KeyError) as e:
-                    logger.warning(f"解析消息失败: {e}")
-                    continue
-            
-            return messages
-        except Exception as e:
-            logger.error(f"获取会话历史失败: {e}")
-            return []
-    
-    def add_message(self, session_id: str, message: BaseMessage) -> None:
-        """添加消息到历史"""
-        try:
-            key = f"{self.prefix}{session_id}"
-            message_type = 'human' if isinstance(message, HumanMessage) else \
-                          'ai' if isinstance(message, AIMessage) else 'system'
-            
-            message_data = json.dumps({
-                'type': message_type,
-                'content': message.content
-            })
-            
-            self.redis_client.rpush(key, message_data)
-            self.redis_client.expire(key, self.ttl)
-        except Exception as e:
-            logger.error(f"添加消息到历史失败: {e}")
-    
-    def clear(self, session_id: str) -> None:
-        """清除会话历史"""
-        try:
-            key = f"{self.prefix}{session_id}"
-            self.redis_client.delete(key)
-        except Exception as e:
-            logger.error(f"清除会话历史失败: {e}")
-
-
-class RedisChatMessageHistory(BaseChatMessageHistory):
-    """Redis聊天消息历史实现（LangChain 1.0.7兼容）"""
-    
-    def __init__(self, session_id: str, memory_store: RedisMemoryStore):
-        self.session_id = session_id
-        self.memory_store = memory_store
-        self._messages = None
-    
-    @property
-    def messages(self) -> List[BaseMessage]:
-        """获取消息列表"""
-        self._messages = self.memory_store.get_messages(self.session_id)
-        return self._messages
-    
-    def add_message(self, message: BaseMessage) -> None:
-        """添加消息"""
-        self.memory_store.add_message(self.session_id, message)
-        self._messages = None
-    
-    def clear(self) -> None:
-        """清除历史"""
-        self.memory_store.clear(self.session_id)
-        self._messages = []
-
-
 class LLMService:
     """
-    配置驱动的智能LLM服务 - LangChain 1.0.7 + OpenAI兼容API
+    配置驱动的智能LLM服务 - LangChain 1.2+ OpenAI兼容API
     ===========================================================
     特点：
     1. 零硬编码：所有模型配置来自config.py
     2. 智能路由：自动根据输入类型选择最佳模型
     3. 视频支持：使用OpenAI frame_list格式处理视频帧
     4. 自动降级：主模型故障时自动切换备用
+    5. 官方组件：使用langchain-community的RedisChatMessageHistory
     """
+    
+    # Redis 配置
+    CHAT_HISTORY_TTL = 7 * 24 * 3600  # 7天
+    CHAT_HISTORY_KEY_PREFIX = "llm_chat_history:"
     
     def __init__(self):
         self.logger = logging.getLogger(__name__)
-        self.memory_store = RedisMemoryStore(redis_client)
         self._client_cache = {}
+        self._chat_history_cache = {}
         
-        self.logger.info("🚀 LLM服务初始化 (LangChain 1.0.7 + OpenAI兼容API)")
+        # 构建 Redis URL
+        redis_password = settings.REDIS_PASSWORD
+        if redis_password:
+            self._redis_url = f"redis://:{redis_password}@{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}"
+        else:
+            self._redis_url = f"redis://{settings.REDIS_HOST}:{settings.REDIS_PORT}/{settings.REDIS_DB}"
+        
+        self.logger.info("🚀 LLM服务初始化 (LangChain 1.2+ OpenAI兼容API)")
         self.logger.info(f"   纯文本模型: {settings.TEXT_LLM_MODEL} @ {settings.TEXT_LLM_BASE_URL}")
         self.logger.info(f"   多模态模型: {settings.MULTIMODAL_LLM_MODEL} @ {settings.MULTIMODAL_LLM_BASE_URL}")
-        self.logger.info(f"   视频支持: OpenAI frame_list格式")
+        self.logger.info(f"   会话历史: Redis @ {settings.REDIS_HOST}:{settings.REDIS_PORT}")
+    
+    def get_chat_history(self, session_id: str) -> RedisChatMessageHistory:
+        """
+        获取会话消息历史（使用 LangChain 官方 RedisChatMessageHistory）
+        
+        Args:
+            session_id: 会话ID
+            
+        Returns:
+            RedisChatMessageHistory: LangChain 官方的 Redis 消息历史实现
+        """
+        if session_id not in self._chat_history_cache:
+            self._chat_history_cache[session_id] = RedisChatMessageHistory(
+                session_id=session_id,
+                url=self._redis_url,
+                key_prefix=self.CHAT_HISTORY_KEY_PREFIX,
+                ttl=self.CHAT_HISTORY_TTL
+            )
+        return self._chat_history_cache[session_id]
     
     def _get_client(self, model_type: str = "text", use_backup: bool = False) -> ChatOpenAI:
         """
@@ -200,7 +139,7 @@ class LLMService:
                 model = settings.TEXT_LLM_MODEL
                 api_key = settings.TEXT_LLM_API_KEY
         
-        # 使用LangChain 1.0.7的ChatOpenAI
+        # 使用LangChain的ChatOpenAI
         client = ChatOpenAI(
             model=model,
             api_key=api_key,
@@ -408,6 +347,72 @@ class LLMService:
             # 解析失败，返回原始文本
             return {"raw_response": text, "parse_error": str(e)}
     
+    def _prepare_client(
+        self,
+        model_type: str,
+        use_backup: bool,
+        response_format: Optional[Dict],
+        temperature: Optional[float],
+        max_tokens: Optional[int]
+    ) -> tuple:
+        """准备 LLM 客户端和调用参数（主模型/备用模型通用）"""
+        client = self._get_client(model_type=model_type, use_backup=use_backup)
+        
+        call_kwargs = {}
+        if temperature is not None:
+            call_kwargs['temperature'] = temperature
+        if max_tokens is not None:
+            call_kwargs['max_tokens'] = max_tokens
+        
+        if response_format and response_format.get("type") == "json_object":
+            try:
+                client = client.bind(response_format={"type": "json_object"})
+            except Exception as e:
+                self.logger.debug(f"bind response_format失败: {e}，将在prompt中要求JSON格式")
+        
+        return client, call_kwargs
+    
+    def _build_result(self, response_text: str, response_format: Optional[Dict]) -> LLMServiceResult:
+        """构建统一的返回结果"""
+        if response_format and response_format.get("type") == "json_object":
+            return LLMServiceResult(
+                success=True,
+                response=response_text,
+                analysis_result=self._parse_json_response(response_text)
+            )
+        return LLMServiceResult(success=True, response=response_text)
+    
+    def _prepare_call(
+        self,
+        prompt: str,
+        system_prompt: Optional[str],
+        image_data: Optional[Union[str, bytes, np.ndarray, Image.Image, List]],
+        video_frames: Optional[List],
+        fps: Optional[float],
+        use_video_format: bool
+    ) -> tuple:
+        """智能路由 + 消息构建（同步/异步共用）"""
+        has_image = image_data is not None
+        has_video = video_frames is not None and (isinstance(video_frames, list) and len(video_frames) > 0)
+        has_visual_input = has_image or has_video
+        
+        model_type = "multimodal" if (settings.LLM_AUTO_ROUTING and has_visual_input) else "text"
+        self.logger.debug(f"🎯 路由决策: 输入类型={'多模态' if has_visual_input else '纯文本'}, 模型={model_type}")
+        
+        if has_video and use_video_format:
+            messages = self._build_messages_for_video(
+                prompt=prompt, system_prompt=system_prompt,
+                video_frames=video_frames, fps=fps
+            )
+            self.logger.debug(f"📹 使用OpenAI视频格式处理{len(video_frames)}帧")
+        else:
+            messages = self._build_messages_standard(
+                prompt=prompt, system_prompt=system_prompt,
+                image_data=image_data, video_frames=video_frames, fps=fps
+            )
+        
+        return model_type, messages
+    
     def call_llm(
         self,
         prompt: str,
@@ -422,148 +427,112 @@ class LLMService:
         **kwargs
     ) -> LLMServiceResult:
         """
-        统一LLM调用接口 - 配置驱动智能路由
-        
-        Args:
-            prompt: 用户提示词
-            system_prompt: 系统提示词
-            image_data: 单张图片或图片列表
-            video_frames: 视频帧序列（numpy/PIL/URL）
-            fps: 视频帧率（告诉模型时序密度）
-            response_format: 响应格式 {"type": "json_object"}
-            temperature: 温度参数（覆盖配置）
-            max_tokens: 最大token数（覆盖配置）
-            use_video_format: 视频帧使用OpenAI video格式（推荐True）
-            
-        Returns:
-            LLMServiceResult: 包含响应文本和解析结果
+        同步LLM调用接口 - 适用于同步上下文（线程池任务等）
+        异步上下文请使用 acall_llm()
         """
         try:
-            # 智能路由：判断使用哪种模型
-            # 安全检查是否有视觉输入（避免numpy数组的布尔运算歧义）
-            has_image = image_data is not None
-            has_video = video_frames is not None and (isinstance(video_frames, list) and len(video_frames) > 0)
-            has_visual_input = has_image or has_video
+            model_type, messages = self._prepare_call(
+                prompt, system_prompt, image_data, video_frames, fps, use_video_format
+            )
             
-            model_type = "multimodal" if (settings.LLM_AUTO_ROUTING and has_visual_input) else "text"
-            
-            self.logger.debug(f"🎯 路由决策: 输入类型={'多模态' if has_visual_input else '纯文本'}, 模型={model_type}")
-            
-            # 构建消息
-            if has_video and use_video_format:
-                # 使用OpenAI视频格式（推荐）
-                messages = self._build_messages_for_video(
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                    video_frames=video_frames,
-                    fps=fps
-                )
-                self.logger.debug(f"📹 使用OpenAI视频格式处理{len(video_frames)}帧")
-            else:
-                # 标准消息构建（单图或多图）
-                messages = self._build_messages_standard(
-                    prompt=prompt,
-                    system_prompt=system_prompt,
-                    image_data=image_data,
-                    video_frames=video_frames,
-                    fps=fps
-                )
-            
-            # 尝试主模型
+            # 主模型 → 备用模型降级
             try:
-                client = self._get_client(model_type=model_type, use_backup=False)
-                
-                # 构建调用参数
-                call_kwargs = {}
-                if temperature is not None:
-                    call_kwargs['temperature'] = temperature
-                if max_tokens is not None:
-                    call_kwargs['max_tokens'] = max_tokens
-                
-                # JSON格式响应 - 使用bind方法设置
-                if response_format and response_format.get("type") == "json_object":
-                    try:
-                        # 尝试使用bind设置response_format
-                        client = client.bind(response_format={"type": "json_object"})
-                    except Exception as e:
-                        self.logger.debug(f"bind response_format失败: {e}，将在prompt中要求JSON格式")
-                
-                # 调用LLM
+                client, call_kwargs = self._prepare_client(
+                    model_type, False, response_format, temperature, max_tokens
+                )
                 response = client.invoke(messages, **call_kwargs)
-                response_text = response.content
+                self.logger.info(f"✅ LLM调用成功: 模型={model_type}, 响应长度={len(response.content)}")
+                return self._build_result(response.content, response_format)
                 
-                self.logger.info(f"✅ LLM调用成功: 模型={model_type}, 响应长度={len(response_text)}")
-                
-                # 解析响应
-                if response_format and response_format.get("type") == "json_object":
-                    analysis_result = self._parse_json_response(response_text)
-                    return LLMServiceResult(
-                        success=True,
-                        response=response_text,
-                        analysis_result=analysis_result
-                    )
-                else:
-                    return LLMServiceResult(
-                        success=True,
-                        response=response_text
-                    )
-                    
             except Exception as main_error:
                 self.logger.warning(f"⚠️ 主模型调用失败: {main_error}")
+                if not settings.LLM_ENABLE_FALLBACK:
+                    raise
                 
-                # 自动降级到备用模型
-                if settings.LLM_ENABLE_FALLBACK:
-                    self.logger.info(f"🔄 切换到备用模型...")
-                    
-                    try:
-                        client = self._get_client(model_type=model_type, use_backup=True)
-                        
-                        # 备用模型调用
-                        call_kwargs = {}
-                        if temperature is not None:
-                            call_kwargs['temperature'] = temperature
-                        if max_tokens is not None:
-                            call_kwargs['max_tokens'] = max_tokens
-                        
-                        # JSON格式响应 - 使用bind方法设置
-                        if response_format and response_format.get("type") == "json_object":
-                            try:
-                                client = client.bind(response_format={"type": "json_object"})
-                            except Exception as e:
-                                self.logger.debug(f"bind response_format失败: {e}，将在prompt中要求JSON格式")
-                        
-                        response = client.invoke(messages, **call_kwargs)
-                        response_text = response.content
-                        
-                        self.logger.info(f"✅ 备用模型调用成功")
-                        
-                        # 解析响应
-                        if response_format and response_format.get("type") == "json_object":
-                            analysis_result = self._parse_json_response(response_text)
-                            return LLMServiceResult(
-                                success=True,
-                                response=response_text,
-                                analysis_result=analysis_result
-                            )
-                        else:
-                            return LLMServiceResult(
-                                success=True,
-                                response=response_text
-                            )
-                    
-                    except Exception as backup_error:
-                        self.logger.error(f"❌ 备用模型也失败: {backup_error}")
-                        raise backup_error
-                else:
-                    raise main_error
+                self.logger.info("🔄 切换到备用模型...")
+                try:
+                    client, call_kwargs = self._prepare_client(
+                        model_type, True, response_format, temperature, max_tokens
+                    )
+                    response = client.invoke(messages, **call_kwargs)
+                    self.logger.info("✅ 备用模型调用成功")
+                    return self._build_result(response.content, response_format)
+                except Exception as backup_error:
+                    self.logger.error(f"❌ 备用模型也失败: {backup_error}")
+                    raise
         
         except Exception as e:
             error_msg = f"LLM调用失败: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
-            return LLMServiceResult(
-                success=False,
-                error_message=error_msg
+            return LLMServiceResult(success=False, error_message=error_msg)
+    
+    async def acall_llm(
+        self,
+        prompt: str,
+        system_prompt: Optional[str] = None,
+        image_data: Optional[Union[str, bytes, np.ndarray, Image.Image, List]] = None,
+        video_frames: Optional[List] = None,
+        fps: Optional[float] = None,
+        response_format: Optional[Dict] = None,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        use_video_format: bool = True,
+        **kwargs
+    ) -> LLMServiceResult:
+        """
+        异步LLM调用接口 - 使用 ainvoke()，不阻塞事件循环
+        在 FastAPI async 端点中应优先使用此方法
+        """
+        try:
+            model_type, messages = self._prepare_call(
+                prompt, system_prompt, image_data, video_frames, fps, use_video_format
             )
+            
+            # 主模型 → 备用模型降级（异步版本）
+            try:
+                client, call_kwargs = self._prepare_client(
+                    model_type, False, response_format, temperature, max_tokens
+                )
+                response = await client.ainvoke(messages, **call_kwargs)
+                self.logger.info(f"✅ LLM异步调用成功: 模型={model_type}, 响应长度={len(response.content)}")
+                return self._build_result(response.content, response_format)
+                
+            except Exception as main_error:
+                self.logger.warning(f"⚠️ 主模型调用失败: {main_error}")
+                if not settings.LLM_ENABLE_FALLBACK:
+                    raise
+                
+                self.logger.info("🔄 切换到备用模型...")
+                try:
+                    client, call_kwargs = self._prepare_client(
+                        model_type, True, response_format, temperature, max_tokens
+                    )
+                    response = await client.ainvoke(messages, **call_kwargs)
+                    self.logger.info("✅ 备用模型异步调用成功")
+                    return self._build_result(response.content, response_format)
+                except Exception as backup_error:
+                    self.logger.error(f"❌ 备用模型也失败: {backup_error}")
+                    raise
+        
+        except Exception as e:
+            error_msg = f"LLM异步调用失败: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return LLMServiceResult(success=False, error_message=error_msg)
+    
+    def _build_chat_messages(
+        self, prompt: str, session_id: str, system_prompt: Optional[str]
+    ) -> tuple:
+        """构建带历史的对话消息列表（同步/异步共用）"""
+        history = self.get_chat_history(session_id)
+        messages = []
+        
+        if system_prompt:
+            messages.append(SystemMessage(content=system_prompt))
+        
+        messages.extend(history.messages)
+        messages.append(HumanMessage(content=prompt))
+        
+        return history, messages
     
     def chat_with_history(
         self,
@@ -572,54 +541,56 @@ class LLMService:
         system_prompt: Optional[str] = None,
         **kwargs
     ) -> LLMServiceResult:
-        """
-        带历史记录的对话（仅支持纯文本）
-        
-        Args:
-            prompt: 用户输入
-            session_id: 会话ID
-            system_prompt: 系统提示
-            **kwargs: 其他参数传递给call_llm
-        """
+        """同步带历史对话。异步上下文请使用 achat_with_history()"""
         try:
-            # 获取历史消息
-            history = RedisChatMessageHistory(session_id, self.memory_store)
-            messages = []
+            history, messages = self._build_chat_messages(prompt, session_id, system_prompt)
             
-            if system_prompt:
-                messages.append(SystemMessage(content=system_prompt))
-            
-            # 添加历史消息
-            messages.extend(history.messages)
-            
-            # 添加当前输入
-            messages.append(HumanMessage(content=prompt))
-            
-            # 调用LLM（纯文本模型）
             client = self._get_client(model_type="text", use_backup=False)
             response = client.invoke(messages, **kwargs)
             response_text = response.content
             
-            # 保存到历史
             history.add_message(HumanMessage(content=prompt))
             history.add_message(AIMessage(content=response_text))
             
-            return LLMServiceResult(
-                success=True,
-                response=response_text
-            )
+            return LLMServiceResult(success=True, response=response_text)
         
         except Exception as e:
             error_msg = f"对话失败: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
-            return LLMServiceResult(
-                success=False,
-                error_message=error_msg
-            )
+            return LLMServiceResult(success=False, error_message=error_msg)
+    
+    async def achat_with_history(
+        self,
+        prompt: str,
+        session_id: str,
+        system_prompt: Optional[str] = None,
+        **kwargs
+    ) -> LLMServiceResult:
+        """异步带历史对话 - 使用 ainvoke()，不阻塞事件循环"""
+        try:
+            history, messages = self._build_chat_messages(prompt, session_id, system_prompt)
+            
+            client = self._get_client(model_type="text", use_backup=False)
+            response = await client.ainvoke(messages, **kwargs)
+            response_text = response.content
+            
+            history.add_message(HumanMessage(content=prompt))
+            history.add_message(AIMessage(content=response_text))
+            
+            return LLMServiceResult(success=True, response=response_text)
+        
+        except Exception as e:
+            error_msg = f"异步对话失败: {str(e)}"
+            self.logger.error(error_msg, exc_info=True)
+            return LLMServiceResult(success=False, error_message=error_msg)
     
     def clear_history(self, session_id: str) -> None:
         """清除会话历史"""
-        self.memory_store.clear(session_id)
+        history = self.get_chat_history(session_id)
+        history.clear()
+        # 从缓存中移除
+        if session_id in self._chat_history_cache:
+            del self._chat_history_cache[session_id]
 
 
 # 全局单例

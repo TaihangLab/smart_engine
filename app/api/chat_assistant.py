@@ -84,14 +84,31 @@ class StreamChunk(BaseModel):
 
 
 class ConversationManager:
-    """现代化会话管理器 - 使用Redis和LangChain内存管理"""
+    """现代化会话管理器 - 使用Redis和LangChain官方消息历史"""
     
     def __init__(self):
         self.redis_client = redis_client
-        self.memory_store = llm_service.memory_store
+        self.llm_service = llm_service
         self.conversation_prefix = "chat_conversation:"
         self.conversation_list_key = "chat_conversations"
         self.ttl = 7 * 24 * 3600  # 7天
+        self.chat_history_prefix = llm_service.CHAT_HISTORY_KEY_PREFIX
+    
+    def _get_chat_history(self, session_id: str):
+        """获取会话消息历史对象（使用 LangChain 官方实现）"""
+        return self.llm_service.get_chat_history(session_id)
+    
+    def _get_messages(self, session_id: str):
+        """获取会话消息列表"""
+        return self._get_chat_history(session_id).messages
+    
+    def _add_message(self, session_id: str, message):
+        """添加消息到历史"""
+        self._get_chat_history(session_id).add_message(message)
+    
+    def _clear_messages(self, session_id: str):
+        """清除会话消息历史"""
+        self._get_chat_history(session_id).clear()
         
     def get_or_create_conversation_id(self, conversation_id: Optional[str] = None) -> str:
         """获取或创建会话ID"""
@@ -103,8 +120,8 @@ class ConversationManager:
                                  context_length: int = 10) -> List[ChatMessage]:
         """获取会话历史"""
         try:
-            # 直接从LLM服务的内存存储获取消息
-            messages = self.memory_store.get_messages(conversation_id)
+            # 使用 LangChain 官方 RedisChatMessageHistory 获取消息
+            messages = self._get_messages(conversation_id)
             
             # 限制上下文长度
             if len(messages) > context_length * 2:  # 每轮对话包含用户和助手消息
@@ -214,7 +231,7 @@ class ConversationManager:
                         # 检查是否需要更新默认格式的标题
                         if current_title.startswith("会话 ") and len(current_title) <= 12:
                             # 如果标题还是默认格式，尝试生成有意义的标题
-                            messages = self.memory_store.get_messages(conversation_id)
+                            messages = self._get_messages(conversation_id)
                             if messages and len(messages) >= 2:  # 有对话历史
                                 try:
                                     generated_title = self.auto_generate_conversation_title(conversation_id)
@@ -236,7 +253,7 @@ class ConversationManager:
                         ))
                     else:
                         # 如果元数据不存在，检查是否有消息历史
-                        messages = self.memory_store.get_messages(conversation_id)
+                        messages = self._get_messages(conversation_id)
                         if messages:
                             # 有消息历史但没有元数据，重新创建元数据
                             generated_title = self.auto_generate_conversation_title(conversation_id)
@@ -263,7 +280,7 @@ class ConversationManager:
         """删除会话"""
         try:
             # 删除内存历史（使用LLM服务的内存存储）
-            self.memory_store.clear(conversation_id)
+            self._clear_messages(conversation_id)
             
             # 删除元数据
             key = f"{self.conversation_prefix}{conversation_id}"
@@ -407,7 +424,7 @@ class ConversationManager:
             
             if not conversation_exists:
                 # 如果元数据不存在，检查是否有消息历史
-                messages = self.memory_store.get_messages(conversation_id)
+                messages = self._get_messages(conversation_id)
                 if messages:
                     conversation_exists = True
                     logger.info(f"会话 {conversation_id} 有消息历史但无元数据，重新创建元数据")
@@ -479,7 +496,7 @@ class ConversationManager:
                 conversation_data = self.redis_client.get(conv_key)
                 if not conversation_data:
                     # 如果元数据不存在，检查是否有消息历史
-                    messages = self.memory_store.get_messages(conv_id)
+                    messages = self._get_messages(conv_id)
                     if messages:
                         # 重新创建元数据
                         logger.info(f"为会话 {conv_id} 重新创建元数据")
@@ -611,7 +628,7 @@ class ChatService:
             from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
             
             # 获取历史消息
-            history_messages = conversation_manager.memory_store.get_messages(conversation_id)
+            history_messages = conversation_manager._get_messages(conversation_id)
             
             # 构建消息列表
             messages = []
@@ -628,7 +645,7 @@ class ChatService:
             messages.append(user_message)
             
             # 保存用户消息
-            conversation_manager.memory_store.add_message(conversation_id, user_message)
+            conversation_manager._add_message(conversation_id, user_message)
             
             # 从llm_service获取纯文本LLM客户端（使用配置文件中的默认参数）
             client = self.llm_service._get_client(
@@ -642,7 +659,7 @@ class ChatService:
             
             # 保存助手回复
             assistant_message = AIMessage(content=response_text)
-            conversation_manager.memory_store.add_message(conversation_id, assistant_message)
+            conversation_manager._add_message(conversation_id, assistant_message)
             
             return response_text
             
@@ -660,7 +677,7 @@ class ChatService:
             from langchain_core.messages import HumanMessage, AIMessage, SystemMessage
             
             # 获取历史消息
-            history_messages = conversation_manager.memory_store.get_messages(conversation_id)
+            history_messages = conversation_manager._get_messages(conversation_id)
             
             # 构建消息列表
             messages = []
@@ -693,7 +710,7 @@ class ChatService:
             # 手动保存助手回复
             if full_response.strip():
                 assistant_message = AIMessage(content=full_response, id=str(uuid.uuid4()))
-                conversation_manager.memory_store.add_message(conversation_id, assistant_message)
+                conversation_manager._add_message(conversation_id, assistant_message)
                 logger.info(f"已保存助手回复: {full_response[:50]}...")
             
         except Exception as e:
@@ -745,7 +762,7 @@ async def chat_completion(request: ChatRequest):
                     # 首先明确保存用户消息，确保即使被早期停止也不会丢失
                     from langchain_core.messages import HumanMessage
                     user_message = HumanMessage(content=request.message, id=str(uuid.uuid4()))
-                    conversation_manager.memory_store.add_message(conversation_id, user_message)
+                    conversation_manager._add_message(conversation_id, user_message)
                     logger.info(f"已保存用户消息: {request.message[:50]}...")
                     
                     # 开始流式响应，第一个chunk包含conversation_id
@@ -916,7 +933,7 @@ async def get_conversation_messages(
         logger.info(f"请求获取会话消息: {conversation_id}, 限制: {limit}")
         
         # 直接从内存存储获取原始消息
-        raw_messages = conversation_manager.memory_store.get_messages(conversation_id)
+        raw_messages = conversation_manager._get_messages(conversation_id)
         logger.info(f"从Redis获取到 {len(raw_messages)} 条原始消息")
         
         # 获取格式化的消息
@@ -925,7 +942,7 @@ async def get_conversation_messages(
         
         # 如果没有消息，检查Redis键
         if not messages:
-            redis_key = f"{conversation_manager.memory_store.prefix}{conversation_id}"
+            redis_key = f"{conversation_manager.chat_history_prefix}{conversation_id}"
             exists = conversation_manager.redis_client.exists(redis_key)
             logger.warning(f"没有找到消息，Redis键 {redis_key} 存在: {exists}")
             
@@ -1526,7 +1543,7 @@ async def stop_generation(
     """停止生成并保存部分内容（模仿Cursor的停止机制）"""
     try:
         # 检查是否已有这个消息ID的内容
-        existing_messages = conversation_manager.memory_store.get_messages(conversation_id)
+        existing_messages = conversation_manager._get_messages(conversation_id)
         message_exists = any(hasattr(msg, 'id') and msg.id == message_id for msg in existing_messages)
         
         if not message_exists:
@@ -1539,7 +1556,7 @@ async def stop_generation(
                 final_content = "[生成已停止]"
             
             assistant_message = AIMessage(content=final_content, id=message_id)
-            conversation_manager.memory_store.add_message(conversation_id, assistant_message)
+            conversation_manager._add_message(conversation_id, assistant_message)
             
             # 更新会话元数据
             conversation_manager.update_conversation_metadata(conversation_id)
@@ -1590,7 +1607,7 @@ async def save_message_to_conversation(
             message_id = str(uuid.uuid4())
         
         # 检查消息是否已存在（去重逻辑）
-        existing_messages = conversation_manager.memory_store.get_messages(conversation_id)
+        existing_messages = conversation_manager._get_messages(conversation_id)
         for existing_msg in existing_messages:
             if hasattr(existing_msg, 'id') and existing_msg.id == message_id:
                 logger.info(f"消息 {message_id} 已存在，跳过保存")
@@ -1615,7 +1632,7 @@ async def save_message_to_conversation(
             message_obj = SystemMessage(content=content, id=message_id)
         
         # 保存到内存存储
-        conversation_manager.memory_store.add_message(conversation_id, message_obj)
+        conversation_manager._add_message(conversation_id, message_obj)
         
         # 更新会话元数据
         conversation_manager.update_conversation_metadata(conversation_id)
@@ -1655,14 +1672,14 @@ async def test_redis_connection():
         test_human_msg = HumanMessage(content="这是一条测试消息")
         test_ai_msg = AIMessage(content="这是AI的回复")
         
-        conversation_manager.memory_store.add_message(test_session_id, test_human_msg)
-        conversation_manager.memory_store.add_message(test_session_id, test_ai_msg)
+        conversation_manager._add_message(test_session_id, test_human_msg)
+        conversation_manager._add_message(test_session_id, test_ai_msg)
         
         # 获取消息验证
-        retrieved_messages = conversation_manager.memory_store.get_messages(test_session_id)
+        retrieved_messages = conversation_manager._get_messages(test_session_id)
         
         # 清理测试数据
-        conversation_manager.memory_store.clear(test_session_id)
+        conversation_manager._clear_messages(test_session_id)
         
         return {
             "success": True,
@@ -1671,7 +1688,7 @@ async def test_redis_connection():
                 "test_session_id": test_session_id,
                 "messages_stored": 2,
                 "messages_retrieved": len(retrieved_messages),
-                "redis_key_prefix": conversation_manager.memory_store.prefix,
+                "redis_key_prefix": conversation_manager.chat_history_prefix,
                 "retrieved_content": [msg.content for msg in retrieved_messages]
             }
         }
@@ -1690,7 +1707,7 @@ async def debug_redis_keys():
     try:
         # 获取所有聊天历史键
         chat_keys = []
-        for key in conversation_manager.redis_client.scan_iter(match=f"{conversation_manager.memory_store.prefix}*"):
+        for key in conversation_manager.redis_client.scan_iter(match=f"{conversation_manager.chat_history_prefix}*"):
             key_str = key.decode('utf-8') if isinstance(key, bytes) else str(key)
             chat_keys.append(key_str)
         
@@ -1709,7 +1726,7 @@ async def debug_redis_keys():
                 "chat_history_keys": chat_keys,
                 "metadata_keys": metadata_keys,
                 "conversation_list": [item.decode('utf-8') if isinstance(item, bytes) else str(item) for item in conversation_list],
-                "memory_prefix": conversation_manager.memory_store.prefix,
+                "memory_prefix": conversation_manager.chat_history_prefix,
                 "metadata_prefix": conversation_manager.conversation_prefix
             }
         }
