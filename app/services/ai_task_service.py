@@ -5,7 +5,6 @@ from typing import List, Dict, Any, Optional, Tuple
 from sqlalchemy.orm import Session
 from app.models.ai_task import AITask
 from app.db.ai_task_dao import AITaskDAO
-import json
 import logging
 
 logger = logging.getLogger(__name__)
@@ -31,11 +30,10 @@ class AITaskService:
         # 构建响应数据
         tasks = []
         for db_task in db_tasks:
-            # 解析JSON字段
-            running_period = json.loads(db_task.running_period) if db_task.running_period else {}
-            electronic_fence = json.loads(db_task.electronic_fence) if db_task.electronic_fence else {}
-            config = json.loads(db_task.config) if db_task.config else {}
-            skill_config = json.loads(db_task.skill_config) if db_task.skill_config else {}
+            running_period = db_task.running_period or {}
+            electronic_fence = db_task.electronic_fence or {}
+            config = db_task.config or {}
+            skill_config = db_task.skill_config or {}
             
             task_data = {
                 "id": db_task.id,
@@ -76,11 +74,10 @@ class AITaskService:
         if not db_task:
             return None
         
-        # 解析JSON字段
-        running_period = json.loads(db_task.running_period) if db_task.running_period else {}
-        electronic_fence = json.loads(db_task.electronic_fence) if db_task.electronic_fence else {}
-        config = json.loads(db_task.config) if db_task.config else {}
-        skill_config = json.loads(db_task.skill_config) if db_task.skill_config else {}
+        running_period = db_task.running_period or {}
+        electronic_fence = db_task.electronic_fence or {}
+        config = db_task.config or {}
+        skill_config = db_task.skill_config or {}
         
         # 获取关联的技能类名称
         skill_class_name = db_task.skill_class.name_zh if db_task.skill_class else None
