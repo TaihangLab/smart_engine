@@ -133,6 +133,22 @@ class SystemStartupService:
             Base.metadata.create_all(bind=engine)
             logger.info("✅ 数据库表创建成功")
             
+            # 1.1 重置本地视频残留推流状态（重启后推流进程已不存在）
+            try:
+                from app.models.local_video import LocalVideo
+                reset_db = SessionLocal()
+                try:
+                    stale_count = reset_db.query(LocalVideo).filter(
+                        LocalVideo.is_streaming == True
+                    ).update({"is_streaming": False})
+                    reset_db.commit()
+                    if stale_count > 0:
+                        logger.info(f"🔄 已重置 {stale_count} 个残留推流状态")
+                finally:
+                    reset_db.close()
+            except Exception as e:
+                logger.warning(f"⚠️ 重置推流状态失败: {str(e)}")
+            
             # 1.5. 初始化预警表重构 (暂时禁用)
             logger.info("⚪ 预警表重构功能暂时禁用（开发中）")
             # try:

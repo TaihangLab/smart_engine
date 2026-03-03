@@ -376,18 +376,14 @@ def start_stream(
             # 状态不一致，重置（推流管理器中不存在，但数据库标记为推流中）
             logger.warning(f"推流状态不一致，重置: {video.name}")
             video.is_streaming = False
-            video.stream_id = None
             db.commit()
     
-    # 使用固定的stream_id（基于视频ID），确保重启后推流地址不变
-    stream_id = f"video_{video.id}"
-    
-    # 检查stream_id是否已被使用
-    if local_video_stream_manager.get_stream_status(stream_id):
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail=f"推流ID已被使用: {stream_id}，请使用其他ID或留空自动生成"
-        )
+    # 优先复用数据库中已有的 stream_id（保证重启后地址不变）
+    # 没有则生成新的随机 ID（避免多实例共用 WVP 时冲突）
+    if video.stream_id:
+        stream_id = video.stream_id
+    else:
+        stream_id = f"video_{uuid.uuid4().hex[:8]}"
     
     # 确定推流帧率
     stream_fps = request.stream_fps or video.stream_fps
@@ -464,21 +460,19 @@ def stop_stream(video_id: int, db: Session = Depends(get_db)):
     try:
         success = local_video_stream_manager.stop_stream(video.stream_id)
         
-        # 更新数据库状态
+        # 更新数据库状态（保留 stream_id，下次推流复用）
         video.is_streaming = False
-        video.stream_id = None
         db.commit()
         
-        logger.info(f"视频推流已停止: {video.name}")
+        logger.info(f"视频推流已停止: {video.name}，stream_id 已保留: {video.stream_id}")
         
         if not success:
             logger.warning(f"推流管理器报告停止失败，但已更新数据库状态")
         
     except Exception as e:
         logger.error(f"停止推流失败: {str(e)}", exc_info=True)
-        # 即使失败，也更新数据库状态
+        # 即使失败，也更新数据库状态（保留 stream_id）
         video.is_streaming = False
-        video.stream_id = None
         db.commit()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -512,9 +506,8 @@ def get_stream_status(video_id: int, db: Session = Depends(get_db)):
     status_info = local_video_stream_manager.get_stream_status(video.stream_id)
     
     if not status_info:
-        # 状态不一致，重置数据库
+        # 状态不一致，重置推流标记（保留 stream_id 供下次复用）
         video.is_streaming = False
-        video.stream_id = None
         db.commit()
         return None
     
