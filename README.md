@@ -1819,7 +1819,123 @@ curl http://localhost:8000/health
 
 ## 部署指南
 
-### 生产环境部署
+### Docker 部署（推荐）
+
+项目提供完整的 Docker 容器化部署方案，包含应用本体和所有基础设施服务。
+
+#### 前置要求
+
+| 组件 | 版本 | 说明 |
+|------|------|------|
+| Docker | 24.0+ | 容器运行时 |
+| Docker Compose | v2.20+ | 服务编排 |
+| NVIDIA Driver | 545+ | GPU 驱动 |
+| NVIDIA Container Toolkit | 最新版 | Docker GPU 支持 |
+
+#### 快速启动
+
+```bash
+# 1. 进入项目目录
+cd smart_engine
+
+# 2. 修改环境变量配置（根据实际情况修改 Triton、WVP、LLM 等外部服务地址）
+#    .env.docker 已提供默认配置，首次部署请确认以下关键项：
+#    - TRITON_URL：Triton 推理服务器地址
+#    - WVP_API_URL：WVP 视频平台地址
+#    - TEXT_LLM_BASE_URL / MULTIMODAL_LLM_BASE_URL：大模型服务地址
+vi .env.docker
+
+# 3. 构建并启动所有服务
+docker compose up -d
+
+# 4. 查看启动状态
+docker compose ps
+
+# 5. 查看应用日志
+docker compose logs -f smart-engine
+```
+
+#### 服务架构
+
+```
+docker compose up -d 将启动以下服务：
+
+┌────────────────────────────────────────────────────┐
+│  smart-engine (FastAPI应用)     :8000               │
+│  ├── AI任务执行引擎                                  │
+│  ├── 预警合并 & RabbitMQ推送                         │
+│  ├── SSE实时推送                                     │
+│  └── GPU加速推理 (NVIDIA)                            │
+├────────────────────────────────────────────────────┤
+│  mysql        :3306   │ 数据持久化                   │
+│  redis        :6379   │ 缓存 & 复判队列              │
+│  rabbitmq     :5672   │ 消息队列 (管理界面 :15672)    │
+│  minio        :9000   │ 对象存储 (控制台 :9001)       │
+└────────────────────────────────────────────────────┘
+
+外部服务（需独立部署）：
+  - Triton Inference Server：AI模型推理
+  - WVP 视频平台：摄像头管理
+  - Ollama / vLLM：大模型服务
+```
+
+#### 常用命令
+
+```bash
+# 启动所有服务
+docker compose up -d
+
+# 仅启动基础设施（不启动应用，用于本地开发）
+docker compose up -d mysql redis rabbitmq minio
+
+# 重新构建应用镜像
+docker compose build smart-engine
+
+# 查看所有服务日志
+docker compose logs -f
+
+# 停止所有服务（保留数据）
+docker compose down
+
+# 停止并删除所有数据卷（⚠️ 清除所有数据）
+docker compose down -v
+```
+
+#### 不需要 GPU 的场景
+
+如果部署环境没有 NVIDIA GPU，需要注释掉 `docker-compose.yml` 中的 GPU 配置：
+
+```yaml
+# 注释以下内容：
+# deploy:
+#   resources:
+#     reservations:
+#       devices:
+#         - driver: nvidia
+#           count: all
+#           capabilities: [gpu]
+```
+
+同时将 Dockerfile 基础镜像改为 `python:3.11-slim`（不包含 CUDA），torch 安装改用 CPU 版本。
+
+#### 安装 NVIDIA Container Toolkit
+
+```bash
+# Ubuntu/Debian
+curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | \
+  sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+  sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+  sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+sudo apt-get update && sudo apt-get install -y nvidia-container-toolkit
+sudo nvidia-ctk runtime configure --runtime=docker
+sudo systemctl restart docker
+
+# 验证 GPU 在 Docker 中可用
+docker run --rm --gpus all nvidia/cuda:12.6.3-base-ubuntu22.04 nvidia-smi
+```
+
+### 生产环境部署（非Docker）
 
 1. 使用Gunicorn启动
 ```bash

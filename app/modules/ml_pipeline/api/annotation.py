@@ -14,6 +14,7 @@ from app.modules.ml_pipeline.models.annotation import AnnotationImage, Annotatio
 from app.modules.ml_pipeline.services import annotation_service
 from app.modules.ml_pipeline.services.dataset_export_service import export_yolo_dataset
 from app.modules.ml_pipeline.services.label_studio_client import get_label_studio_client
+from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -41,10 +42,11 @@ async def label_studio_status():
     ls = get_label_studio_client()
     health = ls.health_check()
     conn = ls.test_connection()
+    public_url = settings.LABEL_STUDIO_PUBLIC_URL or ls.url
     return {
         "health": health,
         "connection": conn,
-        "url": ls.url,
+        "url": public_url,
     }
 
 

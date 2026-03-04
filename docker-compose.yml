@@ -1,0 +1,218 @@
+# ============================================================
+# Smart Vision Engine - Docker Compose
+# 一键部署：智能视觉AI分析引擎 + 基础设施
+# 使用方法：docker compose up -d
+# ============================================================
+
+services:
+
+  # ==================== 核心应用 ====================
+  smart-engine:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: smart-engine
+    restart: unless-stopped
+    ports:
+      - "${REST_PORT:-8000}:8000"
+    env_file:
+      - .env.docker
+    environment:
+      # 数据库连接（指向容器内MySQL）
+      - MYSQL_SERVER=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-root}
+      - MYSQL_DB=${MYSQL_DB:-smart_vision}
+      # Redis连接
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      # RabbitMQ连接
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_PASSWORD=${RABBITMQ_PASSWORD:-admin}
+      # MinIO连接（内部地址，后端连接用）
+      - MINIO_ENDPOINT=minio
+      - MINIO_PORT=9000
+      - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_SECRET_KEY:-minioadmin}
+      # MinIO公共地址（外部地址，生成图片URL给前端浏览器用）
+      - MINIO_PUBLIC_ENDPOINT=${MINIO_PUBLIC_ENDPOINT}
+      - MINIO_PUBLIC_PORT=${MINIO_API_PORT:-9300}
+      # Label Studio连接（内部地址，后端连接用）
+      - LABEL_STUDIO_URL=http://labelstudio:8080
+      # Label Studio公共地址（外部地址，前端浏览器跳转用）
+      - LABEL_STUDIO_PUBLIC_URL=${LABEL_STUDIO_PUBLIC_URL}
+      # 日志级别
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEBUG=false
+    volumes:
+      # 持久化存储
+      - smart-engine-static:/app/static
+      - smart-engine-logs:/app/logs
+      - smart-engine-data:/app/data
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - smart-engine-net
+    # GPU支持（需要安装 NVIDIA Container Toolkit）
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  # ==================== MySQL 数据库 ====================
+  mysql:
+    image: mysql:8.0
+    container_name: smart-engine-mysql
+    restart: unless-stopped
+    ports:
+      - "${MYSQL_EXTERNAL_PORT:-3306}:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_PASSWORD:-smart_vision_2024}
+      - MYSQL_DATABASE=${MYSQL_DB:-smart_vision}
+      - MYSQL_CHARSET=utf8mb4
+      - MYSQL_COLLATION=utf8mb4_unicode_ci
+      - TZ=Asia/Shanghai
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+      - --max-connections=500
+      - --innodb-buffer-pool-size=512M
+      - --innodb-log-file-size=128M
+      - --slow-query-log=1
+      - --long-query-time=2
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_PASSWORD:-smart_vision_2024}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - smart-engine-net
+
+  # ==================== Redis 缓存 ====================
+  redis:
+    image: redis:7-alpine
+    container_name: smart-engine-redis
+    restart: unless-stopped
+    ports:
+      - "${REDIS_EXTERNAL_PORT:-6379}:6379"
+    command: >
+      redis-server
+      --appendonly yes
+      --maxmemory 512mb
+      --maxmemory-policy allkeys-lru
+      ${REDIS_PASSWORD:+--requirepass ${REDIS_PASSWORD}}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - smart-engine-net
+
+  # ==================== RabbitMQ 消息队列 ====================
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: smart-engine-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "${RABBITMQ_EXTERNAL_PORT:-5672}:5672"     # AMQP
+      - "${RABBITMQ_MGMT_PORT:-15672}:15672"       # 管理界面
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-admin}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASSWORD:-admin}
+      - RABBITMQ_DEFAULT_VHOST=/
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - smart-engine-net
+
+  # ==================== MinIO 对象存储 ====================
+  minio:
+    image: minio/minio:latest
+    container_name: smart-engine-minio
+    restart: unless-stopped
+    ports:
+      - "${MINIO_API_PORT:-9300}:9000"             # API（外部9300 → 内部9000）
+      - "${MINIO_CONSOLE_PORT:-9301}:9001"         # 控制台
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ACCESS_KEY:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_SECRET_KEY:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - smart-engine-net
+
+  # ==================== Label Studio 数据标注 ====================
+  # ML Pipeline 模块使用，通过 ML_PIPELINE_ENABLED=true 启用
+  # 访问地址：http://localhost:8888
+  labelstudio:
+    image: heartexlabs/label-studio:latest
+    container_name: smart-engine-labelstudio
+    restart: unless-stopped
+    ports:
+      - "${LABEL_STUDIO_PORT:-8888}:8080"
+    environment:
+      - SECRET_KEY=${LABEL_STUDIO_SECRET_KEY:-smart-engine-ls-secret-2024}
+      - LABEL_STUDIO_USERNAME=${LABEL_STUDIO_USERNAME:-admin@admin.com}
+      - LABEL_STUDIO_PASSWORD=${LABEL_STUDIO_PASSWORD:-admin123456}
+    volumes:
+      - labelstudio-data:/label-studio/data
+    networks:
+      - smart-engine-net
+
+# ==================== 数据卷 ====================
+volumes:
+  mysql-data:
+    name: smart-engine-mysql-data
+  redis-data:
+    name: smart-engine-redis-data
+  rabbitmq-data:
+    name: smart-engine-rabbitmq-data
+  minio-data:
+    name: smart-engine-minio-data
+  labelstudio-data:
+    name: smart-engine-labelstudio-data
+  smart-engine-static:
+    name: smart-engine-static
+  smart-engine-logs:
+    name: smart-engine-logs
+  smart-engine-data:
+    name: smart-engine-data
+
+# ==================== 网络 ====================
+networks:
+  smart-engine-net:
+    name: smart-engine-net
+    driver: bridge

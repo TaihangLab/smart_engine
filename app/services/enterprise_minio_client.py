@@ -448,24 +448,37 @@ class EnterpriseMinIOClient:
         """上传字节数据（兼容性接口）"""
         return self.upload_bytes_with_retry(data, object_name, content_type, prefix)
     
+    @staticmethod
+    def _get_public_endpoint() -> str:
+        """获取MinIO公共访问地址（用于生成前端可访问的URL）"""
+        endpoint = settings.MINIO_PUBLIC_ENDPOINT or settings.MINIO_ENDPOINT
+        port = settings.MINIO_PUBLIC_PORT or settings.MINIO_PORT
+        return f"{endpoint}:{port}"
+
     def get_presigned_url(self, bucket_name: str, prefix: str, object_name: str, expires: int = 3600) -> str:
-        """获取预签名URL（兼容性接口）"""
+        """获取预签名URL（兼容性接口，使用公共地址）"""
         self._ensure_bucket()
         
         def _get_url_operation():
             full_object_name = f"{prefix}{object_name}"
-            return self.client.presigned_get_object(
+            url = self.client.presigned_get_object(
                 bucket_name=bucket_name,
                 object_name=full_object_name,
                 expires=timedelta(seconds=expires)
             )
+            internal = f"{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}"
+            public = self._get_public_endpoint()
+            if internal != public:
+                url = url.replace(internal, public, 1)
+            return url
         
         return self._execute_with_retry(_get_url_operation)
     
     def get_public_url(self, object_name: str) -> str:
-        """获取公共URL（兼容性接口）"""
+        """获取公共URL（兼容性接口，使用公共地址）"""
         protocol = "https" if settings.MINIO_SECURE else "http"
-        return f"{protocol}://{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}/{settings.MINIO_BUCKET}/{object_name}"
+        public = self._get_public_endpoint()
+        return f"{protocol}://{public}/{settings.MINIO_BUCKET}/{object_name}"
     
     def download_file(self, object_name: str) -> bytes:
         """下载文件（兼容性接口）"""

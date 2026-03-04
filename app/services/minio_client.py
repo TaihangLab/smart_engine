@@ -26,6 +26,13 @@ class MinioClient:
         self.client: Optional[Minio] = None
         self._bucket_checked: bool = False
     
+    @staticmethod
+    def _get_public_endpoint() -> str:
+        """获取MinIO公共访问地址（用于生成前端可访问的URL）"""
+        endpoint = settings.MINIO_PUBLIC_ENDPOINT or settings.MINIO_ENDPOINT
+        port = settings.MINIO_PUBLIC_PORT or settings.MINIO_PORT
+        return f"{endpoint}:{port}"
+    
     def _connect(self) -> None:
         """建立MinIO连接"""
         if self.client is not None:
@@ -39,6 +46,9 @@ class MinioClient:
                 secure=settings.MINIO_SECURE
             )
             logger.info(f"MinIO客户端连接成功: {settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}")
+            public_ep = self._get_public_endpoint()
+            if public_ep != f"{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}":
+                logger.info(f"MinIO公共访问地址: {public_ep}")
         except Exception as e:
             logger.error(f"MinIO客户端连接失败: {str(e)}")
             raise HTTPException(status_code=500, detail=f"MinIO客户端连接失败: {str(e)}")
@@ -124,19 +134,24 @@ class MinioClient:
             object_name: 对象名称
             expires: 链接有效期（秒），默认1小时            
         Returns:
-            str: 临时访问URL
+            str: 临时访问URL（使用公共地址，确保前端浏览器可访问）
         """
         try:
             self._ensure_bucket()
             
             object_name = f"{prefix}{object_name}"
 
-            # 生成临时URL
             url = self.client.presigned_get_object(
                 bucket_name=bucket_name,
                 object_name=object_name,
                 expires=timedelta(seconds=expires)
             )
+            # presigned URL 中的主机名是 MinIO 客户端的连接地址（可能是 Docker 内部地址）
+            # 替换为公共地址，确保前端浏览器能访问
+            internal = f"{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}"
+            public = self._get_public_endpoint()
+            if internal != public:
+                url = url.replace(internal, public, 1)
             return url
         except S3Error as err:
             logger.error(f"获取文件URL失败: {err}")
@@ -144,16 +159,17 @@ class MinioClient:
     
     def get_public_url(self, object_name: str) -> str:
         """
-        获取对象的公共访问URL (不带签名)
+        获取对象的公共访问URL (不带签名，使用公共地址)
         
         Args:
             object_name: 对象名称
             
         Returns:
-            str: 公共访问URL
+            str: 公共访问URL（前端浏览器可直接访问）
         """
         protocol = "https" if settings.MINIO_SECURE else "http"
-        return f"{protocol}://{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}/{settings.MINIO_BUCKET}/{object_name}"
+        public = self._get_public_endpoint()
+        return f"{protocol}://{public}/{settings.MINIO_BUCKET}/{object_name}"
     
     def download_file(self, object_name: str) -> bytes:
         """

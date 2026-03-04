@@ -30,7 +30,11 @@ class Settings(BaseSettings):
     # ==================== Label Studio 配置 ====================
     LABEL_STUDIO_URL: str = Field(
         default="http://172.18.1.1:8888",
-        description="Label Studio 服务地址"
+        description="Label Studio 服务地址（后端连接用）"
+    )
+    LABEL_STUDIO_PUBLIC_URL: str = Field(
+        default="",
+        description="Label Studio 公共访问地址（前端浏览器跳转用，留空=与LABEL_STUDIO_URL相同）"
     )
     LABEL_STUDIO_API_KEY: str = Field(
         default="",
@@ -125,12 +129,15 @@ class Settings(BaseSettings):
     # 数据库URL
     SQLALCHEMY_DATABASE_URI: Optional[str] = None
     
-    # MinIO配置
-    MINIO_ENDPOINT: str = Field(default="172.18.1.1", description="MinIO服务器地址")
-    MINIO_PORT: int = Field(default=9300, description="MinIO端口")
+    # MinIO配置（连接地址：后端连接MinIO用）
+    MINIO_ENDPOINT: str = Field(default="172.18.1.1", description="MinIO服务器地址（后端连接用）")
+    MINIO_PORT: int = Field(default=9300, description="MinIO端口（后端连接用）")
     MINIO_ACCESS_KEY: str = Field(default="minioadmin", description="MinIO访问密钥")
     MINIO_SECRET_KEY: str = Field(default="minioadmin", description="MinIO秘密密钥")
     MINIO_SECURE: bool = Field(default=False, description="MinIO是否使用HTTPS")
+    # MinIO公共访问地址（生成图片/视频URL给前端浏览器用，留空则使用MINIO_ENDPOINT和MINIO_PORT）
+    MINIO_PUBLIC_ENDPOINT: str = Field(default="", description="MinIO公共访问地址（前端浏览器用，留空=与MINIO_ENDPOINT相同）")
+    MINIO_PUBLIC_PORT: int = Field(default=0, description="MinIO公共访问端口（前端浏览器用，0=与MINIO_PORT相同）")
     MINIO_BUCKET: str = Field(default="visionai", description="MinIO存储桶名称")
     MINIO_SKILL_IMAGE_PREFIX: str = Field(default="skill-images/", description="技能图片前缀")
     MINIO_LLM_SKILL_ICON_PREFIX: str = Field(default="skill-icons/", description="大模型技能图标前缀")
