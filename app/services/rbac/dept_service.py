@@ -20,30 +20,29 @@ class DeptService:
 
     @staticmethod
     async def create_dept(db: AsyncSession, dept_data: Dict[str, Any]) -> SysDept:
-        """创建部门（异步）"""
+        """创建部门（异步）
+
+        Args:
+            dept_data: 部门数据，必须包含 tenant_id 字段（字符串类型）
+
+        Raises:
+            ValueError: 如果未提供 tenant_id 或 tenant_id 不是字符串类型
+        """
+        # 检查是否提供了 tenant_id
+        if 'tenant_id' not in dept_data:
+            raise ValueError("创建部门必须提供租户ID (tenant_id)")
+
+        tenant_id = dept_data['tenant_id']
+
+        # 确保tenant_id是字符串类型
+        if not isinstance(tenant_id, str):
+            raise ValueError(f"租户ID必须是字符串类型，当前类型: {type(tenant_id)}")
+
         # 如果 dept_data 中没有 id，则生成新的 ID
         if 'id' not in dept_data:
-            # 从tenant_id生成租户ID用于ID生成器
-            tenant_id = dept_data.get('tenant_id', 1000000000000001)  # 默认租户ID
-            # 确保tenant_id是整数
-            if isinstance(tenant_id, str):
-                # 如果是字符串，尝试转换为整数
-                try:
-                    tenant_id = int(tenant_id)
-                except ValueError:
-                    # 如果转换失败，使用默认值
-                    tenant_id = 1000000000000001
-
             # 生成新的部门ID
-            dept_id = generate_id(tenant_id, "dept")
+            dept_id = generate_id("dept")
             dept_data['id'] = dept_id
-        else:
-            # 使用传入的 ID，确保是整数
-            if isinstance(dept_data['id'], str):
-                try:
-                    dept_data['id'] = int(dept_data['id'])
-                except ValueError:
-                    raise ValueError(f"无效的部门 ID: {dept_data['id']}")
 
         try:
             dept = await RbacDao.dept.create_dept(db, dept_data)
@@ -99,12 +98,12 @@ class DeptService:
             raise e
 
     @staticmethod
-    async def get_dept_tree(db: AsyncSession, tenant_id: Optional[int] = None, name: Optional[str] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def get_dept_tree(db: AsyncSession, tenant_id: Optional[str] = None, name: Optional[str] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
         """获取部门树结构（异步）"""
         return await RbacDao.dept.get_dept_tree(db, tenant_id, name, status)
 
     @staticmethod
-    async def get_full_dept_tree(db: AsyncSession, tenant_id: Optional[int] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def get_full_dept_tree(db: AsyncSession, tenant_id: Optional[str] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
         """获取完整的部门树结构（异步）"""
         return await RbacDao.dept.get_full_dept_tree(db, tenant_id, status)
 

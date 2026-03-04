@@ -37,6 +37,8 @@ class RelationService:
     ) -> bool:
         """为用户分配角色（异步）"""
         try:
+            logger.info(f"[assign_role_to_user] 开始分配角色 - user_name: {user_name}, role_code: {role_code}, tenant_id: {tenant_id}")
+
             # 检查用户和角色是否存在
             user = await RbacDao.user.get_user_by_user_name(db, user_name, tenant_id)
             if not user:
@@ -46,17 +48,20 @@ class RelationService:
             if not role:
                 raise ValueError(f"角色 {role_code} 在租户 {tenant_id} 中不存在")
 
+            logger.info(f"[assign_role_to_user] 用户和角色存在 - user.id: {user.id}, user.tenant_id: {user.tenant_id}, role.id: {role.id}, role.tenant_id: {role.tenant_id}")
+
             # 检查租户匹配
             if user.tenant_id != tenant_id or role.tenant_id != tenant_id:
                 raise ValueError("用户和角色必须属于同一租户")
 
-            await RbacDao.user_role.assign_role_to_user(
+            result = await RbacDao.user_role.assign_role_to_user(
                 db, user_name, role_code, tenant_id
             )
-            logger.info(f"为用户 {user.user_name} 分配角色 {role.role_name}")
-            return True
+            logger.info(f"[assign_role_to_user] DAO层返回结果: {result}")
+            logger.info(f"为用户 {user.user_name} (ID: {user.id}) 分配角色 {role.role_name} (ID: {role.id})")
+            return result
         except Exception as e:
-            logger.error(f"分配角色失败: {str(e)}")
+            logger.error(f"分配角色失败: {str(e)}", exc_info=True)
             return False
 
     @staticmethod
@@ -226,6 +231,94 @@ class RelationService:
         except Exception as e:
             logger.error(f"分配权限失败: {str(e)}")
             return False
+
+    @staticmethod
+    async def batch_assign_permissions_to_role(
+        db: AsyncSession, role_code: str, permission_codes: List[str], tenant_id: str
+    ) -> dict:
+        """批量为角色分配权限（异步）
+
+        返回格式: {"success": [成功分配的权限码], "failed": [(权限码, 失败原因), ...], "skipped": [已存在的权限码]}
+        """
+        try:
+            # 检查角色是否存在
+            role = await RbacDao.role.get_role_by_code(db, role_code, tenant_id)
+            if not role:
+                return {
+                    "success": [],
+                    "failed": [(code, f"角色 {role_code} 不存在") for code in permission_codes],
+                    "skipped": [],
+                }
+
+            result = await RbacDao.role_permission.batch_assign_permissions_to_role(
+                db, role_code, permission_codes, tenant_id
+            )
+
+            if result["success"]:
+                logger.info(
+                    f"批量为角色 {role.role_code} 分配权限成功: {result['success']}"
+                )
+            if result["failed"]:
+                logger.warning(
+                    f"批量为角色 {role.role_code} 分配权限失败: {result['failed']}"
+                )
+            if result["skipped"]:
+                logger.info(
+                    f"批量为角色 {role.role_code} 分配权限跳过（已存在）: {result['skipped']}"
+                )
+
+            return result
+        except Exception as e:
+            logger.error(f"批量分配权限失败: {str(e)}", exc_info=True)
+            return {
+                "success": [],
+                "failed": [(code, str(e)) for code in permission_codes],
+                "skipped": [],
+            }
+
+    @staticmethod
+    async def batch_assign_permissions_to_role_by_id(
+        db: AsyncSession, role_id: int, permission_ids: List[int], tenant_id: str
+    ) -> dict:
+        """批量为角色分配权限（通过ID）（异步）
+
+        返回格式: {"success": [成功的权限ID], "failed": [(权限ID, 失败原因), ...], "skipped": [已存在的权限ID]}
+        """
+        try:
+            # 检查角色是否存在
+            role = await RbacDao.role.get_role_by_id(db, role_id)
+            if not role:
+                return {
+                    "success": [],
+                    "failed": [(pid, f"角色ID {role_id} 不存在") for pid in permission_ids],
+                    "skipped": [],
+                }
+
+            result = await RbacDao.role_permission.batch_assign_permissions_to_role_by_id(
+                db, role_id, permission_ids, tenant_id
+            )
+
+            if result["success"]:
+                logger.info(
+                    f"批量为角色 {role.role_name} (ID: {role.id}) 分配权限成功: {result['success']}"
+                )
+            if result["failed"]:
+                logger.warning(
+                    f"批量为角色 {role.role_name} (ID: {role.id}) 分配权限失败: {result['failed']}"
+                )
+            if result["skipped"]:
+                logger.info(
+                    f"批量为角色 {role.role_name} (ID: {role.id}) 分配权限跳过（已存在）: {result['skipped']}"
+                )
+
+            return result
+        except Exception as e:
+            logger.error(f"批量分配权限失败: {str(e)}", exc_info=True)
+            return {
+                "success": [],
+                "failed": [(pid, str(e)) for pid in permission_ids],
+                "skipped": [],
+            }
 
     @staticmethod
     async def remove_permission_from_role(

@@ -80,7 +80,7 @@ class PermissionCopyService:
         if role:
             return role
 
-        role_id = generate_id(0, "role_access")
+        role_id = generate_id("role_access")
         role = SysRole(
             id=role_id,
             role_code=RoleConstants.ROLE_ACCESS,
@@ -159,11 +159,6 @@ class PermissionCopyService:
         Returns:
             ROLE_ACCESS角色对象
         """
-        try:
-            tenant_id_int = int(tenant_id)
-        except ValueError:
-            tenant_id_int = abs(hash(tenant_id)) % 1000000000
-
         result = await db.execute(
             select(SysRole)
             .where(
@@ -171,11 +166,13 @@ class PermissionCopyService:
                 SysRole.role_code == RoleConstants.ROLE_ACCESS,
                 SysRole.is_deleted == False,
             )
+            .order_by(SysRole.id)  # 确保结果稳定，取ID最小的
         )
-        role = result.scalar_one_or_none()
+        role = result.scalars().first()  # 使用 first() 而不是 scalar_one_or_none()，允许多个角色存在
 
         if not role:
-            role_id = generate_id(tenant_id_int, "role_access")
+            # 生成新的角色ID（租户ID不再编码到ID中，传递固定值0）
+            role_id = generate_id("role_access")
             role = SysRole(
                 id=role_id,
                 role_code=RoleConstants.ROLE_ACCESS,
@@ -207,7 +204,8 @@ class PermissionCopyService:
 
             copied_count = 0
             for perm in template_permissions:
-                assoc_id = generate_id(tenant_id_int, "role_permission")
+                # 生成新的关联ID
+                assoc_id = generate_id("role_permission")
                 role_perm = SysRolePermission(
                     id=assoc_id, role_id=role.id, permission_id=perm.id
                 )
@@ -262,7 +260,8 @@ class PermissionCopyService:
 
             added_count = 0
             for perm_id in template_permission_ids - current_permission_ids:
-                assoc_id = generate_id(tenant_id, "role_permission")
+                # 生成新的关联ID
+                assoc_id = generate_id("role_permission")
                 role_perm = SysRolePermission(
                     id=assoc_id, role_id=role.id, permission_id=perm_id
                 )

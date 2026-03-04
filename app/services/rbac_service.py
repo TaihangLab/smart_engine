@@ -165,6 +165,9 @@ class RbacService:
     remove_role_from_user_by_id = RelationService.remove_role_from_user_by_id
     get_role_permissions_by_id = RelationService.get_role_permissions_by_id
     get_roles_by_permission_id = RelationService.get_roles_by_permission_by_id
+    # 批量授权方法
+    batch_assign_permissions_to_role = RelationService.batch_assign_permissions_to_role
+    batch_assign_permissions_to_role_by_id = RelationService.batch_assign_permissions_to_role_by_id
 
 __all__ = [
     # 新的服务类

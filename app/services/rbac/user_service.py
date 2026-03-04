@@ -117,16 +117,19 @@ class UserService:
     async def get_user_by_user_name(
         db: AsyncSession, user_name: str, tenant_id: str
     ) -> Optional[SysUser]:
-        """根据用户名和租户编码获取用户（异步）"""
-        # 由于tenant_id字段已替换为tenant_id，需要先将tenant_id转换为tenant_id
-        try:
-            tenant_id = int(tenant_id)
-            return await RbacDao.user.get_user_by_user_name_and_tenant_id(
-                db, user_name, tenant_id
-            )
-        except ValueError:
-            # 如果tenant_id不是数字，无法转换为ID，则返回None
-            return None
+        """根据用户名和租户ID获取用户（异步）
+
+        Args:
+            db: 数据库会话
+            user_name: 用户名
+            tenant_id: 租户ID（字符串类型）
+
+        Returns:
+            用户对象或None
+        """
+        return await RbacDao.user.get_user_by_user_name_and_tenant_id(
+            db, user_name, tenant_id
+        )
 
     @staticmethod
     async def get_user_by_id(db: AsyncSession, id: int) -> Optional[SysUser]:
@@ -165,44 +168,14 @@ class UserService:
                 f"用户 {user_data.get('user_name')} 在租户 {user_data.get('tenant_id')} 中已存在"
             )
 
-        # 获取tenant_id
+        # 获取tenant_id（必须提供）
         tenant_id = user_data.get("tenant_id")
         if tenant_id is None:
             raise ValueError("用户信息中缺少必需的 tenant_id 字段")
 
-        # 确保tenant_id是整数且在有效范围内
-        if not isinstance(tenant_id, int):
-            # 如果tenant_id是字符串，需要转换为整数
-            if isinstance(tenant_id, str):
-                # 对于"default"这样的字符串，使用默认值1
-                if tenant_id == "default":
-                    tenant_id = 1
-                else:
-                    # 对于其他字符串，尝试转换为整数
-                    try:
-                        tenant_id = int(tenant_id)
-                    except ValueError:
-                        raise ValueError(
-                            f"tenant_id 字段值 '{tenant_id}' 无法转换为整数"
-                        )
-            else:
-                # 如果是其他类型，尝试转换为整数
-                try:
-                    tenant_id = int(tenant_id)
-                except (ValueError, TypeError):
-                    raise ValueError(f"tenant_id 字段值 '{tenant_id}' 无法转换为整数")
-
-        # 验证tenant_id是否在有效范围内
-        if tenant_id < 0:
-            raise ValueError(f"tenant_id 值 {tenant_id} 必须是非负整数")
-        if tenant_id > 16383:
-            raise ValueError(f"tenant_id 值 {tenant_id} 超出有效范围 (0-16383)")
-
-        # 生成新的用户ID
-        user_id = generate_id(
-            tenant_id, "user"
-        )  # tenant_id不再直接编码到ID中，但可用于其他用途
-        user_data["id"] = user_id
+        # 确保tenant_id是字符串类型
+        if not isinstance(tenant_id, str):
+            raise ValueError(f"租户ID必须是字符串类型，当前类型: {type(tenant_id)}")
 
         user = await RbacDao.user.create_user(db, user_data)
         logger.info(f"创建用户成功: {user.user_name}@{user.tenant_id} (ID: {user.id})")

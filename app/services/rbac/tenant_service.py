@@ -18,7 +18,7 @@ class TenantService:
     """租户管理服务（异步）"""
 
     @staticmethod
-    async def get_tenant_by_id(db: AsyncSession, id: int) -> Optional[SysTenant]:
+    async def get_tenant_by_id(db: AsyncSession, id: str) -> Optional[SysTenant]:
         """根据租户ID获取租户（异步）"""
         return await RbacDao.tenant.get_tenant_by_id(db, id)
 
@@ -29,12 +29,25 @@ class TenantService:
 
     @staticmethod
     async def create_tenant(db: AsyncSession, tenant_data: Dict[str, Any]) -> SysTenant:
-        """创建租户（异步）"""
+        """创建租户（异步）
+
+        注意：如果尝试创建模板租户（ID=0），将直接返回已存在的模板租户对象
+        """
         from app.models.rbac.rbac_constants import TenantConstants
 
-        # 检查是否尝试创建租户0（模板租户）
-        if 'id' in tenant_data and tenant_data['id'] == TenantConstants.TEMPLATE_TENANT_ID:
-            raise ValueError(f"租户ID为{TenantConstants.TEMPLATE_TENANT_ID}是系统保留的模板租户ID，不能使用")
+        # 处理租户ID
+        if 'id' in tenant_data:
+            tenant_id_value = tenant_data['id']
+            # 租户ID必须是字符串类型
+            if not isinstance(tenant_id_value, str):
+                raise ValueError(f"租户ID必须是字符串类型，当前类型: {type(tenant_id_value)}")
+
+            # 如果尝试创建模板租户，直接返回已存在的对象
+            if tenant_id_value == TenantConstants.TEMPLATE_TENANT_ID:
+                existing_tenant = await RbacDao.tenant.get_tenant_by_id(db, tenant_id_value)
+                if existing_tenant:
+                    return existing_tenant
+                # 如果模板租户不存在（异常情况），继续创建流程
 
         # 检查统一社会信用代码是否已存在
         company_code = tenant_data.get("company_code")
@@ -52,24 +65,10 @@ class TenantService:
         if 'id' not in tenant_data:
             # 使用默认值生成租户ID用于ID生成器
             tenant_code_val = tenant_data.get('tenant_name', 'default')
-            # 简单的哈希算法生成租户ID，确保在允许范围内
-            tenant_id = sum(ord(c) for c in tenant_code_val) % 16384  # 限制在0-16383范围内
-
             # 生成新的租户ID
             from app.utils.id_generator import generate_id
-            tenant_id_value = generate_id(tenant_id, "tenant")
-        else:
-            # 使用传入的 ID，确保是整数
-            tenant_id_value = tenant_data['id']
-            if isinstance(tenant_id_value, str):
-                try:
-                    tenant_id_value = int(tenant_id_value)
-                except ValueError:
-                    raise ValueError(f"无效的租户 ID: {tenant_id_value}")
-
-            # 再次检查转换后的ID是否为0
-            if tenant_id_value == TenantConstants.TEMPLATE_TENANT_ID:
-                raise ValueError(f"租户ID为{TenantConstants.TEMPLATE_TENANT_ID}是系统保留的模板租户ID，不能使用")
+            tenant_id_value = generate_id("tenant")
+        # 注意：租户ID的类型和模板租户检查已在前面处理，此处直接使用 tenant_id_value
 
         # 只用SysTenant模型中实际存在的字段
         valid_fields = {

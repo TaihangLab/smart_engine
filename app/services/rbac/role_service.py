@@ -58,37 +58,26 @@ class RoleService:
 
     @staticmethod
     async def create_role(db: AsyncSession, role_data: Dict[str, Any]) -> SysRole:
-        """创建角色（异步）"""
-        # 获取tenant_id，确保它是整数类型
-        tenant_id = role_data.get('tenant_id', 1)  # 默认使用租户ID 1
+        """创建角色（异步）
 
-        # 确保tenant_id是整数且在有效范围内
-        if not isinstance(tenant_id, int):
-            # 如果tenant_id是字符串（如"default"），需要转换为整数
-            if isinstance(tenant_id, str):
-                # 对于"default"这样的字符串，使用默认值1
-                if tenant_id == "default":
-                    tenant_id = 1
-                else:
-                    # 对于其他字符串，尝试转换为整数
-                    try:
-                        tenant_id = int(tenant_id)
-                    except ValueError:
-                        # 如果转换失败，使用默认值
-                        tenant_id = 1
-            else:
-                # 如果是其他类型，尝试转换为整数
-                try:
-                    tenant_id = int(tenant_id)
-                except (ValueError, TypeError):
-                    tenant_id = 1  # 如果转换失败，使用默认值
+        Args:
+            role_data: 角色数据，必须包含 tenant_id 字段
 
-        # 验证tenant_id是否在有效范围内
-        if tenant_id < 0 or tenant_id > 16383:
-            tenant_id = 1  # 如果超出范围，使用默认值
+        Raises:
+            ValueError: 如果未提供 tenant_id 或 tenant_id 不是字符串类型
+        """
+        # 获取tenant_id（必须提供）
+        if 'tenant_id' not in role_data:
+            raise ValueError("创建角色必须提供租户ID (tenant_id)")
+
+        tenant_id = role_data['tenant_id']
+
+        # 确保tenant_id是字符串类型
+        if not isinstance(tenant_id, str):
+            raise ValueError(f"租户ID必须是字符串类型，当前类型: {type(tenant_id)}")
 
         # 生成新的角色ID
-        role_id = generate_id(tenant_id, "role")  # tenant_id不再直接编码到ID中，但可用于其他用途
+        role_id = generate_id("role")
         role_data['id'] = role_id
 
         role = await RbacDao.role.create_role(db, role_data)
@@ -125,7 +114,7 @@ class RoleService:
     @staticmethod
     async def delete_role_by_id(db: AsyncSession, id: int) -> bool:
         """删除角色（通过角色ID）（异步）"""
-        success = await RbacDao.role.delete_role_by_id(db, id)
+        success = await RbacDao.role.delete_role(db, id)
         if success:
             role = await RbacDao.role.get_role_by_id(db, id)
             if role:
