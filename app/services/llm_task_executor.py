@@ -768,7 +768,40 @@ class LLMTaskExecutor:
             
         except Exception as e:
             logger.error(f"调度LLM任务 {task.id} 失败: {str(e)}", exc_info=True)
-    
+
+    async def _schedule_task_async(self, task: LLMTask, db: AsyncSession):
+        """异步调度单个LLM任务"""
+        try:
+            # 获取技能类信息（使用异步查询）
+            result = await db.execute(
+                select(LLMSkillClass).filter(
+                    LLMSkillClass.skill_id == task.skill_id,
+                    LLMSkillClass.status == True
+                )
+            )
+            skill_class = result.scalars().first()
+
+            if not skill_class:
+                logger.warning(f"LLM任务 {task.id} 关联的技能类 {task.skill_id} 不存在或已禁用")
+                return
+
+            # 停止已存在的任务处理器
+            self._stop_task_processor(task.id)
+
+            # 创建新的任务处理器
+            processor = LLMTaskProcessor(task.id)
+
+            with self.lock:
+                self.task_processors[task.id] = processor
+
+            # 启动任务处理器
+            processor.start(task, skill_class)
+
+            logger.info(f"LLM任务 {task.id} ({task.name}) 已调度成功（异步模式）")
+
+        except Exception as e:
+            logger.error(f"异步调度LLM任务 {task.id} 失败: {str(e)}", exc_info=True)
+
     def _stop_task_processor(self, task_id: int):
         """停止指定的任务处理器"""
         with self.lock:

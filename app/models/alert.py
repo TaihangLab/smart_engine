@@ -10,16 +10,9 @@ from datetime import datetime
 from sqlalchemy import Column, String, DateTime, Float, JSON, BigInteger, Integer, Text, ForeignKey, Index, Boolean
 from sqlalchemy.orm import relationship
 
-# 条件导入TINYINT类型，提供MySQL优化的同时保持兼容性
-try:
-    from sqlalchemy.dialects.mysql import TINYINT
-    # MySQL环境下使用TINYINT优化存储
-    StatusType = TINYINT(unsigned=True)
-    logger_available = True
-except ImportError:
-    # 其他数据库环境下使用Integer
-    StatusType = Integer
-    logger_available = False
+# 使用 Integer 作为状态类型，确保在所有数据库环境下兼容
+# SQLite 不支持 TINYINT，而 Integer 在 MySQL 中也能提供良好的性能
+StatusType = Integer
 from pydantic import BaseModel, Field
 from enum import IntEnum
 

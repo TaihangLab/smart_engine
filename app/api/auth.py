@@ -52,14 +52,14 @@ async def login(
         # 获取客户端IP地址
         client_ip = request.client.host
 
-        logger.info(f"用户登录尝试: {login_request.username}, 租户: {login_request.tenantCode}, IP: {client_ip}")
+        logger.info(f"用户登录尝试: {login_request.username}, 租户: {login_request.tenant_id}, IP: {client_ip}")
 
         # 验证用户凭据
         user, error_msg = await AuthenticationService.authenticate_user(
             db,
             login_request.username,
             login_request.password,
-            login_request.tenantCode
+            login_request.tenant_id
         )
 
         if not user:
@@ -76,8 +76,8 @@ async def login(
         roles = await AuthenticationService.get_user_roles(db, user.id, user.user_name, user.tenant_id)
         permissions = await AuthenticationService.get_user_permissions(db, user.id, user.user_name, user.tenant_id)
 
-        # 生成adminToken
-        admin_token = AuthenticationService.generate_admin_token(user, roles, permissions)
+        # 生成adminToken（异步调用）
+        admin_token = await AuthenticationService.generate_admin_token(db, user, roles, permissions)
 
         # 创建新的登录响应
         login_response = AuthenticationService.create_new_login_response(user, roles, permissions, admin_token)

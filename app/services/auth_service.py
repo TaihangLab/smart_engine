@@ -29,7 +29,7 @@ class AuthenticationService:
     """认证服务类（异步）"""
 
     @staticmethod
-    async def authenticate_user(db: AsyncSession, username: str, password: str, tenant_code: str = None) -> Tuple[Optional[SysUser], Optional[str]]:
+    async def authenticate_user(db: AsyncSession, username: str, password: str, tenant_id: str = None) -> Tuple[Optional[SysUser], Optional[str]]:
         """
         验证用户凭据（异步）
 
@@ -37,7 +37,7 @@ class AuthenticationService:
             db: 异步数据库会话
             username: 用户名
             password: 明文密码
-            tenant_code: 租户编码
+            tenant_id: 租户ID
 
         Returns:
             (用户对象, 错误信息)
@@ -49,15 +49,11 @@ class AuthenticationService:
                 SysUser.is_deleted == False
             )
 
-            # 如果提供了租户编码，按租户过滤
-            if tenant_code:
-                # 如果tenant_code是数字，转换为整数
-                try:
-                    tenant_id = int(tenant_code)
-                    stmt = stmt.filter(SysUser.tenant_id == str(tenant_id))
-                except ValueError:
-                    # 如果tenant_code不是数字，直接使用字符串
-                    stmt = stmt.filter(SysUser.tenant_id == tenant_code)
+            # 如果提供了租户ID，按租户过滤（租户ID必须是字符串类型）
+            if tenant_id:
+                # 确保是字符串类型
+                tenant_id_str = str(tenant_id)
+                stmt = stmt.filter(SysUser.tenant_id == tenant_id_str)
 
             result = await db.execute(stmt)
             user = result.scalars().first()
@@ -127,8 +123,8 @@ class AuthenticationService:
         """
         try:
             permissions = await BaseRbacService.get_user_permission_list(db, user_name, tenant_id)
-            # 提取权限编码作为权限列表
-            return [perm.get('permission_code', '') for perm in permissions if perm.get('permission_code')]
+            # 提取权限编码作为权限列表（permissions 是 SysPermission 对象列表）
+            return [perm.permission_code for perm in permissions if perm.permission_code]
         except Exception as e:
             logger.error(f"获取用户权限列表失败: {str(e)}", exc_info=True)
             return []
@@ -209,7 +205,7 @@ class AuthenticationService:
         user_info = UserInfo(
             userId=str(user.id),
             username=user.user_name,
-            tenantCode=str(user.tenant_id),
+            tenant_id=str(user.tenant_id),
             roles=roles,
             permissions=permissions
         )

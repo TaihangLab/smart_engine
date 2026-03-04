@@ -4,6 +4,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, Request
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
+from sqlalchemy.ext.asyncio import AsyncSession
 import asyncio
 import math
 from sqlalchemy import desc
@@ -12,6 +13,7 @@ import csv
 import io
 
 from app.db.session import get_db
+from app.db.async_session import get_async_db
 from app.models.alert import Alert, AlertResponse, AlertUpdate, AlertStatus
 from app.services.alert_service import alert_service, register_sse_client, unregister_sse_client, publish_test_alert, connected_clients
 # 导入JWT用户信息相关功能
@@ -302,7 +304,7 @@ def get_sse_status():
 
 @router.get("/statistics", description="获取报警统计信息")
 async def get_alert_statistics(
-    db: Session = Depends(get_db),
+    db: AsyncSession = Depends(get_async_db),
     days: int = Query(30, ge=1, le=3650, description="统计天数，设为3650可统计约10年数据"),
     all_time: bool = Query(False, description="是否统计全部历史数据（忽略时间范围）")
 ):
@@ -333,19 +335,14 @@ async def get_alert_statistics(
             start_date = datetime(2000, 1, 1)
         else:
             start_date = end_date - timedelta(days=days)
-        
-        # 计算时间范围
-        from datetime import datetime, timedelta
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=days)
-        
+
         # 获取统计数据
         stats = await alert_service.get_alert_statistics(
             db=db,
             start_date=start_date,
             end_date=end_date
         )
-        
+
         return {
             "success": True,
             "time_range": {

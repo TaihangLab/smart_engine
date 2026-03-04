@@ -121,12 +121,12 @@ def _parse_review_response(response_text: str) -> tuple[Dict[str, Any], bool]:
         
         # 查找明确的true/false标识
         if any(pattern in response_lower for pattern in [
-            '"判断结果":\s*true', '"判断结果": true', 
+            r'"判断结果":\s*true', '"判断结果": true',
             'true', '结果为true', '答案是true', '判断为true'
         ]):
             review_result = True
         elif any(pattern in response_lower for pattern in [
-            '"判断结果":\s*false', '"判断结果": false',
+            r'"判断结果":\s*false', '"判断结果": false',
             'false', '结果为false', '答案是false', '判断为false'
         ]):
             review_result = False

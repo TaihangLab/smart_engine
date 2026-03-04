@@ -24,10 +24,12 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, Optional, List
 from concurrent.futures import ThreadPoolExecutor
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc, func, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy import and_, or_, desc, func, text, select
 
 from app.core.config import settings
 from app.db.session import SessionLocal
+from app.db.async_session import AsyncSessionLocal
 from app.models.compensation import (
     AlertPublishLog, AlertNotificationLog, CompensationTaskLog,
     PublishStatus, NotificationStatus, NotificationChannel, CompensationTaskType,
@@ -193,25 +195,24 @@ class UnifiedCompensationService:
         """初始化补偿服务"""
         if self.is_initialized:
             return
-            
+
         logger.info("🔧 初始化补偿服务...")
-        
+
         try:
-            # 检查数据库连接
-            db = SessionLocal()
-            db.execute(text("SELECT 1"))
-            db.close()
+            # 检查数据库连接（使用异步方式）
+            async with AsyncSessionLocal() as db:
+                await db.execute(text("SELECT 1"))
             logger.info("✅ 数据库连接正常")
-            
+
             # 检查RabbitMQ连接
             if rabbitmq_client.is_connected:
                 logger.info("✅ RabbitMQ连接正常")
             else:
                 logger.warning("⚠️ RabbitMQ连接异常，补偿功能可能受影响")
-            
+
             self.is_initialized = True
             logger.info("✅ 补偿服务初始化完成")
-            
+
         except Exception as e:
             logger.error(f"❌ 补偿服务初始化失败: {e}")
             raise
@@ -263,7 +264,7 @@ class UnifiedCompensationService:
     async def _compensate_producer(self) -> Dict[str, Any]:
         """
         🚀 生产端补偿 - 重新发送失败的消息到RabbitMQ
-        
+
         处理逻辑：
         1. 查找PENDING或FAILED状态的发布记录
         2. 检查重试次数限制
@@ -271,87 +272,89 @@ class UnifiedCompensationService:
         4. 更新发布状态和统计信息
         """
         logger.debug("🚀 开始生产端补偿")
-        
-        db = SessionLocal()
+
+        # 使用异步数据库会话
         compensated_count = 0
-        
-        try:
-            # 查找需要补偿的发布记录
-            failed_publishes = db.query(AlertPublishLog).filter(
-                and_(
-                    AlertPublishLog.status.in_([
-                        PublishStatus.PENDING, 
-                        PublishStatus.FAILED
-                    ]),
-                    AlertPublishLog.retries < AlertPublishLog.max_retries,
-                    AlertPublishLog.created_at > datetime.utcnow() - timedelta(
-                        hours=settings.ALERT_MAX_RETRY_HOURS
-                    )
+
+        async with AsyncSessionLocal() as db:
+            try:
+                # 查找需要补偿的发布记录
+                result = await db.execute(
+                    select(AlertPublishLog).filter(
+                        and_(
+                            AlertPublishLog.status.in_([
+                                PublishStatus.PENDING,
+                                PublishStatus.FAILED
+                            ]),
+                            AlertPublishLog.retries < AlertPublishLog.max_retries,
+                            AlertPublishLog.created_at > datetime.utcnow() - timedelta(
+                                hours=settings.ALERT_MAX_RETRY_HOURS
+                            )
+                        )
+                    ).order_by(AlertPublishLog.created_at.asc()).limit(self.batch_size)
                 )
-            ).order_by(AlertPublishLog.created_at.asc()).limit(self.batch_size).all()
-            
-            logger.info(f"🔍 发现 {len(failed_publishes)} 个待补偿的发布任务")
-            
-            for publish_log in failed_publishes:
-                try:
-                    # 计算退避时间
-                    backoff_seconds = self._calculate_backoff_time(
-                        publish_log.retries, settings.PRODUCER_RETRY_INTERVAL
-                    )
-                    
-                    # 检查是否到了重试时间
-                    if (datetime.utcnow() - publish_log.updated_at).total_seconds() < backoff_seconds:
-                        continue
-                    
-                    # 更新状态为补偿中
-                    publish_log.status = PublishStatus.COMPENSATING
-                    publish_log.retries += 1
-                    publish_log.updated_at = datetime.utcnow()
-                    db.commit()
-                    
-                    # 重新发送消息
-                    success = rabbitmq_client.publish_alert(publish_log.payload)
-                    
-                    if success:
-                        publish_log.status = PublishStatus.ENQUEUED
-                        publish_log.sent_at = datetime.utcnow()
-                        publish_log.error_message = None
-                        compensated_count += 1
-                        
-                        logger.info(f"✅ 生产端补偿成功: {publish_log.message_id} (重试 {publish_log.retries})")
-                    else:
+                failed_publishes = result.scalars().all()
+
+                logger.info(f"🔍 发现 {len(failed_publishes)} 个待补偿的发布任务")
+
+                for publish_log in failed_publishes:
+                    try:
+                        # 计算退避时间
+                        backoff_seconds = self._calculate_backoff_time(
+                            publish_log.retries, settings.PRODUCER_RETRY_INTERVAL
+                        )
+
+                        # 检查是否到了重试时间
+                        if (datetime.utcnow() - publish_log.updated_at).total_seconds() < backoff_seconds:
+                            continue
+
+                        # 更新状态为补偿中
+                        publish_log.status = PublishStatus.COMPENSATING
+                        publish_log.retries += 1
+                        publish_log.updated_at = datetime.utcnow()
+                        await db.commit()
+
+                        # 重新发送消息
+                        success = rabbitmq_client.publish_alert(publish_log.payload)
+
+                        if success:
+                            publish_log.status = PublishStatus.ENQUEUED
+                            publish_log.sent_at = datetime.utcnow()
+                            publish_log.error_message = None
+                            compensated_count += 1
+
+                            logger.info(f"✅ 生产端补偿成功: {publish_log.message_id} (重试 {publish_log.retries})")
+                        else:
+                            publish_log.status = PublishStatus.FAILED
+                            publish_log.error_message = "RabbitMQ发布失败"
+
+                            # 检查是否超过最大重试次数
+                            if publish_log.retries >= publish_log.max_retries:
+                                logger.error(f"💀 生产端补偿彻底失败: {publish_log.message_id}")
+
+                        await db.commit()
+
+                    except Exception as e:
                         publish_log.status = PublishStatus.FAILED
-                        publish_log.error_message = "RabbitMQ发布失败"
-                        
-                        # 检查是否超过最大重试次数
-                        if publish_log.retries >= publish_log.max_retries:
-                            logger.error(f"💀 生产端补偿彻底失败: {publish_log.message_id}")
-                        
-                    db.commit()
-                    
-                except Exception as e:
-                    publish_log.status = PublishStatus.FAILED
-                    publish_log.error_message = f"补偿异常: {str(e)}"
-                    db.commit()
-                    logger.error(f"❌ 生产端补偿失败: {publish_log.message_id} - {str(e)}")
-            
-            # 更新统计
-            self.stats.increment_compensation("producer", compensated_count)
-            
-            logger.info(f"🚀 生产端补偿完成: 成功补偿 {compensated_count} 个消息")
-            
-            return {
-                "layer": "producer",
-                "processed": len(failed_publishes),
-                "compensated": compensated_count,
-                "status": "success"
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 生产端补偿执行失败: {str(e)}")
-            raise
-        finally:
-            db.close()
+                        publish_log.error_message = f"补偿异常: {str(e)}"
+                        await db.commit()
+                        logger.error(f"❌ 生产端补偿失败: {publish_log.message_id} - {str(e)}")
+
+                # 更新统计
+                self.stats.increment_compensation("producer", compensated_count)
+
+                logger.info(f"🚀 生产端补偿完成: 成功补偿 {compensated_count} 个消息")
+
+                return {
+                    "layer": "producer",
+                    "processed": len(failed_publishes),
+                    "compensated": compensated_count,
+                    "status": "success"
+                }
+
+            except Exception as e:
+                logger.error(f"❌ 生产端补偿执行失败: {str(e)}")
+                raise
     
     async def _compensate_consumer(self) -> Dict[str, Any]:
         """
@@ -446,7 +449,7 @@ class UnifiedCompensationService:
     async def _compensate_notification(self) -> Dict[str, Any]:
         """
         📡 通知端补偿 - 重新发送失败的SSE通知
-        
+
         处理逻辑：
         1. 查找PENDING或FAILED状态的通知记录
         2. 检查ACK超时和重试次数
@@ -454,98 +457,99 @@ class UnifiedCompensationService:
         4. 支持多通道降级（SSE失败可降级到其他通道）
         """
         logger.debug("📡 开始通知端补偿")
-        
-        db = SessionLocal()
+
         compensated_count = 0
-        
-        try:
-            # 查找需要补偿的通知记录
-            failed_notifications = db.query(AlertNotificationLog).filter(
-                and_(
-                    AlertNotificationLog.status.in_([
-                        NotificationStatus.PENDING,
-                        NotificationStatus.FAILED,
-                        NotificationStatus.SENDING
-                    ]),
-                    AlertNotificationLog.retries < AlertNotificationLog.max_retries,
-                    AlertNotificationLog.created_at > datetime.utcnow() - timedelta(
-                        hours=settings.NOTIFICATION_COMPENSATION_INTERVAL // 3600 * 6
-                    )
+
+        async with AsyncSessionLocal() as db:
+            try:
+                # 查找需要补偿的通知记录
+                result = await db.execute(
+                    select(AlertNotificationLog).filter(
+                        and_(
+                            AlertNotificationLog.status.in_([
+                                NotificationStatus.PENDING,
+                                NotificationStatus.FAILED,
+                                NotificationStatus.SENDING
+                            ]),
+                            AlertNotificationLog.retries < AlertNotificationLog.max_retries,
+                            AlertNotificationLog.created_at > datetime.utcnow() - timedelta(
+                                hours=settings.NOTIFICATION_COMPENSATION_INTERVAL // 3600 * 6
+                            )
+                        )
+                    ).order_by(AlertNotificationLog.created_at.asc()).limit(self.batch_size)
                 )
-            ).order_by(AlertNotificationLog.created_at.asc()).limit(self.batch_size).all()
-            
-            logger.info(f"🔍 发现 {len(failed_notifications)} 个待补偿的通知任务")
-            
-            for notification_log in failed_notifications:
-                try:
-                    # 检查ACK超时
-                    if (notification_log.status == NotificationStatus.SENDING and
-                        notification_log.ack_required and
-                        notification_log.sent_at):
-                        
-                        ack_timeout = timedelta(seconds=notification_log.ack_timeout_seconds)
-                        if datetime.utcnow() - notification_log.sent_at < ack_timeout:
-                            continue  # 还没有超时
-                    
-                    # 计算退避时间
-                    backoff_seconds = self._calculate_backoff_time(
-                        notification_log.retries, settings.SSE_NOTIFICATION_RETRY_INTERVAL
-                    )
-                    
-                    if (datetime.utcnow() - notification_log.updated_at).total_seconds() < backoff_seconds:
-                        continue
-                    
-                    # 更新重试信息
-                    notification_log.retries += 1
-                    notification_log.status = NotificationStatus.SENDING
-                    notification_log.updated_at = datetime.utcnow()
-                    db.commit()
-                    
-                    # 重新发送通知
-                    success = await self._resend_notification(notification_log)
-                    
-                    if success:
-                        notification_log.status = NotificationStatus.DELIVERED
-                        notification_log.sent_at = datetime.utcnow()
-                        notification_log.error_message = None
-                        compensated_count += 1
-                        
-                        logger.info(f"✅ 通知端补偿成功: ID={notification_log.id} "
-                                   f"Alert={notification_log.alert_id} (重试 {notification_log.retries})")
-                    else:
+                failed_notifications = result.scalars().all()
+
+                logger.info(f"🔍 发现 {len(failed_notifications)} 个待补偿的通知任务")
+
+                for notification_log in failed_notifications:
+                    try:
+                        # 检查ACK超时
+                        if (notification_log.status == NotificationStatus.SENDING and
+                            notification_log.ack_required and
+                            notification_log.sent_at):
+
+                            ack_timeout = timedelta(seconds=notification_log.ack_timeout_seconds)
+                            if datetime.utcnow() - notification_log.sent_at < ack_timeout:
+                                continue  # 还没有超时
+
+                        # 计算退避时间
+                        backoff_seconds = self._calculate_backoff_time(
+                            notification_log.retries, settings.SSE_NOTIFICATION_RETRY_INTERVAL
+                        )
+
+                        if (datetime.utcnow() - notification_log.updated_at).total_seconds() < backoff_seconds:
+                            continue
+
+                        # 更新重试信息
+                        notification_log.retries += 1
+                        notification_log.status = NotificationStatus.SENDING
+                        notification_log.updated_at = datetime.utcnow()
+                        await db.commit()
+
+                        # 重新发送通知
+                        success = await self._resend_notification(notification_log)
+
+                        if success:
+                            notification_log.status = NotificationStatus.DELIVERED
+                            notification_log.sent_at = datetime.utcnow()
+                            notification_log.error_message = None
+                            compensated_count += 1
+
+                            logger.info(f"✅ 通知端补偿成功: ID={notification_log.id} "
+                                       f"Alert={notification_log.alert_id} (重试 {notification_log.retries})")
+                        else:
+                            notification_log.status = NotificationStatus.FAILED
+                            notification_log.error_message = "SSE发送失败"
+
+                            # 检查是否需要降级处理
+                            if notification_log.retries >= notification_log.max_retries:
+                                logger.warning(f"📧 通知彻底失败，考虑降级处理: Alert={notification_log.alert_id}")
+                                # 这里可以实现降级到邮件等其他通道
+
+                        await db.commit()
+
+                    except Exception as e:
                         notification_log.status = NotificationStatus.FAILED
-                        notification_log.error_message = "SSE发送失败"
-                        
-                        # 检查是否需要降级处理
-                        if notification_log.retries >= notification_log.max_retries:
-                            logger.warning(f"📧 通知彻底失败，考虑降级处理: Alert={notification_log.alert_id}")
-                            # 这里可以实现降级到邮件等其他通道
-                    
-                    db.commit()
-                    
-                except Exception as e:
-                    notification_log.status = NotificationStatus.FAILED
-                    notification_log.error_message = f"补偿异常: {str(e)}"
-                    db.commit()
-                    logger.error(f"❌ 通知端补偿失败: ID={notification_log.id} - {str(e)}")
-            
-            # 更新统计
-            self.stats.increment_compensation("notification", compensated_count)
-            
-            logger.info(f"📡 通知端补偿完成: 成功补偿 {compensated_count} 个通知")
-            
-            return {
-                "layer": "notification",
-                "processed": len(failed_notifications),
-                "compensated": compensated_count,
-                "status": "success"
-            }
-            
-        except Exception as e:
-            logger.error(f"❌ 通知端补偿执行失败: {str(e)}")
-            raise
-        finally:
-            db.close()
+                        notification_log.error_message = f"补偿异常: {str(e)}"
+                        await db.commit()
+                        logger.error(f"❌ 通知端补偿失败: ID={notification_log.id} - {str(e)}")
+
+                # 更新统计
+                self.stats.increment_compensation("notification", compensated_count)
+
+                logger.info(f"📡 通知端补偿完成: 成功补偿 {compensated_count} 个通知")
+
+                return {
+                    "layer": "notification",
+                    "processed": len(failed_notifications),
+                    "compensated": compensated_count,
+                    "status": "success"
+                }
+
+            except Exception as e:
+                logger.error(f"❌ 通知端补偿执行失败: {str(e)}")
+                raise
     
     async def _resend_notification(self, notification_log: AlertNotificationLog) -> bool:
         """重新发送通知"""
@@ -582,49 +586,48 @@ class UnifiedCompensationService:
     
     async def _log_compensation_task(self, task_id: str, task_type: CompensationTaskType):
         """记录补偿任务开始"""
-        db = SessionLocal()
-        try:
-            task_log = CompensationTaskLog(
-                task_id=task_id,
-                task_type=task_type,
-                execution_result="running",
-                started_at=datetime.utcnow(),
-                executor_host=socket.gethostname() if 'socket' in globals() else "unknown"
-            )
-            db.add(task_log)
-            db.commit()
-        except Exception as e:
-            logger.error(f"❌ 记录补偿任务失败: {str(e)}")
-        finally:
-            db.close()
+        async with AsyncSessionLocal() as db:
+            try:
+                task_log = CompensationTaskLog(
+                    task_id=task_id,
+                    task_type=task_type,
+                    execution_result="running",
+                    started_at=datetime.utcnow(),
+                    executor_host="unknown"  # 简化处理
+                )
+                db.add(task_log)
+                await db.commit()
+            except Exception as e:
+                logger.error(f"❌ 记录补偿任务失败: {str(e)}")
     
-    async def _complete_compensation_task(self, task_id: str, result: str, 
-                                        success_count: int, failed_count: int, 
+    async def _complete_compensation_task(self, task_id: str, result: str,
+                                        success_count: int, failed_count: int,
                                         error_message: str = None):
         """完成补偿任务记录"""
-        db = SessionLocal()
-        try:
-            task_log = db.query(CompensationTaskLog).filter(
-                CompensationTaskLog.task_id == task_id
-            ).first()
-            
-            if task_log:
-                task_log.execution_result = result
-                task_log.completed_at = datetime.utcnow()
-                task_log.success_count = success_count
-                task_log.failed_count = failed_count
-                task_log.processed_count = success_count + failed_count
-                task_log.error_message = error_message
-                
-                if task_log.started_at:
-                    duration = (task_log.completed_at - task_log.started_at).total_seconds()
-                    task_log.duration_ms = int(duration * 1000)
-                
-                db.commit()
-        except Exception as e:
-            logger.error(f"❌ 完成补偿任务记录失败: {str(e)}")
-        finally:
-            db.close()
+        async with AsyncSessionLocal() as db:
+            try:
+                result = await db.execute(
+                    select(CompensationTaskLog).filter(
+                        CompensationTaskLog.task_id == task_id
+                    )
+                )
+                task_log = result.scalars().first()
+
+                if task_log:
+                    task_log.execution_result = result
+                    task_log.completed_at = datetime.utcnow()
+                    task_log.success_count = success_count
+                    task_log.failed_count = failed_count
+                    task_log.processed_count = success_count + failed_count
+                    task_log.error_message = error_message
+
+                    if task_log.started_at:
+                        duration = (task_log.completed_at - task_log.started_at).total_seconds()
+                        task_log.duration_ms = int(duration * 1000)
+
+                    await db.commit()
+            except Exception as e:
+                logger.error(f"❌ 完成补偿任务记录失败: {str(e)}")
     
     async def _log_permanent_failure(self, message_data: Dict[str, Any], reason: str):
         """记录永久失败的消息"""
@@ -716,8 +719,8 @@ def get_compensation_service_stats() -> Dict[str, Any]:
 
 async def get_compensation_health() -> Dict[str, Any]:
     """获取补偿服务健康状态"""
-    stats = unified_compensation_service.get_compensation_stats()
-    
+    stats = _get_unified_compensation_service().get_compensation_stats()
+
     # 计算健康分数
     health_score = 100
     issues = []

@@ -15,7 +15,7 @@ class LoginRequest(BaseModel):
     """登录请求模型"""
     username: str = Field(..., description="用户名", min_length=1, max_length=64)
     password: str = Field(..., description="密码", min_length=1, max_length=128)
-    tenantCode: str = Field(..., description="租户编码", min_length=1, max_length=64)
+    tenant_id: str = Field(..., description="租户ID", min_length=1, max_length=64)
 
     @validator('username')
     def validate_username(cls, v):
@@ -29,7 +29,7 @@ class UserInfo(BaseModel):
     """用户信息模型"""
     userId: str = Field(..., description="用户ID")
     username: str = Field(..., description="用户名")
-    tenantCode: str = Field(..., description="租户编码")
+    tenant_id: str = Field(..., description="租户ID")
     roles: List[str] = Field(default=[], description="用户角色列表")
     permissions: List[str] = Field(default=[], description="用户权限列表")
 

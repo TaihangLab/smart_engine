@@ -60,18 +60,17 @@ class IdGenerator:
             timestamp = self._get_timestamp()
         return timestamp
 
-    def generate_id(self, tenant_id: int, entity_type: str = "common") -> int:
+    def generate_id(self, entity_type: str = "common") -> int:
         """生成通用ID
 
         Args:
-            tenant_id: 租户ID，不再直接编码到ID中，但可用于其他用途
             entity_type: 实体类型，用于区分不同类型的ID（目前未使用，保留扩展性）
 
         Returns:
             int: 生成的ID
 
         Raises:
-            ValueError: 当租户ID超出范围时
+            RuntimeError: 当系统时间回拨时
         """
         # 生成一个随机部分，用于增加ID的随机性
         import random
@@ -148,17 +147,21 @@ class IdGenerator:
 id_generator = IdGenerator()
 
 
-def generate_id(tenant_id: int = 0, entity_type: str = "common") -> int:
+def generate_id(entity_type: str = "common") -> int:
     """生成通用ID的便捷函数
 
     Args:
-        tenant_id: 租户ID，不再直接编码到ID中，但可用于其他用途
-        entity_type: 实体类型，用于区分不同类型的ID
+        entity_type: 实体类型，用于区分不同类型的ID（目前未使用，保留扩展性）
 
     Returns:
         int: 生成的ID
+
+    Examples:
+        >>> generate_id()  # 生成通用ID
+        >>> generate_id("user")  # 生成用户类型的ID
+        >>> generate_id("role")  # 生成角色类型的ID
     """
-    return id_generator.generate_id(tenant_id, entity_type)
+    return id_generator.generate_id(entity_type)
 
 
 def get_tenant_id_from_id(entity_id: int) -> int:
@@ -183,45 +186,3 @@ def get_real_timestamp_from_id(entity_id: int) -> int:
         int: 真实的Unix时间戳
     """
     return id_generator.get_real_timestamp_from_id(entity_id)
-
-
-if __name__ == "__main__":
-    # 测试ID生成器
-    print("测试ID生成器:")
-
-    # 生成几个ID
-    for i in range(5):
-        entity_id = generate_id(123, "user")
-        tenant_id = get_tenant_id_from_id(entity_id)
-        real_timestamp = get_real_timestamp_from_id(entity_id)
-
-        # 解析ID的组成部分
-        timestamp, random_part, sequence = id_generator.get_info_from_id(entity_id)
-
-        print(f"生成的ID: {entity_id}")
-        print(f"ID长度: {len(str(entity_id))} 位")
-        print(f"ID二进制表示: {bin(entity_id)}")
-        print(f"解析出的租户ID: {tenant_id} (注意：租户ID不再编码到ID中，始终返回0)")
-        print(f"解析出的时间戳: {timestamp}")
-        print(f"解析出的随机部分: {random_part}")
-        print(f"解析出的序列号: {sequence}")
-        print(f"真实时间戳: {real_timestamp}")
-        print(f"对应时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(real_timestamp))}")
-        print("---")
-
-        # 短暂延迟，确保时间戳变化
-        time.sleep(1)
-
-    # 测试大租户ID的情况
-    print("\n测试大租户ID的情况:")
-    large_tenant_id = 34557705322560  # 这是一个大租户ID
-    entity_id_with_large_tenant = generate_id(large_tenant_id, "user")
-    timestamp, random_part, sequence = id_generator.get_info_from_id(entity_id_with_large_tenant)
-
-    print(f"使用大租户ID {large_tenant_id} 生成的ID: {entity_id_with_large_tenant}")
-    print(f"ID长度: {len(str(entity_id_with_large_tenant))} 位")
-    print(f"解析出的时间戳: {timestamp}")
-    print(f"解析出的随机部分: {random_part}")
-    print(f"解析出的序列号: {sequence}")
-    print(f"真实时间戳: {get_real_timestamp_from_id(entity_id_with_large_tenant)}")
-    print(f"对应时间: {time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(get_real_timestamp_from_id(entity_id_with_large_tenant)))}")
