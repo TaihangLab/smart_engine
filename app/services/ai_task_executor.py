@@ -664,7 +664,7 @@ class FFmpegRTSPStreamer:
                 if self.process.stdin:
                     try:
                         self.process.stdin.close()
-                    except:
+                    except Exception:
                         pass
                 
                 # 等待进程结束
@@ -747,22 +747,22 @@ class AITaskExecutor:
         try:
             if hasattr(self, 'alert_executor'):
                 self.alert_executor.shutdown(wait=True)
-        except:
+        except Exception:
             pass
         try:
             if hasattr(self, 'message_executor'):
                 self.message_executor.shutdown(wait=True)
-        except:
+        except Exception:
             pass
         try:
             if hasattr(self, 'image_executor'):
                 self.image_executor.shutdown(wait=True)
-        except:
+        except Exception:
             pass
         try:
             if hasattr(self, 'scheduler'):
                 self.scheduler.shutdown()
-        except:
+        except Exception:
             pass
     
     def schedule_all_tasks(self):
@@ -871,7 +871,7 @@ class AITaskExecutor:
             for job_id in self.task_jobs[task_id]:
                 try:
                     self.scheduler.remove_job(job_id)
-                except:
+                except Exception:
                     pass
             del self.task_jobs[task_id]
     
@@ -2029,7 +2029,7 @@ class AITaskExecutor:
             # 移除已存在的清理作业
             try:
                 self.scheduler.remove_job("periodic_cleanup")
-            except:
+            except Exception:
                 pass
             
             # 添加每天凌晨2点的定期清理作业

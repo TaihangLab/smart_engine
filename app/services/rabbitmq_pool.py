@@ -2,16 +2,12 @@
 高性能RabbitMQ连接池管理器
 支持连接池、通道池、批量处理和负载均衡
 """
-import json
 import logging
 import threading
-import time
 import queue
-from typing import Dict, List, Any, Optional, Callable
 from contextlib import contextmanager
-from concurrent.futures import ThreadPoolExecutor
 import pika
-from pika.adapters.blocking_connection import BlockingChannel, BlockingConnection
+from pika.adapters.blocking_connection import BlockingConnection
 
 from app.core.config import settings
 
@@ -93,7 +89,7 @@ class RabbitMQConnectionPool:
             if connection and not connection.is_closed:
                 try:
                     connection.close()
-                except:
+                except Exception:
                     pass
             connection = None
             raise
@@ -106,7 +102,7 @@ class RabbitMQConnectionPool:
                     # 池已满，关闭连接
                     try:
                         connection.close()
-                    except:
+                    except Exception:
                         pass
     
     def close(self):

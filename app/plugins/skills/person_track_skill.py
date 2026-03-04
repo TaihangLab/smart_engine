@@ -508,7 +508,7 @@ class PersonTrackSkill(BaseSkill):
                                 main_h = main_bbox[3] - main_bbox[1]
                                 sub_w = sub_bbox[2] - sub_bbox[0]
                                 sub_h = sub_bbox[3] - sub_bbox[1]
-                            except:
+                            except Exception:
                                 main_w, main_h = draw.textsize(main_text, font=font_main)
                                 sub_w, sub_h = draw.textsize(sub_text, font=font_sub)
                             

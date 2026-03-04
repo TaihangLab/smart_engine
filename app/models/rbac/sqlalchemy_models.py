@@ -6,7 +6,7 @@ RBAC SQLAlchemy数据库模型
 用于ORM映射和数据库操作
 """
 
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, func, UniqueConstraint, BigInteger
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, UniqueConstraint, BigInteger
 from sqlalchemy.sql import func
 from app.db.base import Base
 

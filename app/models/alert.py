@@ -560,7 +560,7 @@ class ProcessingHistoryResponse(BaseModel):
 
 
 # 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
+class AlertCreate(BaseModel):  # noqa: F811
     """创建报警的模型"""
     alert_time: datetime
     alert_type: str
@@ -604,14 +604,14 @@ class AlertCreate(BaseModel):
     }
 
 
-class AlertUpdate(BaseModel):
+class AlertUpdate(BaseModel):  # noqa: F811
     """更新报警状态的模型"""
     status: AlertStatus
     processed_by: Optional[str] = None
     processing_notes: Optional[str] = None
 
 
-class AlertResponse(BaseModel):
+class AlertResponse(BaseModel):  # noqa: F811
     """报警响应模型"""
     alert_id: int
     alert_time: datetime
@@ -663,7 +663,7 @@ class AlertListResponse(BaseModel):
 
 
 # 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
+class AlertCreate(BaseModel):  # noqa: F811
     """创建报警的模型"""
     alert_time: datetime
     alert_type: str
@@ -707,14 +707,14 @@ class AlertCreate(BaseModel):
     }
 
 
-class AlertUpdate(BaseModel):
+class AlertUpdate(BaseModel):  # noqa: F811
     """更新报警状态的模型"""
     status: AlertStatus
     processed_by: Optional[str] = None
     processing_notes: Optional[str] = None
 
 
-class AlertResponse(BaseModel):
+class AlertResponse(BaseModel):  # noqa: F811
     """报警响应模型"""
     alert_id: int
     alert_time: datetime
@@ -767,7 +767,7 @@ class ProcessingStatistics(BaseModel):
 
 
 # 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
+class AlertCreate(BaseModel):  # noqa: F811
     """创建报警的模型"""
     alert_time: datetime
     alert_type: str
@@ -811,14 +811,14 @@ class AlertCreate(BaseModel):
     }
 
 
-class AlertUpdate(BaseModel):
+class AlertUpdate(BaseModel):  # noqa: F811
     """更新报警状态的模型"""
     status: AlertStatus
     processed_by: Optional[str] = None
     processing_notes: Optional[str] = None
 
 
-class AlertResponse(BaseModel):
+class AlertResponse(BaseModel):  # noqa: F811
     """报警响应模型"""
     alert_id: int
     alert_time: datetime

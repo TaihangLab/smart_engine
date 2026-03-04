@@ -140,7 +140,7 @@ class AlertCompensationService:
                     if time_diff.total_seconds() > settings.DEAD_LETTER_REPROCESS_TIME_LIMIT:
                         logger.debug(f"💀 死信消息超过时间限制: {time_diff}")
                         return False
-                except:
+                except Exception:
                     pass
             
             # 4. 检查死信原因 - 统一重试策略，不再基于优先级区分

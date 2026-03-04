@@ -38,7 +38,7 @@ class AlertArchiveLinkDAO:
         if hasattr(self, '_auto_close') and self._auto_close and hasattr(self, 'db'):
             try:
                 self.db.close()
-            except:
+            except Exception:
                 pass  # 忽略关闭时的错误
     
     def _build_minio_url(self, object_name: str, is_video: bool = False) -> str:

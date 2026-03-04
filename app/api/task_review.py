@@ -92,7 +92,7 @@ async def get_task_review_config(
     if review_skill_class and review_skill_class.skill_tags:
         try:
             skill_tags = json.loads(review_skill_class.skill_tags)
-        except:
+        except Exception:
             skill_tags = []
     
     return {

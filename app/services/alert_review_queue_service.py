@@ -274,7 +274,7 @@ class AlertReviewQueueService:
                 task = json.loads(task_data)
                 self._handle_task_failure(task, str(e))
                 self.redis_client.lrem(self.processing_queue_key, 1, task_data)
-            except:
+            except Exception:
                 # 如果连解析都失败，移入失败队列
                 self.redis_client.lpush(self.failed_queue_key, task_data)
                 self.redis_client.lrem(self.processing_queue_key, 1, task_data)

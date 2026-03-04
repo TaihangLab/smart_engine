@@ -279,7 +279,7 @@ class VideoBufferManager:
                 # 清理临时文件
                 try:
                     os.unlink(temp_video_path)
-                except:
+                except Exception:
                     pass
                     
         except Exception as e:
@@ -290,7 +290,7 @@ class VideoBufferManager:
         """清理资源"""
         try:
             self.video_executor.shutdown(wait=True, timeout=10)
-        except:
+        except Exception:
             pass
 
 

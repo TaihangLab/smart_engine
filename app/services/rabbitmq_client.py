@@ -277,7 +277,7 @@ class RabbitMQClient:
             try:
                 # 发生异常时拒绝消息
                 self.channel.basic_nack(delivery_tag=delivery_tag, requeue=False)
-            except:
+            except Exception:
                 pass
             return False
     
@@ -481,7 +481,7 @@ class RabbitMQClient:
                 try:
                     if self.channel and not self.channel.is_closed:
                         self.channel.stop_consuming()
-                except:
+                except Exception:
                     pass
                 
                 self.is_connected = False
@@ -643,7 +643,7 @@ class RabbitMQClient:
                 if self.consumer_thread:
                     try:
                         self.channel.stop_consuming()
-                    except:
+                    except Exception:
                         pass
                 
                 # 启动新线程
@@ -688,7 +688,7 @@ class RabbitMQClient:
                 try:
                     if self.channel and not self.channel.is_closed:
                         self.channel.stop_consuming()
-                except:
+                except Exception:
                     pass
                 
                 # 等待线程结束

@@ -433,7 +433,7 @@ class LLMService:
             if json_match:
                 try:
                     return json.loads(json_match.group(0))
-                except:
+                except Exception:
                     pass
             
             # 解析失败，返回原始文本

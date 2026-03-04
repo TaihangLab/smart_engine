@@ -422,7 +422,7 @@ class UnifiedCompensationService:
                             delivery_tag=dead_msg['delivery_tag'], 
                             requeue=False
                         )
-                    except:
+                    except Exception:
                         pass
             
             # 更新统计

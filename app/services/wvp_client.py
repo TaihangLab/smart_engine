@@ -108,7 +108,7 @@ def auto_relogin(func):
                         self._login()
                         # 重新调用原始方法
                         return func(self, *args, **kwargs)
-                except:
+                except Exception:
                     pass  # 解析失败，继续处理其他情况
             
             # 其他异常继续抛出
@@ -256,7 +256,7 @@ class WVPClient:
                         # 如果能解析成JSON且包含401错误码，抛出带有响应对象的异常
                         if content.get("code") == 401:
                             response.raise_for_status()
-                    except:
+                    except Exception:
                         # 解析失败也抛出异常
                         response.raise_for_status()
                 else:

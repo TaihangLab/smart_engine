@@ -744,7 +744,7 @@ class PStopCocoSkill(BaseSkill):
                                 main_h = main_bbox[3] - main_bbox[1]
                                 sub_w = sub_bbox[2] - sub_bbox[0]
                                 sub_h = sub_bbox[3] - sub_bbox[1]
-                            except:
+                            except Exception:
                                 # 如果textbbox不可用，使用textsize（较老的PIL版本）
                                 main_w, main_h = temp_draw.textsize(main_text, font=font_main)
                                 sub_w, sub_h = temp_draw.textsize(sub_text, font=font_sub)

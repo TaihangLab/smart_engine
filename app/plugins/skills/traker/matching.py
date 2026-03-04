@@ -35,7 +35,7 @@ def bbox_ious(boxes, query_boxes):
     return overlaps
 
 def merge_matches(m1, m2, shape):
-    O,P,Q = shape
+    O, P, Q = shape  # noqa: E741
     m1 = np.asarray(m1)
     m2 = np.asarray(m2)
 

@@ -155,7 +155,7 @@ class AsyncAlertReviewQueueService:
             else:
                 # 如果事件循环未运行，直接运行
                 return loop.run_until_complete(self.enqueue_review_task_async(alert_data, ai_task, review_skill_class_id))
-        except:
+        except Exception:
             # 回退到同步版本
             return self._enqueue_review_task_sync(alert_data, ai_task, review_skill_class_id)
 
@@ -340,7 +340,7 @@ class AsyncAlertReviewQueueService:
                 task = json.loads(task_data)
                 await self._handle_task_failure_async(task, str(e))
                 self.redis_client.lrem(self.processing_queue_key, 1, task_data)
-            except:
+            except Exception:
                 # 如果连解析都失败，移入失败队列
                 self.redis_client.lpush(self.failed_queue_key, task_data)
                 self.redis_client.lrem(self.processing_queue_key, 1, task_data)
