@@ -103,15 +103,21 @@ async def get_review_records(
         records_data = []
         for record in records:
             record_dict = ReviewRecordListResponse.model_validate(record).model_dump()
-            # 添加关联的预警信息
             if record.alert:
-                # 从 MinIO 对象名构建图片URL
                 image_url = None
                 if record.alert.minio_frame_object_name:
-                    from app.core.config import settings
-                    from urllib.parse import quote
-                    object_name = quote(record.alert.minio_frame_object_name, safe='/')
-                    image_url = f"http://{settings.MINIO_ENDPOINT}:{settings.MINIO_PORT}/{settings.MINIO_BUCKET}/{object_name}"
+                    try:
+                        from app.services.minio_client import minio_client
+                        from app.core.config import settings
+                        image_url = minio_client.get_presigned_url(
+                            bucket_name=settings.MINIO_BUCKET,
+                            prefix=f"{settings.MINIO_ALERT_IMAGE_PREFIX}{record.alert.task_id}/",
+                            object_name=record.alert.minio_frame_object_name,
+                            expires=3600
+                        )
+                    except Exception as e:
+                        logger.warning(f"生成复判记录图片预签名URL失败: {e}")
+                        image_url = None
                 
                 record_dict.update({
                     "alert_name": record.alert.alert_name,
