@@ -20,18 +20,9 @@ class PositionDao:
         """
         # 如果没有提供ID，则生成新的ID
         if 'id' not in position_data:
-            # 从tenant_id生成租户ID用于ID生成器
-            tenant_id = position_data.get('tenant_id', 1000000000000001)  # 使用默认租户ID
-
             # 生成新的岗位ID
             from app.utils.id_generator import generate_id
-            position_id = generate_id(tenant_id, "position")  # tenant_id不再直接编码到ID中，但可用于其他用途
-
-            # 验证生成的ID是否在合理范围内
-            # MySQL BIGINT范围是 -9223372036854775808 到 9223372036854775807
-            if position_id > 9223372036854775807:
-                raise ValueError(f"Generated ID {position_id} exceeds BIGINT range")
-
+            position_id = generate_id("position")
             position_data['id'] = position_id
 
         position = SysPosition(**position_data)

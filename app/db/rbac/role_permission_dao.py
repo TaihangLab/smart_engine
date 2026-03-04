@@ -1,8 +1,11 @@
 from typing import List
+import logging
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, delete
 from app.models.rbac import SysRolePermission, SysPermission, SysRole
 from app.utils.id_generator import generate_id
+
+logger = logging.getLogger(__name__)
 
 
 class RolePermissionDao:
@@ -180,14 +183,185 @@ class RolePermissionDao:
 
     @staticmethod
     async def assign_permission_to_role(db: AsyncSession, role_code: str, permission_code: str, tenant_id: str) -> bool:
-        """为角色分配权限（异步）"""
+        """为角色分配权限（异步）
+
+        简化逻辑：先删除角色与该权限的关联，再新增
+        """
         try:
-            # 检查是否已存在
-            existing = await RolePermissionDao.get_role_permission(db, role_code, permission_code, tenant_id)
-            if existing:
-                return False  # 已存在，不重复分配
-            # 创建新的角色权限关联
-            await RolePermissionDao.create_role_permission(db, role_code, permission_code, tenant_id)
+            # 获取角色和权限
+            result = await db.execute(
+                select(SysRole).filter(
+                    SysRole.role_code == role_code,
+                    SysRole.tenant_id == tenant_id,
+                    SysRole.is_deleted == False,
+                    SysRole.status == 0,
+                )
+            )
+            role = result.scalars().first()
+            if not role:
+                return False
+
+            result = await db.execute(
+                select(SysPermission).filter(
+                    SysPermission.permission_code == permission_code,
+                    SysPermission.is_deleted == False,
+                    SysPermission.status == 0,
+                )
+            )
+            permission = result.scalars().first()
+            if not permission:
+                return False
+
+            # 先删除角色与该权限的关联（如果存在）
+            await db.execute(
+                delete(SysRolePermission).where(
+                    SysRolePermission.role_id == role.id,
+                    SysRolePermission.permission_id == permission.id
+                )
+            )
+
+            # 新增权限关联
+            role_permission = SysRolePermission(
+                role_id=role.id,
+                permission_id=permission.id
+            )
+            db.add(role_permission)
+            await db.commit()
+
             return True
         except Exception as e:
+            logger.error(f"分配权限失败: {e}")
             return False
+
+    @staticmethod
+    async def batch_assign_permissions_to_role(
+        db: AsyncSession, role_code: str, permission_codes: List[str], tenant_id: str
+    ) -> dict:
+        """批量为角色分配权限（异步）
+
+        返回格式: {"success": [成功分配的权限码], "failed": [(权限码, 失败原因), ...], "skipped": [已存在的权限码]}
+        """
+        result = {"success": [], "failed": [], "skipped": []}
+
+        # 获取角色ID
+        role_result = await db.execute(
+            select(SysRole).filter(
+                SysRole.role_code == role_code,
+                SysRole.tenant_id == tenant_id,
+                SysRole.is_deleted == False,
+                SysRole.status == 0,
+            )
+        )
+        role = role_result.scalars().first()
+        if not role:
+            for code in permission_codes:
+                result["failed"].append((code, f"角色 {role_code} 不存在"))
+            return result
+
+        # 批量获取权限ID
+        permission_result = await db.execute(
+            select(SysPermission).filter(
+                SysPermission.permission_code.in_(permission_codes),
+                SysPermission.is_deleted == False,
+                SysPermission.status == 0,
+            )
+        )
+        permissions = {p.permission_code: p for p in permission_result.scalars().all()}
+
+        # 批量检查已存在的关联
+        existing_result = await db.execute(
+            select(SysRolePermission).filter(
+                SysRolePermission.role_id == role.id,
+                SysRolePermission.permission_id.in_([p.id for p in permissions.values()]),
+            )
+        )
+        existing_permissions = {
+            ep.permission_id: ep
+            for ep in existing_result.scalars().all()
+        }
+
+        # 准备要添加的关联
+        to_add = []
+        for code in permission_codes:
+            permission = permissions.get(code)
+            if not permission:
+                result["failed"].append((code, f"权限 {code} 不存在"))
+                continue
+
+            if permission.id in existing_permissions:
+                result["skipped"].append(code)
+                continue
+
+            to_add.append(SysRolePermission(role_id=role.id, permission_id=permission.id))
+            result["success"].append(code)
+
+        # 批量添加
+        if to_add:
+            db.add_all(to_add)
+            await db.commit()
+
+        return result
+
+    @staticmethod
+    async def batch_assign_permissions_to_role_by_id(
+        db: AsyncSession, role_id: int, permission_ids: List[int], tenant_id: str
+    ) -> dict:
+        """批量为角色分配权限（通过ID）（异步）
+
+        返回格式: {"success": [成功的权限ID], "failed": [(权限ID, 失败原因), ...], "skipped": [已存在的权限ID]}
+        """
+        result = {"success": [], "failed": [], "skipped": []}
+
+        # 验证角色存在
+        role_result = await db.execute(
+            select(SysRole).filter(
+                SysRole.id == role_id,
+                SysRole.tenant_id == tenant_id,
+                SysRole.is_deleted == False,
+                SysRole.status == 0,
+            )
+        )
+        role = role_result.scalars().first()
+        if not role:
+            for pid in permission_ids:
+                result["failed"].append((pid, f"角色ID {role_id} 不存在"))
+            return result
+
+        # 批量检查已存在的关联
+        existing_result = await db.execute(
+            select(SysRolePermission).filter(
+                SysRolePermission.role_id == role_id,
+                SysRolePermission.permission_id.in_(permission_ids),
+            )
+        )
+        existing_permission_ids = {ep.permission_id for ep in existing_result.scalars().all()}
+
+        # 准备要添加的关联
+        to_add = []
+        for pid in permission_ids:
+            if pid in existing_permission_ids:
+                result["skipped"].append(pid)
+                continue
+
+            # 验证权限存在
+            perm_result = await db.execute(
+                select(SysPermission).filter(
+                    SysPermission.id == pid,
+                    SysPermission.is_deleted == False,
+                    SysPermission.status == 0,
+                )
+            )
+            permission = perm_result.scalars().first()
+            if not permission:
+                result["failed"].append((pid, f"权限ID {pid} 不存在"))
+                continue
+
+            to_add.append(SysRolePermission(role_id=role_id, permission_id=pid))
+            result["success"].append(pid)
+
+        # 批量添加
+        if to_add:
+            db.add_all(to_add)
+            await db.commit()
+
+        return result

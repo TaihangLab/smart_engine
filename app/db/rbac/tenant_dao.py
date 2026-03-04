@@ -12,7 +12,7 @@ class TenantDao:
     """租户数据访问对象（异步）"""
 
     @staticmethod
-    async def get_tenant_by_id(db: AsyncSession, id: int) -> Optional[SysTenant]:
+    async def get_tenant_by_id(db: AsyncSession, id: str) -> Optional[SysTenant]:
         """根据租户ID获取租户（异步）"""
         result = await db.execute(
             select(SysTenant).filter(
@@ -54,7 +54,7 @@ class TenantDao:
         return tenant
 
     @staticmethod
-    async def update_tenant_by_id(db: AsyncSession, id: int, update_data: dict, user_id: Optional[int] = None) -> Optional[SysTenant]:
+    async def update_tenant_by_id(db: AsyncSession, id: str, update_data: dict, user_id: Optional[int] = None) -> Optional[SysTenant]:
         """更新租户信息（通过租户ID）（异步）
 
         Args:
@@ -113,7 +113,7 @@ class TenantDao:
         return None
 
     @staticmethod
-    async def delete_tenant_by_id(db: AsyncSession, id: int) -> bool:
+    async def delete_tenant_by_id(db: AsyncSession, id: str) -> bool:
         """删除租户（通过租户ID）（异步）"""
         result = await db.execute(
             select(SysTenant).filter(SysTenant.id == id)

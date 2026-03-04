@@ -125,20 +125,8 @@ class DeptDao:
 
         # 如果没有提供ID，则生成新的ID
         if 'id' not in dept_data:
-            # 从tenant_id中提取数字ID用于ID生成器
-            tenant_id = dept_data.get('tenant_id', 1000000000000001)  # 使用默认租户ID
-            # 确保tenant_id是整数
-            if not isinstance(tenant_id, int):
-                raise ValueError(f"tenant_id must be an integer, got {type(tenant_id)}")
-
             # 生成新的部门ID
-            dept_id = generate_id(tenant_id, "dept")  # tenant_id不再直接编码到ID中，但可用于其他用途
-
-            # 验证生成的ID是否在合理范围内
-            # MySQL BIGINT范围是 -9223372036854775808 到 9223372036854775807
-            if dept_id > 9223372036854775807:
-                raise ValueError(f"Generated ID {dept_id} exceeds BIGINT range")
-
+            dept_id = generate_id("dept")
             dept_data['id'] = dept_id
 
         # Check for circular reference before creating the department
@@ -379,7 +367,7 @@ class DeptDao:
         return True
 
     @staticmethod
-    async def get_dept_tree(db: AsyncSession, tenant_id: Optional[int] = None, name: Optional[str] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def get_dept_tree(db: AsyncSession, tenant_id: Optional[str] = None, name: Optional[str] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
         """获取部门树结构（异步）
 
         Args:
@@ -446,7 +434,7 @@ class DeptDao:
         return root_depts
 
     @staticmethod
-    async def get_full_dept_tree(db: AsyncSession, tenant_id: Optional[int] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
+    async def get_full_dept_tree(db: AsyncSession, tenant_id: Optional[str] = None, status: Optional[int] = None) -> List[Dict[str, Any]]:
         """获取完整的部门树结构（异步）
 
         Args:
