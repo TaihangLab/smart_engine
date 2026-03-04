@@ -22,8 +22,7 @@ from dataclasses import dataclass, asdict
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable
-import statistics
+from typing import Dict, Any, List, Optional
 import psutil
 
 from app.core.config import settings

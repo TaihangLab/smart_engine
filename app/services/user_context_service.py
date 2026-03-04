@@ -6,19 +6,20 @@
 从 request.state 中获取真实的用户信息，替换之前的 Mock 实现
 """
 
+import contextvars
+import logging
 from typing import Optional, List
+
 from fastapi import Request, HTTPException, status
 from app.models.user import UserInfo
 from app.db.session import get_db
 from app.services.rbac_service import RbacService
-import logging
 
 logger = logging.getLogger(__name__)
 
 
 # ========== 上下文变量存储 ==========
 # 使用 contextvars 来保存当前请求（async-safe）
-import contextvars
 
 _request_context: contextvars.ContextVar[Request] = contextvars.ContextVar('request_context')
 

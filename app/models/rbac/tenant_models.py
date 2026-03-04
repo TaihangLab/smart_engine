@@ -7,9 +7,8 @@
 
 from typing import Optional, List
 from datetime import datetime, date
-from pydantic import BaseModel, Field, validator, field_validator
+from pydantic import BaseModel, Field, field_validator
 from pydantic import ConfigDict
-from .rbac_base import BaseResponse
 from .package_enum import PackageType
 
 

@@ -4,7 +4,6 @@
 import cv2
 import numpy as np
 from typing import Dict, List, Any, Tuple, Union, Optional
-from enum import IntEnum
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
@@ -378,7 +377,7 @@ class CrowdDetectorSkill(BaseSkill):
             检测点坐标 (x, y)，如果无法获取则返回None
         """
         bbox = detection.get("bbox", [])
-        class_name = detection.get("class_name", "")
+        detection.get("class_name", "")
 
         if len(bbox) >= 4:
             # bbox格式: [x1, y1, x2, y2]

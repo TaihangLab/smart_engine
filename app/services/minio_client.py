@@ -3,10 +3,7 @@ MinIO客户端服务，提供对象存储相关操作
 """
 import logging
 from typing import Optional, Dict, Any, List
-import os
-import uuid
-import tempfile
-from pathlib import Path
+from datetime import timedelta
 from fastapi import HTTPException
 from app.core.config import settings
 
@@ -23,7 +20,7 @@ if MINIO_ENABLED:
         from minio import Minio
         from minio.error import S3Error
     except ImportError:
-        logger.warning(f"⚠️ 未安装minio库，MinIO功能将不可用")
+        logger.warning("⚠️ 未安装minio库，MinIO功能将不可用")
         MINIO_ENABLED = False
 
 class MinioClient:
@@ -41,7 +38,7 @@ class MinioClient:
         """建立MinIO连接"""
         # 检查MinIO是否启用
         if not MINIO_ENABLED:
-            logger.info(f"⏭️ MinIO客户端已禁用，跳过连接")
+            logger.info("⏭️ MinIO客户端已禁用，跳过连接")
             return
             
         if self.client is not None:
@@ -49,7 +46,7 @@ class MinioClient:
             
         # 检查Minio类是否已导入
         if Minio is None:
-            logger.info(f"⏭️ MinIO客户端库未安装，跳过连接")
+            logger.info("⏭️ MinIO客户端库未安装，跳过连接")
             return
             
         try:
@@ -68,7 +65,7 @@ class MinioClient:
         """确保存储桶存在，如果不存在则创建"""
         # 检查MinIO是否启用
         if not MINIO_ENABLED:
-            logger.info(f"⏭️ MinIO客户端已禁用，跳过确保存储桶存在")
+            logger.info("⏭️ MinIO客户端已禁用，跳过确保存储桶存在")
             self._bucket_checked = True
             return
             

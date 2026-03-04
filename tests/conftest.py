@@ -1,22 +1,22 @@
+import asyncio
 import sys
-import os
 from pathlib import Path
+
+import pytest
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
+from sqlalchemy.pool import NullPool
+
+from app.core.config import settings
 
 # 将项目根目录添加到 Python 路径
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
-import pytest
-import asyncio
-from unittest.mock import patch
-
 # ============================================
 # 真实数据库连接 Fixtures
 # ============================================
-
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
-from app.core.config import settings
 
 # 创建真实的数据库引擎
 SYNC_DATABASE_URL = (
@@ -42,10 +42,6 @@ def db_session():
     finally:
         session.close()
 
-
-# 异步数据库会话
-from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
-from sqlalchemy.pool import NullPool
 
 ASYNC_DATABASE_URL = (
     f"mysql+aiomysql://{settings.MYSQL_USER}:{settings.MYSQL_PASSWORD}"

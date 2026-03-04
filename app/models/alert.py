@@ -7,16 +7,17 @@
 
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, JSON, BigInteger, Integer, Text, ForeignKey, Index, Boolean
+from enum import IntEnum
+
+from pydantic import BaseModel, Field
+from sqlalchemy import Column, String, DateTime, JSON, BigInteger, Integer, ForeignKey, Index, Boolean
 from sqlalchemy.orm import relationship
+
+from app.db.base import Base
 
 # 使用 Integer 作为状态类型，确保在所有数据库环境下兼容
 # SQLite 不支持 TINYINT，而 Integer 在 MySQL 中也能提供良好的性能
 StatusType = Integer
-from pydantic import BaseModel, Field
-from enum import IntEnum
-
-from app.db.base import Base
 
 
 class AlertStatus(IntEnum):
@@ -560,7 +561,7 @@ class ProcessingHistoryResponse(BaseModel):
 
 
 # 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
+class AlertCreate(BaseModel):  # noqa: F811
     """创建报警的模型"""
     alert_time: datetime
     alert_type: str
@@ -604,14 +605,14 @@ class AlertCreate(BaseModel):
     }
 
 
-class AlertUpdate(BaseModel):
+class AlertUpdate(BaseModel):  # noqa: F811
     """更新报警状态的模型"""
     status: AlertStatus
     processed_by: Optional[str] = None
     processing_notes: Optional[str] = None
 
 
-class AlertResponse(BaseModel):
+class AlertResponse(BaseModel):  # noqa: F811
     """报警响应模型"""
     alert_id: int
     alert_time: datetime
@@ -663,7 +664,7 @@ class AlertListResponse(BaseModel):
 
 
 # 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
+class AlertCreate(BaseModel):  # noqa: F811
     """创建报警的模型"""
     alert_time: datetime
     alert_type: str
@@ -707,14 +708,14 @@ class AlertCreate(BaseModel):
     }
 
 
-class AlertUpdate(BaseModel):
+class AlertUpdate(BaseModel):  # noqa: F811
     """更新报警状态的模型"""
     status: AlertStatus
     processed_by: Optional[str] = None
     processing_notes: Optional[str] = None
 
 
-class AlertResponse(BaseModel):
+class AlertResponse(BaseModel):  # noqa: F811
     """报警响应模型"""
     alert_id: int
     alert_time: datetime
@@ -767,7 +768,7 @@ class ProcessingStatistics(BaseModel):
 
 
 # 兼容性Pydantic模型（保持与原有API的兼容性）
-class AlertCreate(BaseModel):
+class AlertCreate(BaseModel):  # noqa: F811
     """创建报警的模型"""
     alert_time: datetime
     alert_type: str
@@ -811,14 +812,14 @@ class AlertCreate(BaseModel):
     }
 
 
-class AlertUpdate(BaseModel):
+class AlertUpdate(BaseModel):  # noqa: F811
     """更新报警状态的模型"""
     status: AlertStatus
     processed_by: Optional[str] = None
     processing_notes: Optional[str] = None
 
 
-class AlertResponse(BaseModel):
+class AlertResponse(BaseModel):  # noqa: F811
     """报警响应模型"""
     alert_id: int
     alert_time: datetime

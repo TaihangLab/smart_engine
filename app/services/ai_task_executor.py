@@ -10,13 +10,10 @@ import json
 import os
 import logging
 import subprocess
-import signal
 import queue
 from datetime import datetime, timedelta
 from typing import Dict, List, Any, Optional, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from concurrent.futures import ThreadPoolExecutor
@@ -24,9 +21,6 @@ from app.services.ai_task_service import AITaskService
 from app.services.wvp_client import wvp_client
 from app.models.ai_task import AITask
 from app.db.session import get_db
-from app.db.async_session import AsyncSessionLocal, get_async_db_session
-from app.services.camera_service import CameraService
-from app.services.minio_client import minio_client
 from app.services.alert_merge_manager import alert_merge_manager
 
 logger = logging.getLogger(__name__)
@@ -106,7 +100,7 @@ class OptimizedAsyncProcessor:
             if self.frame_buffer.full():
                 try:
                     # 丢弃最旧的帧
-                    old_frame_data = self.frame_buffer.get_nowait()
+                    self.frame_buffer.get_nowait()
                     self.stats["frames_dropped"] += 1
                 except queue.Empty:
                     pass
@@ -670,7 +664,7 @@ class FFmpegRTSPStreamer:
                 if self.process.stdin:
                     try:
                         self.process.stdin.close()
-                    except:
+                    except Exception:
                         pass
                 
                 # 等待进程结束
@@ -753,22 +747,22 @@ class AITaskExecutor:
         try:
             if hasattr(self, 'alert_executor'):
                 self.alert_executor.shutdown(wait=True)
-        except:
+        except Exception:
             pass
         try:
             if hasattr(self, 'message_executor'):
                 self.message_executor.shutdown(wait=True)
-        except:
+        except Exception:
             pass
         try:
             if hasattr(self, 'image_executor'):
                 self.image_executor.shutdown(wait=True)
-        except:
+        except Exception:
             pass
         try:
             if hasattr(self, 'scheduler'):
                 self.scheduler.shutdown()
-        except:
+        except Exception:
             pass
     
     def schedule_all_tasks(self):
@@ -877,7 +871,7 @@ class AITaskExecutor:
             for job_id in self.task_jobs[task_id]:
                 try:
                     self.scheduler.remove_job(job_id)
-                except:
+                except Exception:
                     pass
             del self.task_jobs[task_id]
     
@@ -1421,7 +1415,7 @@ class AITaskExecutor:
         try:
             result = future.result()
             if result:
-                logger.info(f"预警生成成功")
+                logger.info("预警生成成功")
             else:
                 logger.warning("预警生成失败")
         except Exception as e:
@@ -1484,7 +1478,6 @@ class AITaskExecutor:
         try:
             from app.services.camera_service import CameraService
             from app.services.minio_client import minio_client
-            from app.services.rabbitmq_client import rabbitmq_client
             from datetime import datetime
             import cv2
             
@@ -1642,9 +1635,6 @@ class AITaskExecutor:
             level: 预警等级（技能返回的实际预警等级）
         """
         try:
-            from app.services.camera_service import CameraService
-            from app.services.minio_client import minio_client
-            from app.services.rabbitmq_client import rabbitmq_client
             from datetime import datetime
             import cv2
             import threading
@@ -1831,7 +1821,7 @@ class AITaskExecutor:
             
             if success:
                 logger.info(f"✅ 高性能预警已添加到合并管理器: task_id={task.id}, camera_id={task.camera_id}, level={level}")
-                logger.info(f"🚀 性能优化: 图片异步上传中，预警已提前发送")
+                logger.info("🚀 性能优化: 图片异步上传中，预警已提前发送")
                 return complete_alert
             else:
                 logger.error(f"❌ 添加高性能预警到合并管理器失败: task_id={task.id}")
@@ -2039,7 +2029,7 @@ class AITaskExecutor:
             # 移除已存在的清理作业
             try:
                 self.scheduler.remove_job("periodic_cleanup")
-            except:
+            except Exception:
                 pass
             
             # 添加每天凌晨2点的定期清理作业

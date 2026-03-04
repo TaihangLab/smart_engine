@@ -3,7 +3,6 @@ import logging
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, delete
 from app.models.rbac import SysRolePermission, SysPermission, SysRole
-from app.utils.id_generator import generate_id
 
 logger = logging.getLogger(__name__)
 
@@ -76,7 +75,7 @@ class RolePermissionDao:
             ).filter(
                 SysRole.role_code == role_code,
                 SysRole.tenant_id == tenant_id,
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.status == 0
             )
         )
@@ -90,7 +89,7 @@ class RolePermissionDao:
                 SysRolePermission, SysPermission.id == SysRolePermission.permission_id
             ).filter(
                 SysRolePermission.role_id == role_id,
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.status == 0
             )
         )
@@ -107,7 +106,7 @@ class RolePermissionDao:
             ).filter(
                 SysPermission.permission_code == permission_code,
                 SysRole.tenant_id == tenant_id,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
                 SysRole.status == 0
             )
         )
@@ -122,7 +121,7 @@ class RolePermissionDao:
             ).filter(
                 SysRolePermission.permission_id == permission_id,
                 SysRole.tenant_id == tenant_id,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
                 SysRole.status == 0
             )
         )
@@ -162,7 +161,7 @@ class RolePermissionDao:
             db.add(role_permission)
             await db.commit()
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     @staticmethod
@@ -193,7 +192,7 @@ class RolePermissionDao:
                 select(SysRole).filter(
                     SysRole.role_code == role_code,
                     SysRole.tenant_id == tenant_id,
-                    SysRole.is_deleted == False,
+                    not SysRole.is_deleted,
                     SysRole.status == 0,
                 )
             )
@@ -204,7 +203,7 @@ class RolePermissionDao:
             result = await db.execute(
                 select(SysPermission).filter(
                     SysPermission.permission_code == permission_code,
-                    SysPermission.is_deleted == False,
+                    not SysPermission.is_deleted,
                     SysPermission.status == 0,
                 )
             )
@@ -248,7 +247,7 @@ class RolePermissionDao:
             select(SysRole).filter(
                 SysRole.role_code == role_code,
                 SysRole.tenant_id == tenant_id,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
                 SysRole.status == 0,
             )
         )
@@ -262,7 +261,7 @@ class RolePermissionDao:
         permission_result = await db.execute(
             select(SysPermission).filter(
                 SysPermission.permission_code.in_(permission_codes),
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.status == 0,
             )
         )
@@ -317,7 +316,7 @@ class RolePermissionDao:
             select(SysRole).filter(
                 SysRole.id == role_id,
                 SysRole.tenant_id == tenant_id,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
                 SysRole.status == 0,
             )
         )
@@ -347,7 +346,7 @@ class RolePermissionDao:
             perm_result = await db.execute(
                 select(SysPermission).filter(
                     SysPermission.id == pid,
-                    SysPermission.is_deleted == False,
+                    not SysPermission.is_deleted,
                     SysPermission.status == 0,
                 )
             )

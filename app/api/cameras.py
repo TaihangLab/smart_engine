@@ -2,7 +2,7 @@
 摄像头API端点模块，提供摄像头相关的REST API
 """
 from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Response, Query, Path, Body
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Path
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.services.camera_service import CameraService

@@ -9,10 +9,8 @@
 
 import functools
 import hashlib
-import json
 import logging
-from typing import Optional, List, Set, Any, Dict
-from datetime import timedelta
+from typing import Optional, List, Any, Dict
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
@@ -122,7 +120,7 @@ def cached(ttl: int = None, key_prefix: str = None):
         ttl = get_default_cache_ttl()
 
     def decorator(func):
-        cache = functools.lru_cache(maxsize=get_max_cache_size())
+        functools.lru_cache(maxsize=get_max_cache_size())
 
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
@@ -236,7 +234,7 @@ class PermissionCacheService:
                 from app.models.rbac import SysPermission
                 result = await db.execute(
                     select(SysPermission).filter(
-                        SysPermission.is_deleted == False,
+                        not SysPermission.is_deleted,
                         SysPermission.status == 0
                     )
                 )
@@ -310,7 +308,7 @@ class PermissionCacheService:
         from app.models.rbac import SysPermission
         result = await db.execute(
             select(SysPermission).filter(
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.status == 0
             )
         )
@@ -441,7 +439,7 @@ class MenuCacheService:
         # 获取所有菜单权限
         result = await db.execute(
             select(SysPermission).filter(
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.permission_type.in_(["folder", "menu"])
             ).order_by(SysPermission.sort_order, SysPermission.id)
         )
@@ -538,7 +536,7 @@ class MenuCacheService:
         from app.models.rbac import SysPermission
         result = await db.execute(
             select(SysPermission).filter(
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.permission_type.in_(["folder", "menu"])
             ).order_by(SysPermission.sort_order, SysPermission.id)
         )

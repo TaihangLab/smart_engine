@@ -1,6 +1,6 @@
 from typing import List, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, desc, select, func, exists
+from sqlalchemy import desc, select, func, exists
 from app.models.rbac import SysUser, SysPosition, SysUserRole
 
 
@@ -16,7 +16,7 @@ class UserDao:
             select(SysUser).filter(
                 SysUser.user_name == user_name,
                 SysUser.tenant_id == tenant_id,
-                SysUser.is_deleted == False,
+                not SysUser.is_deleted,
             )
         )
         return result.scalars().first()
@@ -32,7 +32,7 @@ class UserDao:
     async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[SysUser]:
         """根据主键ID获取用户（异步）"""
         result = await db.execute(
-            select(SysUser).filter(SysUser.id == user_id, SysUser.is_deleted == False)
+            select(SysUser).filter(SysUser.id == user_id, not SysUser.is_deleted)
         )
         return result.scalars().first()
 
@@ -59,7 +59,7 @@ class UserDao:
                 select(SysUser).filter(
                     SysUser.id == user_id_int,
                     SysUser.tenant_id == tenant_id,
-                    SysUser.is_deleted == False,
+                    not SysUser.is_deleted,
                 )
             )
             return result.scalars().first()
@@ -69,7 +69,7 @@ class UserDao:
                 select(SysUser).filter(
                     SysUser.user_name == user_id,
                     SysUser.tenant_id == tenant_id,
-                    SysUser.is_deleted == False,
+                    not SysUser.is_deleted,
                 )
             )
             return result.scalars().first()
@@ -83,7 +83,7 @@ class UserDao:
             raise ValueError("tenant_id 必须是有效的正整数")
         result = await db.execute(
             select(SysUser)
-            .filter(SysUser.tenant_id == tenant_id, SysUser.is_deleted == False)
+            .filter(SysUser.tenant_id == tenant_id, not SysUser.is_deleted)
             .order_by(desc(SysUser.update_time))
             .offset(skip)
             .limit(limit)
@@ -153,7 +153,7 @@ class UserDao:
         result = await db.execute(
             select(func.count()).select_from(
                 select(SysUser)
-                .filter(SysUser.tenant_id == tenant_id, SysUser.is_deleted == False)
+                .filter(SysUser.tenant_id == tenant_id, not SysUser.is_deleted)
                 .subquery()
             )
         )
@@ -192,7 +192,7 @@ class UserDao:
         """
         # 基础查询
         stmt = select(SysUser).filter(
-            SysUser.tenant_id == tenant_id, SysUser.is_deleted == False
+            SysUser.tenant_id == tenant_id, not SysUser.is_deleted
         )
 
         if user_name:
@@ -267,16 +267,16 @@ class UserDao:
             role_code: 角色编码（关联查询）
         """
         # 基础查询
-        stmt = select(func.count()).select_from(
+        select(func.count()).select_from(
             select(SysUser)
-            .filter(SysUser.tenant_id == tenant_id, SysUser.is_deleted == False)
+            .filter(SysUser.tenant_id == tenant_id, not SysUser.is_deleted)
             .subquery()
         )
 
         # 由于需要应用所有过滤条件，我们采用不同的方式
         # 先构建用户的查询
         user_stmt = select(SysUser).filter(
-            SysUser.tenant_id == tenant_id, SysUser.is_deleted == False
+            SysUser.tenant_id == tenant_id, not SysUser.is_deleted
         )
 
         if user_name:

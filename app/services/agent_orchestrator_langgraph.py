@@ -19,8 +19,7 @@ from operator import add
 
 # LangGraph imports
 from langgraph.graph import StateGraph, START, END
-from langgraph.checkpoint.memory import MemorySaver
-from langchain_core.messages import BaseMessage, HumanMessage, AIMessage
+from langchain_core.messages import BaseMessage, AIMessage
 
 logger = logging.getLogger(__name__)
 
@@ -213,7 +212,7 @@ class Layer2SceneUnderstanding:
             
             # 编码图像
             image_data = frame  # LLM服务支持直接传入numpy数组
-            logger.debug(f"🖼️ 图像数据准备完成")
+            logger.debug("🖼️ 图像数据准备完成")
             
             # 使用配置的提示词
             system_prompt = self.system_prompt
@@ -224,7 +223,7 @@ class Layer2SceneUnderstanding:
             # 调用LLM服务
             try:
                 from app.services.llm_service import llm_service
-                logger.debug(f"🔄 开始调用LLM服务...")
+                logger.debug("🔄 开始调用LLM服务...")
                 
                 result = llm_service.call_llm(
                     prompt=user_prompt,
@@ -235,7 +234,7 @@ class Layer2SceneUnderstanding:
                 
                 if result.success:
                     scene_description = result.response
-                    logger.info(f"✅ LLM调用成功")
+                    logger.info("✅ LLM调用成功")
                     logger.info(f"📄 场景描述长度: {len(scene_description)} 字符")
                     logger.debug(f"📄 场景描述预览: {scene_description[:100]}...")
                 else:
@@ -250,7 +249,7 @@ class Layer2SceneUnderstanding:
             elapsed = time.time() - start_time
             
             logger.info(f"📄 场景描述: {scene_description[:80]}...")
-            logger.info(f"➡️ 下一步: decision_engine")
+            logger.info("➡️ 下一步: decision_engine")
             logger.info(f"⏱️ Layer 2 耗时: {elapsed:.3f}秒")
             logger.info("✅ [Layer 2] 场景理解 - 完成")
             logger.info("="*60 + "\n")
@@ -347,7 +346,7 @@ class Layer3DecisionEngine:
             # 调用思考LLM
             try:
                 from app.services.llm_service import llm_service
-                logger.debug(f"🔄 开始调用决策LLM...")
+                logger.debug("🔄 开始调用决策LLM...")
                 
                 result = llm_service.call_llm(
                     system_prompt=system_prompt,
@@ -360,7 +359,7 @@ class Layer3DecisionEngine:
                     decision_data = result.analysis_result
                     decision_type = decision_data.get("decision", "B2")
                     risk_level = decision_data.get("risk_level", "medium")
-                    logger.info(f"✅ LLM决策成功")
+                    logger.info("✅ LLM决策成功")
                     logger.info(f"📊 决策结果: {decision_data}")
                 else:
                     logger.warning(f"⚠️ LLM决策失败: {result.error_message}")
@@ -444,8 +443,8 @@ class Layer4FrameCollection:
             logger.info(f"📊 进度: {len(new_buffer)/self.max_frames*100:.1f}%")
             
             if buffer_full:
-                logger.info(f"🎯 缓冲区已满，准备时序分析")
-                logger.info(f"➡️ 下一步: temporal_analysis")
+                logger.info("🎯 缓冲区已满，准备时序分析")
+                logger.info("➡️ 下一步: temporal_analysis")
                 logger.info(f"⏱️ Layer 4 耗时: {elapsed:.3f}秒")
                 logger.info("✅ [Layer 4] 帧序列收集 - 完成")
                 logger.info("="*60 + "\n")
@@ -456,8 +455,8 @@ class Layer4FrameCollection:
                     "next_action": "temporal_analysis"
                 }
             else:
-                logger.info(f"⏳ 缓冲区未满，继续收集")
-                logger.info(f"➡️ 下一步: collect_more")
+                logger.info("⏳ 缓冲区未满，继续收集")
+                logger.info("➡️ 下一步: collect_more")
                 logger.info(f"⏱️ Layer 4 耗时: {elapsed:.3f}秒")
                 logger.info("✅ [Layer 4] 帧序列收集 - 继续")
                 logger.info("="*60 + "\n")
@@ -568,7 +567,7 @@ class Layer5TemporalAnalysis:
                     if "current_stage" not in analysis_result:
                         analysis_result["current_stage"] = f"阶段{current_batch}"
                     
-                    logger.info(f"✅ LLM时序分析成功")
+                    logger.info("✅ LLM时序分析成功")
                     logger.info(f"📊 分析结果: {analysis_result.get('batch_summary', 'N/A')[:60]}...")
                 else:
                     logger.warning(f"⚠️ LLM分析失败: {result.error_message}")
@@ -675,7 +674,7 @@ class Layer6FinalReasoning:
             if decision_type == "B1":
                 # 单帧判断
                 analysis_content = f"【单帧分析】\n{state['scene_description']}"
-                logger.info(f"📄 使用单帧场景描述进行推理")
+                logger.info("📄 使用单帧场景描述进行推理")
             else:  # B2
                 # 时序分析
                 batch_history = state.get("batch_analyses", [])
@@ -695,7 +694,7 @@ class Layer6FinalReasoning:
             # 调用思考LLM
             try:
                 from app.services.llm_service import llm_service
-                logger.debug(f"🔄 开始调用推理LLM...")
+                logger.debug("🔄 开始调用推理LLM...")
                 
                 result = llm_service.call_llm(
                     system_prompt=system_prompt,
@@ -715,7 +714,7 @@ class Layer6FinalReasoning:
                         "penalty_amount": 0,
                         "safety_education": ""
                     })
-                    logger.info(f"✅ LLM推理成功")
+                    logger.info("✅ LLM推理成功")
                     logger.info(f"📊 推理结果: {reasoning_data}")
                 else:
                     logger.warning(f"⚠️ LLM推理失败: {result.error_message}")
@@ -786,7 +785,7 @@ class Layer7AutoDisposal:
             disposal_plan = state["disposal_plan"]
             task_id = state["task_id"]
             
-            logger.info(f"📋 处置计划:")
+            logger.info("📋 处置计划:")
             logger.info(f"   🔊 语音广播: {disposal_plan.get('voice_broadcast', 'N/A')}")
             logger.info(f"   📝 记录违规: {disposal_plan.get('record_violation', False)}")
             logger.info(f"   💰 罚款金额: ¥{disposal_plan.get('penalty_amount', 0)}")
@@ -804,7 +803,7 @@ class Layer7AutoDisposal:
                 }
             
             # 执行处置
-            logger.debug(f"🔄 开始执行处置动作...")
+            logger.debug("🔄 开始执行处置动作...")
             result = self.disposal_executor.execute_disposal(
                 violation_info={
                     "violation_type": state["violation_type"],
@@ -818,7 +817,7 @@ class Layer7AutoDisposal:
             elapsed = time.time() - start_time
             executed_actions = result.get('executed_actions', [])
             
-            logger.info(f"✅ 处置执行完成")
+            logger.info("✅ 处置执行完成")
             logger.info(f"📊 已执行动作: {executed_actions}")
             logger.info(f"📈 执行结果: {result.get('success', False)}")
             if not result.get('success'):

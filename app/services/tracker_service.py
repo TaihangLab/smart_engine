@@ -3,7 +3,7 @@
 支持按类别分离的多跟踪器，避免跨类别的错误关联
 """
 import numpy as np
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any
 import logging
 from app.services.sort import Sort
 
@@ -205,7 +205,7 @@ class TrackerService:
             union = area1 + area2 - intersection
             
             return intersection / union if union > 0 else 0.0
-        except:
+        except Exception:
             return 0.0
     
     def reset(self):

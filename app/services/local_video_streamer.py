@@ -8,7 +8,6 @@ import time
 import logging
 from typing import Optional, Dict, Any
 from pathlib import Path
-import numpy as np
 from app.services.pyav_rtsp_streamer import PyAVRTSPStreamer
 from app.core.config import settings
 

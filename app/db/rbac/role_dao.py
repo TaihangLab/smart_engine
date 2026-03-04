@@ -1,6 +1,5 @@
-from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, select, func
+from sqlalchemy import select, func
 from app.models.rbac import SysRole
 
 
@@ -16,7 +15,7 @@ class RoleDao:
             select(SysRole).filter(
                 SysRole.role_code == role_code,
                 SysRole.tenant_id == tenant_id,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
             )
         )
         return result.scalars().first()
@@ -30,7 +29,7 @@ class RoleDao:
     async def get_role_by_id(db: AsyncSession, role_id: int):
         """根据主键ID获取角色（异步）"""
         result = await db.execute(
-            select(SysRole).filter(SysRole.id == role_id, SysRole.is_deleted == False)
+            select(SysRole).filter(SysRole.id == role_id, not SysRole.is_deleted)
         )
         return result.scalars().first()
 
@@ -41,7 +40,7 @@ class RoleDao:
         """根据租户ID获取角色列表（异步）"""
         result = await db.execute(
             select(SysRole)
-            .filter(SysRole.tenant_id == tenant_id, SysRole.is_deleted == False)
+            .filter(SysRole.tenant_id == tenant_id, not SysRole.is_deleted)
             .offset(skip)
             .limit(limit)
         )
@@ -171,7 +170,7 @@ class RoleDao:
         result = await db.execute(
             select(func.count()).select_from(
                 select(SysRole)
-                .filter(SysRole.tenant_id == tenant_id, SysRole.is_deleted == False)
+                .filter(SysRole.tenant_id == tenant_id, not SysRole.is_deleted)
                 .subquery()
             )
         )
@@ -212,7 +211,7 @@ class RoleDao:
             limit: 限制返回的记录数
         """
         stmt = select(SysRole).filter(
-            SysRole.tenant_id == tenant_id, SysRole.is_deleted == False
+            SysRole.tenant_id == tenant_id, not SysRole.is_deleted
         )
 
         if role_name:
@@ -283,7 +282,7 @@ class RoleDao:
         """
         # 构建查询
         stmt = select(SysRole).filter(
-            SysRole.tenant_id == tenant_id, SysRole.is_deleted == False
+            SysRole.tenant_id == tenant_id, not SysRole.is_deleted
         )
 
         if role_name:

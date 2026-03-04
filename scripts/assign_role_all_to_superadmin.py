@@ -13,8 +13,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')
 
 from app.db.session import SessionLocal
 from app.models.rbac import SysUser, SysRole, SysUserRole
-from app.models.rbac.rbac_constants import RoleConstants, TenantConstants
-from sqlalchemy import text
+from app.models.rbac.rbac_constants import RoleConstants
 
 
 def assign_role_all_to_superadmin():

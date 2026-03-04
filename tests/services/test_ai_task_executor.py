@@ -3,7 +3,6 @@ AI任务API测试脚本，演示如何为摄像头配置技能
 """
 import requests
 import json
-import time
 import logging
 
 # 配置日志

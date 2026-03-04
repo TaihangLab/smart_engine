@@ -15,14 +15,13 @@ MinIO上传编排器 - 企业级统一上传管理
 """
 import asyncio
 import base64
-import json
 import logging
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime
 from enum import Enum
-from typing import Dict, Any, Optional, Callable, Tuple, List
+from typing import Dict, Any, Optional, Callable, List
 import uuid
 
 from app.core.config import settings

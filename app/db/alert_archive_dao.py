@@ -5,8 +5,8 @@
 
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime
-from sqlalchemy import func, desc, asc, and_, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy import desc, and_, or_
+from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 import logging
 

@@ -5,10 +5,7 @@ import importlib
 import inspect
 import logging
 import os
-import re
 import sys
-import traceback
-import pkgutil
 import importlib.util
 from typing import Dict, Any, Type, List, Optional, Union, Tuple
 
@@ -17,8 +14,6 @@ from sqlalchemy.orm import Session
 from app.skills.skill_base import BaseSkill
 from app.services.llm_service import llm_service, LLMServiceResult
 from app.db.skill_class_dao import SkillClassDAO
-from app.db.model_dao import ModelDAO
-from app.models.skill import SkillClass
 from app.models.llm_skill import LLMSkillClass
 
 logger = logging.getLogger(__name__)
@@ -395,7 +390,7 @@ class SkillFactory:
                 # 遍历所有技能文件
                 for file_path in skill_files:
                     file_name = os.path.basename(file_path)
-                    module_name = file_name[:-3]  # 去掉.py扩展名
+                    file_name[:-3]  # 去掉.py扩展名
                     
                     try:
                         # 动态导入模块 (支持从插件目录和标准目录)

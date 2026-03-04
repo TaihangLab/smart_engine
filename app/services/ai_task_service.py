@@ -1,9 +1,8 @@
 """
 AI任务服务模块，负责AI任务相关的业务逻辑
 """
-from typing import List, Dict, Any, Optional, Tuple
+from typing import Dict, Any
 from sqlalchemy.orm import Session
-from app.models.ai_task import AITask
 from app.db.ai_task_dao import AITaskDAO
 import json
 import logging

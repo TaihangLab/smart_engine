@@ -4,9 +4,6 @@ API包，提供REST API接口
 from fastapi import APIRouter
 from . import cameras, models, skill_classes, alerts, ai_tasks, monitor, task_management, system, llm_skills, llm_skill_review, task_review, chat_assistant, wvp_proxy, alert_archives, review_records, local_videos, realtime_monitor, realtime_detection, rbac, auth, weather
 
-# 导入前端路由处理模块
-from . import frontend_routes
-
 api_router = APIRouter()
 api_router.include_router(cameras.router, prefix="/cameras", tags=["cameras"])
 api_router.include_router(models.router, prefix="/models", tags=["models"])

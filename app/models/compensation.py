@@ -31,7 +31,7 @@
 - 扩展性设计：支持新增通知渠道和补偿策略
 """
 
-from typing import Optional, Dict, Any, List
+from typing import Optional, Dict, Any
 from datetime import datetime
 from sqlalchemy import Column, String, DateTime, Integer, BigInteger, JSON, Text, Boolean, Index
 from pydantic import BaseModel, Field

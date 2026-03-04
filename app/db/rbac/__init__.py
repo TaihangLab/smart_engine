@@ -46,9 +46,9 @@ class RbacDao:
             ).filter(
                 SysUser.user_name == user_name,
                 SysUser.tenant_id == tenant_id,
-                SysUser.is_deleted == False,
-                SysRole.is_deleted == False,
-                SysPermission.is_deleted == False
+                not SysUser.is_deleted,
+                not SysRole.is_deleted,
+                not SysPermission.is_deleted
             )
         )
         return list(result.scalars().all())

@@ -62,7 +62,7 @@ class RedisClient:
                 return False
             self.client.ping()
             return True
-        except:
+        except Exception:
             self.is_connected = False
             return False
     

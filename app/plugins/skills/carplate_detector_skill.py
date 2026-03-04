@@ -1,7 +1,7 @@
 import cv2
 import numpy as np
 import os
-from typing import List, Dict, Any, Tuple, Union, Optional
+from typing import List, Dict, Any, Tuple, Union
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
@@ -195,7 +195,7 @@ class PlateRecognitionSkill(BaseSkill):
         return self.postprocess_recognizer(preds)
 
     def preprocess_recognizer(self, img: np.ndarray) -> np.ndarray:
-        imgC, imgH, imgW = 3, 48, 320
+        _imgC, imgH, imgW = 3, 48, 320
         if len(img.shape) == 2:
             img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
         h, w = img.shape[0:2]
@@ -262,14 +262,12 @@ class PlateRecognitionSkill(BaseSkill):
                 "/Library/Fonts/Arial.ttf",
             ]
             
-            found_font_path = None
             
             for font_path in font_paths:
                 if os.path.exists(font_path):
                     try:
                         self.font_main = ImageFont.truetype(font_path, 24)  # 主文字字体
                         self.font_sub = ImageFont.truetype(font_path, 18)   # 副文字字体
-                        found_font_path = font_path
                         self.use_chinese_display = True
                         self.log("info", f"字体初始化成功: {font_path}")
                         break
@@ -404,7 +402,7 @@ class PlateRecognitionSkill(BaseSkill):
                                 main_h = main_bbox[3] - main_bbox[1]
                                 sub_w = sub_bbox[2] - sub_bbox[0]
                                 sub_h = sub_bbox[3] - sub_bbox[1]
-                            except:
+                            except Exception:
                                 # 如果textbbox不可用，使用textsize（较老的PIL版本）
                                 main_w, main_h = temp_draw.textsize(main_text, font=font_main)
                                 sub_w, sub_h = temp_draw.textsize(sub_text, font=font_sub)

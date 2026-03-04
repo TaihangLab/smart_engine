@@ -288,7 +288,7 @@ class AlertDataMockService:
 
         generated = 0
         date_start = target_date.replace(hour=0, minute=0, second=0, microsecond=0)
-        date_end = date_start.replace(hour=23, minute=59, second=59, microsecond=999999)
+        date_start.replace(hour=23, minute=59, second=59, microsecond=999999)
 
         try:
             for _ in range(count):
@@ -420,7 +420,6 @@ def check_and_fill_alert_data():
 
 if __name__ == "__main__":
     # 测试模式：直接运行此文件可以填充数据
-    import sys
 
     logging.basicConfig(
         level=logging.INFO,

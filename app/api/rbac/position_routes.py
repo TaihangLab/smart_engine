@@ -6,11 +6,9 @@ RBAC岗位管理API
 处理岗位相关的增删改查操作
 """
 
-from typing import Optional
 from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
-from typing import Optional
 from app.db.async_session import get_async_db
 from app.models.rbac import (
     PositionCreate, PositionUpdate, PositionResponse,

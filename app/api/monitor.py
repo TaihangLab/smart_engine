@@ -255,7 +255,6 @@ def get_dashboard_summary(db: Session = Depends(get_db)):
         alert_stats = alert_service.get_summary_stats(db=db)
 
         # 2. 获取预警等级统计（所有时间）
-        from datetime import timedelta
         # 使用历史数据的起止时间，确保能获取到数据
         end_date = datetime.now()
         start_date = datetime(2020, 1, 1)  # 使用很早的日期来获取所有数据

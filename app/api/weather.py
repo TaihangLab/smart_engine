@@ -7,8 +7,7 @@
 
 import logging
 import random
-from typing import Dict, Any
-from fastapi import APIRouter, Query
+from fastapi import APIRouter
 
 from app.core.config import settings
 

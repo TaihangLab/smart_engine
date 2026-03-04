@@ -4,12 +4,10 @@
 """
 import cv2
 import numpy as np
-import time
 from typing import Dict, List, Any, Tuple, Union, Optional
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
-import sys
 import os
 from PIL import Image, ImageDraw, ImageFont
 
@@ -613,14 +611,12 @@ class PStopCocoSkill(BaseSkill):
                 "/Library/Fonts/Arial.ttf",
             ]
             
-            found_font_path = None
             
             for font_path in font_paths:
                 if os.path.exists(font_path):
                     try:
                         self.font_main = ImageFont.truetype(font_path, 24)  # 主文字字体
                         self.font_sub = ImageFont.truetype(font_path, 18)   # 副文字字体
-                        found_font_path = font_path
                         self.use_chinese_display = True
                         self.log("info", f"字体初始化成功: {font_path}")
                         break
@@ -683,7 +679,7 @@ class PStopCocoSkill(BaseSkill):
                 confidence = detection.get("confidence", 0.0)
                 track_id = detection.get("track_id", -1)
                 dwell_time = detection.get("dwell_time", 0)
-                class_name = detection.get("class_name", "unknown")
+                detection.get("class_name", "unknown")
                 is_matched = detection.get("matched", True)  # 默认为匹配状态
                 is_temp_track = detection.get("temp_track", False)  # 是否为临时跟踪
                 
@@ -748,7 +744,7 @@ class PStopCocoSkill(BaseSkill):
                                 main_h = main_bbox[3] - main_bbox[1]
                                 sub_w = sub_bbox[2] - sub_bbox[0]
                                 sub_h = sub_bbox[3] - sub_bbox[1]
-                            except:
+                            except Exception:
                                 # 如果textbbox不可用，使用textsize（较老的PIL版本）
                                 main_w, main_h = temp_draw.textsize(main_text, font=font_main)
                                 sub_w, sub_h = temp_draw.textsize(sub_text, font=font_sub)

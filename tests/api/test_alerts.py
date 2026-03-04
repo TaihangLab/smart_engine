@@ -42,7 +42,7 @@ def test_get_alert_statistics(client):
     """测试获取预警统计信息"""
     response = client.get("/api/v1/alerts/statistics")
     
-    print(f"\n测试: 获取预警统计信息")
+    print("\n测试: 获取预警统计信息")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问
@@ -53,7 +53,7 @@ def test_get_alert_summary(client):
     """测试获取预警统计摘要"""
     response = client.get("/api/v1/alerts/statistics/summary")
     
-    print(f"\n测试: 获取预警统计摘要")
+    print("\n测试: 获取预警统计摘要")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问
@@ -64,7 +64,7 @@ def test_get_sse_status(client):
     """测试获取 SSE 连接状态"""
     response = client.get("/api/v1/alerts/sse/status")
     
-    print(f"\n测试: 获取 SSE 连接状态")
+    print("\n测试: 获取 SSE 连接状态")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问
@@ -75,7 +75,7 @@ def test_get_connected_status(client):
     """测试获取连接状态"""
     response = client.get("/api/v1/alerts/connected")
     
-    print(f"\n测试: 获取连接状态")
+    print("\n测试: 获取连接状态")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问

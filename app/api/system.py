@@ -218,12 +218,11 @@ async def get_system_resources():
     """
     try:
         import psutil
-        import platform
 
         # ==================== CPU 信息 ====================
         cpu_percent = psutil.cpu_percent(interval=0.1)
         cpu_cores = psutil.cpu_count(logical=True)
-        cpu_physical_cores = psutil.cpu_count(logical=False)
+        psutil.cpu_count(logical=False)
 
         # CPU 温度（如果支持）
         cpu_avg_temp = None
@@ -239,7 +238,7 @@ async def get_system_resources():
                 if all_temps:
                     cpu_avg_temp = round(sum(all_temps) / len(all_temps), 1)
                     cpu_max_temp = round(max(all_temps), 1)
-        except Exception as e:
+        except Exception:
             # 温度读取不支持，使用默认值
             cpu_avg_temp = 45.0
             cpu_max_temp = 65.0
@@ -260,7 +259,6 @@ async def get_system_resources():
         disk_type = "SSD"
         try:
             import os
-            root_path = '/'
             if os.path.exists('/sys/block'):
                 # 简单检测：如果是旋转磁盘则是 HDD
                 for block in os.listdir('/sys/block'):
@@ -308,7 +306,7 @@ async def get_system_resources():
 
         # ==================== 网络信息 ====================
         net_io = psutil.net_io_counters()
-        network_usage = min(100, round((net_io.bytes_sent + net_io.bytes_recv) / (1024**3) * 10, 2))
+        min(100, round((net_io.bytes_sent + net_io.bytes_recv) / (1024**3) * 10, 2))
 
         return {
             "code": 0,

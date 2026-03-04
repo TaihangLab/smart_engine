@@ -9,10 +9,9 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Union, AsyncGenerator
 
-from fastapi import APIRouter, HTTPException, Query, Form, Request
+from fastapi import APIRouter, HTTPException, Query, Form
 from fastapi.responses import StreamingResponse, HTMLResponse
 from pydantic import BaseModel, Field, validator
-from langchain_core.runnables import RunnableConfig
 
 from app.services.llm_service import get_llm_service
 from app.services.redis_client import redis_client
@@ -1132,11 +1131,13 @@ async def health_check():
         provider = settings.TEXT_LLM_PROVIDER
         
         # 检查LLM服务（尝试简单的调用）
+        from app.services.llm_service import get_llm_service
         llm_healthy = True
         error_msg = None
         try:
             # 简单测试：创建一个客户端
-            client = llm_service._get_client(model_type="text", use_backup=False)
+            service = get_llm_service()
+            client = service._get_client(model_type="text", use_backup=False)
             if not client:
                 llm_healthy = False
                 error_msg = "无法创建LLM客户端"

@@ -6,7 +6,7 @@ RBAC关系管理API
 处理用户-角色、角色-权限之间的关联关系
 """
 
-from typing import Optional, List
+from typing import Optional
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession

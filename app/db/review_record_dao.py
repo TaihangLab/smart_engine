@@ -5,7 +5,7 @@
 from typing import List, Optional, Dict, Any, Tuple
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import and_, or_, desc, func
+from sqlalchemy import desc, func
 from sqlalchemy.exc import SQLAlchemyError
 import logging
 

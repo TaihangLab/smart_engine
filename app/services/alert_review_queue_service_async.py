@@ -5,15 +5,10 @@
 import logging
 import json
 import asyncio
-import time
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from typing import Dict, Any
+from datetime import datetime
 
-from app.db.async_session import AsyncSessionLocal, get_async_db_session
 from app.models.ai_task import AITask
-from app.models.llm_skill import LLMSkillClass
 from app.services.alert_review_service import alert_review_service
 from app.services.redis_client import get_redis_client
 from app.core.config import settings
@@ -154,13 +149,13 @@ class AsyncAlertReviewQueueService:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # 如果事件循环正在运行，创建任务
-                future = asyncio.ensure_future(self.enqueue_review_task_async(alert_data, ai_task, review_skill_class_id))
+                asyncio.ensure_future(self.enqueue_review_task_async(alert_data, ai_task, review_skill_class_id))
                 # 不等待结果，直接返回True
                 return True
             else:
                 # 如果事件循环未运行，直接运行
                 return loop.run_until_complete(self.enqueue_review_task_async(alert_data, ai_task, review_skill_class_id))
-        except:
+        except Exception:
             # 回退到同步版本
             return self._enqueue_review_task_sync(alert_data, ai_task, review_skill_class_id)
 
@@ -345,7 +340,7 @@ class AsyncAlertReviewQueueService:
                 task = json.loads(task_data)
                 await self._handle_task_failure_async(task, str(e))
                 self.redis_client.lrem(self.processing_queue_key, 1, task_data)
-            except:
+            except Exception:
                 # 如果连解析都失败，移入失败队列
                 self.redis_client.lpush(self.failed_queue_key, task_data)
                 self.redis_client.lrem(self.processing_queue_key, 1, task_data)

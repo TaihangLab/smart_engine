@@ -2,7 +2,7 @@ import requests
 import logging
 import hashlib
 import functools
-from typing import List, Dict, Any, Optional, Callable
+from typing import List, Dict, Any, Optional
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -104,11 +104,11 @@ def auto_relogin(func):
                 try:
                     content = e.response.json()
                     if content.get("code") == 401:
-                        logger.warning(f"返回内容包含401错误码，尝试重新登录")
+                        logger.warning("返回内容包含401错误码，尝试重新登录")
                         self._login()
                         # 重新调用原始方法
                         return func(self, *args, **kwargs)
-                except:
+                except Exception:
                     pass  # 解析失败，继续处理其他情况
             
             # 其他异常继续抛出
@@ -126,7 +126,7 @@ class WVPClient:
         if WVP_ENABLED:
             self._initialize_connection()
         else:
-            logger.info(f"⏭️ WVP客户端已禁用")
+            logger.info("⏭️ WVP客户端已禁用")
 
     def _initialize_connection(self) -> None:
         """初始化WVP连接 - 优雅降级处理"""
@@ -256,7 +256,7 @@ class WVPClient:
                         # 如果能解析成JSON且包含401错误码，抛出带有响应对象的异常
                         if content.get("code") == 401:
                             response.raise_for_status()
-                    except:
+                    except Exception:
                         # 解析失败也抛出异常
                         response.raise_for_status()
                 else:

@@ -1,7 +1,7 @@
 """
 技能类数据访问对象，提供对技能类数据的增删改查操作
 """
-from typing import Dict, Any, List, Optional, Union, Tuple
+from typing import Dict, Any, List, Optional, Tuple
 from sqlalchemy.orm import Session
 from app.models.skill import SkillClass, SkillClassModel
 from app.models.model import Model
@@ -108,7 +108,7 @@ class SkillClassDAO:
         Returns:
             启用的技能类列表
         """
-        return db.query(SkillClass).filter(SkillClass.status == True).all()
+        return db.query(SkillClass).filter(SkillClass.status).all()
         
     @staticmethod
     def create(data: Dict[str, Any], db: Session) -> SkillClass:
@@ -278,7 +278,6 @@ class SkillClassDAO:
             技能类列表
         """
         # 查找使用此模型的所有技能类
-        from sqlalchemy.orm import joinedload
         
         skill_classes = db.query(SkillClass).join(
             SkillClassModel, 

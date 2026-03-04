@@ -1,21 +1,26 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 
+import asyncio
 import logging
-import sys
 import os
 import signal
-import asyncio
+import sys
+
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from starlette.middleware.base import BaseHTTPMiddleware
 
 # 添加项目根目录到Python路径
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
 from app.core.config import settings
 from app.api import api_router
+from app.api import chat_assistant
+from app.models.rbac import UnifiedResponse
 
 # 导入中间件
 from app.core.middleware import RequestLoggingMiddleware, AuditMiddleware
@@ -133,7 +138,6 @@ app.add_middleware(AuditMiddleware)
 app.add_middleware(RequestLoggingMiddleware)
 
 # 添加鉴权中间件
-from starlette.middleware.base import BaseHTTPMiddleware
 class AuthMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request, call_next):
         try:
@@ -192,18 +196,7 @@ app.add_middleware(
 )
 
 
-# 全局异常处理器
-from fastapi import Request, HTTPException
-from fastapi.responses import JSONResponse
-from app.models.rbac import UnifiedResponse
 # 导入业务异常类供其他模块使用
-from app.core.exceptions import (
-    RBACException,
-    NotFoundException,
-    BadRequestException,
-    ForbiddenException,
-    ConflictException
-)
 
 # CORS 配置
 ALLOWED_ORIGINS = ["http://localhost:8080", "http://localhost:4000", "http://127.0.0.1:4000"]
@@ -283,9 +276,7 @@ async def global_exception_handler(request: Request, exc: Exception):
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
-# 单独挂载 chat_assistant 路由到 /api 前缀（与前端调用路径一致）
-from app.api import chat_assistant
-# chat_assistant
+# chat_assistant 路由
 app.include_router(chat_assistant.router, prefix="/api/chat")
 
 # 配置静态文件

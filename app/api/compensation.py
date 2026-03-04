@@ -25,30 +25,24 @@ API设计特点：
 - 无手动干预：完全自动化，不提供手动触发功能
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Path, BackgroundTasks
-from fastapi.responses import StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import Dict, Any, List, Optional, Union
+from typing import Dict, Any, List, Optional
 from datetime import datetime, timedelta
-import json
-import asyncio
 from pydantic import BaseModel, Field
 
 from app.db.session import get_db
 from app.core.config import settings
 from app.models.compensation import (
     AlertPublishLog, AlertNotificationLog, CompensationTaskLog,
-    PublishStatus, NotificationStatus, CompensationTaskType,
-    CompensationStats
+    PublishStatus, NotificationStatus
 )
 from app.services.unified_compensation_service import (
-    unified_compensation_service,
     get_compensation_service_stats,
     get_compensation_health
 )
 from app.utils.message_id_generator import (
-    generate_message_id, parse_message_id, MessageIdUtils,
-    benchmark_id_generation, MessageIdType
+    generate_message_id, parse_message_id, benchmark_id_generation, MessageIdType
 )
 
 # 创建路由器 "💎 企业级补偿机制"

@@ -1,8 +1,7 @@
 import logging
 import numpy as np
-import json
 import time
-from typing import Dict, List, Any, Optional, Union, Tuple
+from typing import Dict, Optional
 from app.core.config import settings
 
 # 配置日志
@@ -19,7 +18,7 @@ if TRITON_ENABLED:
     try:
         import tritonclient.grpc as grpcclient
     except ImportError:
-        logger.warning(f"⚠️ 未安装tritonclient库，Triton功能将不可用")
+        logger.warning("⚠️ 未安装tritonclient库，Triton功能将不可用")
         TRITON_ENABLED = False
 
 class TritonClient:
@@ -47,7 +46,7 @@ class TritonClient:
         if TRITON_ENABLED:
             logger.info(f"初始化Triton客户端配置，目标服务器: {url}")
         else:
-            logger.info(f"⏭️ Triton客户端已禁用")
+            logger.info("⏭️ Triton客户端已禁用")
     
     def _get_client(self):
         """
@@ -122,7 +121,7 @@ class TritonClient:
         """
         # 检查Triton是否启用
         if not TRITON_ENABLED:
-            logger.info(f"⏭️ Triton客户端已禁用，跳过重新连接")
+            logger.info("⏭️ Triton客户端已禁用，跳过重新连接")
             return False
         
         try:

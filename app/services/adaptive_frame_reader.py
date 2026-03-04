@@ -14,11 +14,9 @@ import numpy as np
 import time
 import logging
 import threading
-import weakref
 from typing import Optional, Dict, Any, Tuple, Set
 from io import BytesIO
 from PIL import Image
-from collections import defaultdict
 
 from app.services.wvp_client import wvp_client
 

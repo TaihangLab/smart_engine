@@ -1,8 +1,6 @@
-from typing import List
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, or_, func, select
+from sqlalchemy import func, select
 from app.models.rbac import SysPermission
-import json
 
 
 class PermissionDao:
@@ -14,7 +12,7 @@ class PermissionDao:
         result = await db.execute(
             select(SysPermission).filter(
                 SysPermission.id == permission_id,
-                SysPermission.is_deleted == False
+                not SysPermission.is_deleted
             )
         )
         return result.scalars().first()
@@ -25,7 +23,7 @@ class PermissionDao:
         result = await db.execute(
             select(SysPermission).filter(
                 SysPermission.permission_code == permission_code,
-                SysPermission.is_deleted == False
+                not SysPermission.is_deleted
             )
         )
         return result.scalars().first()
@@ -37,7 +35,7 @@ class PermissionDao:
             select(SysPermission).filter(
                 SysPermission.path == path,
                 SysPermission.method == method,
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.status == 0
             )
         )
@@ -52,7 +50,7 @@ class PermissionDao:
             raise ValueError("limit 必须是正整数")
         result = await db.execute(
             select(SysPermission).filter(
-                SysPermission.is_deleted == False
+                not SysPermission.is_deleted
             ).order_by(SysPermission.sort_order).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
@@ -105,7 +103,7 @@ class PermissionDao:
         result = await db.execute(
             select(func.count()).select_from(
                 select(SysPermission).filter(
-                    SysPermission.is_deleted == False
+                    not SysPermission.is_deleted
                 ).subquery()
             )
         )
@@ -129,7 +127,7 @@ class PermissionDao:
             limit: 限制返回的记录数
         """
         stmt = select(SysPermission).filter(
-            SysPermission.is_deleted == False
+            not SysPermission.is_deleted
         )
 
         if permission_name:
@@ -166,7 +164,7 @@ class PermissionDao:
         """
         # 构建基础查询
         base_stmt = select(SysPermission).filter(
-            SysPermission.is_deleted == False
+            not SysPermission.is_deleted
         )
 
         if permission_name:

@@ -3,11 +3,10 @@
 提供预警档案和档案记录的RESTful API
 """
 
-from typing import List, Optional, Dict, Any
+from typing import Optional, Dict, Any
 from datetime import datetime
 import logging
-from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Form, Query, Path, status, Body
-from fastapi.responses import JSONResponse
+from fastapi import APIRouter, Depends, HTTPException, File, UploadFile, Query, Path, status, Body
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -18,14 +17,12 @@ from app.models.alert_archive import (
     AlertArchiveUpdate,
     AlertArchiveResponse,
     AlertArchiveListResponse,
-    PaginatedResponse,
     AlertArchiveStatistics
 )
 from app.services.minio_client import MinioClient
 # 导入JWT用户信息相关功能
 from app.models.user import UserInfo
 from app.core.auth import get_current_user_optional
-import json
 import uuid
 import os
 
@@ -353,7 +350,7 @@ async def upload_archive_image(
                 }
             }
             
-        except Exception as e:
+        except Exception:
             # 如果MinIO上传失败，保存到本地
             upload_dir = "static/uploads/warning_archives"
             os.makedirs(upload_dir, exist_ok=True)

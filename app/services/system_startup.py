@@ -18,7 +18,7 @@
 import asyncio
 import logging
 from contextlib import asynccontextmanager
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, Optional
 from datetime import datetime
 
 from app.core.config import settings
@@ -33,11 +33,9 @@ from app.db.base import Base
 
 # 导入其他服务的工厂函数（延迟导入，避免在模块加载时初始化）
 from app.services.sse_connection_manager import get_sse_manager
-from app.services.triton_client import get_triton_client
-from app.services.llm_service import get_llm_service
 from app.services.rabbitmq_client import get_rabbitmq_client
-from app.services.wvp_client import get_wvp_client
 from app.mock import check_and_fill_alert_data
+from app.services.model_service import sync_models_from_triton
 
 logger = logging.getLogger(__name__)
 
@@ -218,7 +216,7 @@ class SystemStartupService:
                     # 自动修复：禁用冲突的服务
                     service_name = error.get("service")
                     if service_name == "AI任务执行器":
-                        logger.warning(f"   🔧 自动禁用 AI_TASK_EXECUTOR_ENABLED")
+                        logger.warning("   🔧 自动禁用 AI_TASK_EXECUTOR_ENABLED")
                         # 注意：这里不能直接修改 settings，需要在环境变量中设置
                         # 这里只是记录日志，实际修复需要用户修改 .env
 
@@ -253,13 +251,13 @@ class SystemStartupService:
             # 确保所有模型都被导入，以便create_all能发现它们
             try:
                 # 导入现有模型
-                from app.models import alert, model, skill, ai_task, llm_skill
+                from app.models import alert, model, skill, ai_task, llm_skill  # noqa: F401
                 # 导入预警档案关联模型
-                from app.models import alert_archive_link
+                from app.models import alert_archive_link  # noqa: F401
                 # 导入复判记录模型
-                from app.models import review_record
+                from app.models import review_record  # noqa: F401
                 # 导入本地视频模型
-                from app.models import local_video
+                from app.models import local_video  # noqa: F401
                 logger.info("✅ 现有模型导入完成")
                 
                 # 导入预警重构模型（已替换原有模型）
@@ -383,7 +381,7 @@ class SystemStartupService:
                 today = result.get("today", {})
                 history = result.get("history", {})
 
-                logger.info(f"✅ 预警数据Mock服务执行成功:")
+                logger.info("✅ 预警数据Mock服务执行成功:")
                 logger.info(f"   今日: {today.get('action', 'N/A')} - 现有: {today.get('existing', 0)}, 生成: {today.get('generated', 0)}")
                 logger.info(f"   历史: 处理 {history.get('days_processed', 0)} 天, 生成 {history.get('total_generated', 0)} 条")
             elif result.get("status") == "disabled":
@@ -569,7 +567,7 @@ class SystemStartupService:
             self.startup_completed = True
             startup_duration = (datetime.utcnow() - self.startup_time).total_seconds()
             
-            logger.info(f"🎉 系统启动完成！")
+            logger.info("🎉 系统启动完成！")
             logger.info(f"📊 启动统计: 成功={startup_success}, 失败={startup_failed}, 耗时={startup_duration:.2f}s")
             
             # 记录系统启动事件

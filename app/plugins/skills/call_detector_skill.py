@@ -4,7 +4,6 @@
 import cv2
 import numpy as np
 from typing import Dict, List, Any, Tuple, Union, Optional
-from enum import IntEnum
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging

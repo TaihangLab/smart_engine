@@ -303,7 +303,7 @@ async def preview_test_review_skill(
         
         try:
             # 创建临时的LLM配置用于测试（使用智能配置）
-            test_api_config = {
+            {
                 "api_key": settings.PRIMARY_LLM_API_KEY or "ollama",
                 "base_url": settings.PRIMARY_LLM_BASE_URL,
                 "temperature": smart_config["temperature"],

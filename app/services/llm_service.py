@@ -35,28 +35,28 @@ if LLM_ENABLED:
         from PIL import Image as PIL_Image
         import numpy as np
     except ImportError:
-        logging.warning(f"⚠️ 未安装PIL或numpy库，LLM多模态功能将不可用")
+        logging.warning("⚠️ 未安装PIL或numpy库，LLM多模态功能将不可用")
 
 # LangChain 1.0.7+ - 仅在LLM启用时导入
 if LLM_ENABLED:
     try:
         from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
-        from langchain_core.prompts import ChatPromptTemplate
-        from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
+        from langchain_core.prompts import ChatPromptTemplate  # noqa: F401
+        from langchain_core.output_parsers import StrOutputParser, JsonOutputParser  # noqa: F401
         from langchain_core.chat_history import BaseChatMessageHistory
-        from langchain_core.language_models import BaseChatModel
+        from langchain_core.language_models import BaseChatModel  # noqa: F401
         from langchain_openai import ChatOpenAI
     except ImportError:
-        logging.warning(f"⚠️ 未安装langchain相关库，LLM功能将不可用")
+        logging.warning("⚠️ 未安装langchain相关库，LLM功能将不可用")
         LLM_ENABLED = False
 
 # Redis客户端 - 仅在LLM启用时导入
 redis_client = None
 if LLM_ENABLED:
     try:
-        from app.services.redis_client import redis_client
+        from app.services.redis_client import redis_client  # noqa: F401
     except ImportError:
-        logging.warning(f"⚠️ 未找到redis_client模块，LLM历史记录功能将不可用")
+        logging.warning("⚠️ 未找到redis_client模块，LLM历史记录功能将不可用")
 
 logger = logging.getLogger(__name__)
 
@@ -182,7 +182,7 @@ class LLMService:
     
     def __init__(self):
         if not LLM_ENABLED:
-            logging.warning(f"⏭️ LLM服务已禁用")
+            logging.warning("⏭️ LLM服务已禁用")
             return
             
         self.logger = logging.getLogger(__name__)
@@ -196,7 +196,7 @@ class LLMService:
         self.logger.info("🚀 LLM服务初始化 (LangChain 1.0.7 + OpenAI兼容API)")
         self.logger.info(f"   纯文本模型: {settings.TEXT_LLM_MODEL} @ {settings.TEXT_LLM_BASE_URL}")
         self.logger.info(f"   多模态模型: {settings.MULTIMODAL_LLM_MODEL} @ {settings.MULTIMODAL_LLM_BASE_URL}")
-        self.logger.info(f"   视频支持: OpenAI frame_list格式")
+        self.logger.info("   视频支持: OpenAI frame_list格式")
     
     def _get_client(self, model_type: str = "text", use_backup: bool = False) -> ChatOpenAI:
         """
@@ -433,7 +433,7 @@ class LLMService:
             if json_match:
                 try:
                     return json.loads(json_match.group(0))
-                except:
+                except Exception:
                     pass
             
             # 解析失败，返回原始文本
@@ -544,7 +544,7 @@ class LLMService:
                 
                 # 自动降级到备用模型
                 if settings.LLM_ENABLE_FALLBACK:
-                    self.logger.info(f"🔄 切换到备用模型...")
+                    self.logger.info("🔄 切换到备用模型...")
                     
                     try:
                         client = self._get_client(model_type=model_type, use_backup=True)
@@ -566,7 +566,7 @@ class LLMService:
                         response = client.invoke(messages, **call_kwargs)
                         response_text = response.content
                         
-                        self.logger.info(f"✅ 备用模型调用成功")
+                        self.logger.info("✅ 备用模型调用成功")
                         
                         # 解析响应
                         if response_format and response_format.get("type") == "json_object":

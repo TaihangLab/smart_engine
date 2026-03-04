@@ -15,7 +15,7 @@ import io
 from app.db.session import get_db
 from app.db.async_session import get_async_db
 from app.models.alert import Alert, AlertResponse, AlertUpdate, AlertStatus
-from app.services.alert_service import alert_service, register_sse_client, unregister_sse_client, publish_test_alert, connected_clients
+from app.services.alert_service import alert_service, register_sse_client, unregister_sse_client, connected_clients
 # 导入JWT用户信息相关功能
 from app.models.user import UserInfo
 from app.core.auth import get_current_user, get_current_user_optional
@@ -27,7 +27,6 @@ logger = logging.getLogger(__name__)
 try:
     from openpyxl import Workbook
     from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
-    from openpyxl.utils import get_column_letter
     OPENPYXL_AVAILABLE = True
 except ImportError:
     OPENPYXL_AVAILABLE = False
@@ -1121,7 +1120,6 @@ async def send_test_alert(
         from app.models.ai_task import AITask
         import numpy as np
         import cv2
-        import json
         import asyncio
         from datetime import datetime
         
@@ -1549,7 +1547,7 @@ def update_alert_status(
         alert.updated_at = datetime.now()
         
         # 5. 创建处理记录 - 关键步骤！
-        from app.models.alert import AlertProcessingRecord, ProcessingActionType
+        from app.models.alert import AlertProcessingRecord
         
         # 根据状态变化确定动作类型
         action_type = _get_action_type_from_status_change(original_status, alert_update.status)
@@ -1699,7 +1697,7 @@ def batch_update_alert_status(
                 alert.updated_at = datetime.now()
                 
                 # 创建处理记录
-                from app.models.alert import AlertProcessingRecord, ProcessingActionType
+                from app.models.alert import AlertProcessingRecord
                 action_type = _get_action_type_from_status_change(original_status, status)
                 
                 processing_record = AlertProcessingRecord(
@@ -2061,7 +2059,7 @@ async def batch_mark_alerts_as_false_alarm(
             # 创建复判记录
             from app.db.review_record_dao import ReviewRecordDAO
             review_dao = ReviewRecordDAO(db)
-            review_record = review_dao.create_review_record(
+            review_dao.create_review_record(
                 alert_id=alert.alert_id,
                 review_type="manual",
                 reviewer_name=reviewer_name,

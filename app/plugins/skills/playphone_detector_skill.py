@@ -4,7 +4,6 @@
 import cv2
 import numpy as np
 from typing import Dict, List, Any, Tuple, Union, Optional
-from enum import IntEnum
 from app.skills.skill_base import BaseSkill, SkillResult
 from app.services.triton_client import triton_client
 import logging
@@ -278,7 +277,7 @@ class CallPlayDetectorSkill(BaseSkill):
             elif class_name == 'PlayPhone':
                 playphone_count += 1
 
-        total_violations = call_count + playphone_count
+        call_count + playphone_count
         is_safe = playphone_count == 0
 
         # 确定预警信息

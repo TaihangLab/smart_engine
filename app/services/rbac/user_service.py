@@ -10,7 +10,6 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.rbac import RbacDao
 from app.models.rbac import SysUser
-from app.utils.id_generator import generate_id
 
 logger = logging.getLogger(__name__)
 

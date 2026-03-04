@@ -13,7 +13,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.rbac import (
     RoleCreate, RoleUpdate, RoleResponse, RoleListResponse,
-    RolePermissionAssign, RolePermissionResponse,
     PaginatedResponse
 )
 from app.models.rbac import UnifiedResponse

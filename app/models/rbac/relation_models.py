@@ -8,7 +8,6 @@
 from typing import Optional, List
 from pydantic import BaseModel, Field
 from pydantic import ConfigDict
-from .rbac_base import BaseResponse
 
 
 # ===========================================

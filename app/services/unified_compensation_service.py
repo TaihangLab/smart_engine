@@ -21,21 +21,16 @@ import asyncio
 import logging
 import threading
 from datetime import datetime, timedelta
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from concurrent.futures import ThreadPoolExecutor
-from sqlalchemy.orm import Session
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, or_, desc, func, text, select
+from sqlalchemy import and_, text, select
 
 from app.core.config import settings
-from app.db.session import SessionLocal
 from app.db.async_session import AsyncSessionLocal
 from app.models.compensation import (
     AlertPublishLog, AlertNotificationLog, CompensationTaskLog,
-    PublishStatus, NotificationStatus, NotificationChannel, CompensationTaskType,
-    AlertPublishLogCreate, AlertNotificationLogCreate, CompensationTaskLogCreate
+    PublishStatus, NotificationStatus, NotificationChannel, CompensationTaskType
 )
-from app.models.alert import Alert, AlertStatus
 from app.services.rabbitmq_client import rabbitmq_client
 from app.services.sse_connection_manager import sse_manager
 from app.utils.message_id_generator import generate_message_id
@@ -427,7 +422,7 @@ class UnifiedCompensationService:
                             delivery_tag=dead_msg['delivery_tag'], 
                             requeue=False
                         )
-                    except:
+                    except Exception:
                         pass
             
             # 更新统计
@@ -564,7 +559,7 @@ class UnifiedCompensationService:
                     success = await sse_manager.broadcast_to_all(notification_content)
                     return success
                 else:
-                    logger.warning(f"⚠️ 没有活跃的SSE客户端，通知发送失败")
+                    logger.warning("⚠️ 没有活跃的SSE客户端，通知发送失败")
                     return False
             else:
                 # 其他通道暂未实现
@@ -686,7 +681,6 @@ class UnifiedCompensationService:
 
 
 # 导入socket模块（用于获取主机名）
-import socket
 
 # 延迟初始化全局实例
 _unified_compensation_service: Optional["UnifiedCompensationService"] = None

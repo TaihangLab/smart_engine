@@ -42,7 +42,7 @@ def test_get_ai_cameras_list(client):
     """测试获取 AI 摄像头列表"""
     response = client.get("/api/v1/cameras/ai/list?page=1&limit=10")
     
-    print(f"\n测试: 获取 AI 摄像头列表")
+    print("\n测试: 获取 AI 摄像头列表")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问
@@ -53,7 +53,7 @@ def test_get_wvp_gb28181_list(client):
     """测试获取国标设备列表"""
     response = client.get("/api/v1/cameras/wvp/gb28181_list?page=1&count=10")
     
-    print(f"\n测试: 获取国标设备列表")
+    print("\n测试: 获取国标设备列表")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问
@@ -64,7 +64,7 @@ def test_get_wvp_push_list(client):
     """测试获取推流设备列表"""
     response = client.get("/api/v1/cameras/wvp/push_list?page=1&count=10")
     
-    print(f"\n测试: 获取推流设备列表")
+    print("\n测试: 获取推流设备列表")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问
@@ -75,7 +75,7 @@ def test_get_wvp_proxy_list(client):
     """测试获取代理流设备列表"""
     response = client.get("/api/v1/cameras/wvp/proxy_list?page=1&count=10")
     
-    print(f"\n测试: 获取代理流设备列表")
+    print("\n测试: 获取代理流设备列表")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问

@@ -5,7 +5,6 @@
 ID生成器单元测试
 """
 
-import pytest
 import time
 from app.utils.id_generator import generate_id, get_tenant_id_from_id, get_real_timestamp_from_id, id_generator
 

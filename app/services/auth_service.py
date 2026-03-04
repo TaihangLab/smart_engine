@@ -10,16 +10,13 @@ import logging
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from app.models.rbac import SysUser, SysDept
+from app.models.rbac import SysUser
 from app.utils.password_utils import verify_password, hash_password
-from app.services.rbac.user_service import UserService
 from app.services.rbac.relation_service import RelationService
 from app.services.rbac.rbac_base_service import BaseRbacService
 from app.core.auth import create_access_token
-from app.models.auth import LoginRequest, LoginResponse, NewLoginResponse, UserInfo
-import base64
-import json
-from datetime import datetime, timedelta
+from app.models.auth import LoginResponse, NewLoginResponse, UserInfo
+from datetime import datetime
 from app.core.config import settings
 
 logger = logging.getLogger(__name__)
@@ -46,7 +43,7 @@ class AuthenticationService:
             # 构建查询
             stmt = select(SysUser).filter(
                 SysUser.user_name == username,
-                SysUser.is_deleted == False
+                not SysUser.is_deleted
             )
 
             # 如果提供了租户ID，按租户过滤（租户ID必须是字符串类型）
@@ -240,9 +237,6 @@ class AuthenticationService:
                 dept_name = dept.name
 
         # 获取租户信息
-        tenant_name = f"Tenant-{user.tenant_id}"
-        company_name = f"Company-{user.tenant_id}"
-        company_code = f"COMP-{user.tenant_id}"
 
         # 生成随机字符串
         import secrets
@@ -288,7 +282,7 @@ class AuthenticationService:
             result = await db.execute(
                 select(SysUser).filter(
                     SysUser.id == user_id,
-                    SysUser.is_deleted == False
+                    not SysUser.is_deleted
                 )
             )
             user = result.scalars().first()
@@ -344,7 +338,7 @@ class AuthenticationService:
             result = await db.execute(
                 select(SysUser).filter(
                     SysUser.user_name == username,
-                    SysUser.is_deleted == False
+                    not SysUser.is_deleted
                 )
             )
             user = result.scalars().first()
@@ -385,7 +379,7 @@ class AuthenticationService:
             result = await db.execute(
                 select(SysUser).filter(
                     SysUser.id == user_id,
-                    SysUser.is_deleted == False
+                    not SysUser.is_deleted
                 )
             )
             user = result.scalars().first()
@@ -424,7 +418,7 @@ class AuthenticationService:
             result = await db.execute(
                 select(SysUser).filter(
                     SysUser.id == user_id,
-                    SysUser.is_deleted == False
+                    not SysUser.is_deleted
                 )
             )
             user = result.scalars().first()
@@ -458,7 +452,7 @@ class AuthenticationService:
         result = await db.execute(
             select(SysUser).filter(
                 SysUser.id == user_id,
-                SysUser.is_deleted == False
+                not SysUser.is_deleted
             )
         )
         user = result.scalars().first()

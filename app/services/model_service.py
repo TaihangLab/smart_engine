@@ -1,13 +1,12 @@
 """
 模型服务模块，负责模型相关的业务逻辑
 """
-from typing import List, Dict, Any, Optional, Tuple
+from typing import List, Dict, Any, Tuple
 from sqlalchemy.orm import Session
 from app.db.model_dao import ModelDAO
 from app.services.triton_client import triton_client
 from app.db.session import SessionLocal
 import logging
-import json
 
 logger = logging.getLogger(__name__)
 

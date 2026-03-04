@@ -2,7 +2,8 @@ import json
 import logging
 import threading
 import time
-from typing import Callable, Dict, List, Any, Optional, Tuple
+from datetime import datetime
+from typing import Callable, Dict, List, Any
 
 # 项目模块
 from app.core.config import settings
@@ -17,7 +18,7 @@ if RABBITMQ_ENABLED:
         import pika
         from pika.adapters.blocking_connection import BlockingChannel
     except ImportError:
-        logging.warning(f"⚠️ 未安装pika库，RabbitMQ功能将不可用")
+        logging.warning("⚠️ 未安装pika库，RabbitMQ功能将不可用")
         RABBITMQ_ENABLED = False
 
 logger = logging.getLogger(__name__)
@@ -35,10 +36,10 @@ class RabbitMQClient:
         self.health_monitor_thread = None  # 健康监控线程
         
         if not RABBITMQ_ENABLED:
-            logger.info(f"⏭️ RabbitMQ客户端已禁用")
+            logger.info("⏭️ RabbitMQ客户端已禁用")
             return
             
-        logger.info(f"🚀 初始化RabbitMQ客户端...")
+        logger.info("🚀 初始化RabbitMQ客户端...")
         
         # 死信队列配置
         self.dead_letter_exchange = f"{settings.RABBITMQ_ALERT_EXCHANGE}.dlx"
@@ -54,7 +55,7 @@ class RabbitMQClient:
     def _connect(self) -> bool:
         """连接到RabbitMQ服务器"""
         if not RABBITMQ_ENABLED or pika is None:
-            logger.info(f"⏭️ RabbitMQ客户端已禁用，跳过连接")
+            logger.info("⏭️ RabbitMQ客户端已禁用，跳过连接")
             return False
             
         try:
@@ -276,7 +277,7 @@ class RabbitMQClient:
             try:
                 # 发生异常时拒绝消息
                 self.channel.basic_nack(delivery_tag=delivery_tag, requeue=False)
-            except:
+            except Exception:
                 pass
             return False
     
@@ -319,7 +320,7 @@ class RabbitMQClient:
         """📮 智能订阅报警消息 - 增强状态管理"""
         # 检查 RabbitMQ 是否启用
         if not RABBITMQ_ENABLED or pika is None:
-            logger.info(f"⏭️ RabbitMQ客户端已禁用，跳过订阅")
+            logger.info("⏭️ RabbitMQ客户端已禁用，跳过订阅")
             return
 
         logger.info(f"📮 新增预警订阅者: {callback.__qualname__ if hasattr(callback, '__qualname__') else 'unknown'}")
@@ -454,7 +455,7 @@ class RabbitMQClient:
                         else:
                             # 超过重试次数，进入死信队列
                             ch.basic_nack(delivery_tag=method.delivery_tag, requeue=False)
-                            logger.error(f"💀 消息超过重试次数，进入死信队列")
+                            logger.error("💀 消息超过重试次数，进入死信队列")
                 
                 # 设置QoS
                 self.channel.basic_qos(prefetch_count=1)
@@ -480,7 +481,7 @@ class RabbitMQClient:
                 try:
                     if self.channel and not self.channel.is_closed:
                         self.channel.stop_consuming()
-                except:
+                except Exception:
                     pass
                 
                 self.is_connected = False
@@ -642,7 +643,7 @@ class RabbitMQClient:
                 if self.consumer_thread:
                     try:
                         self.channel.stop_consuming()
-                    except:
+                    except Exception:
                         pass
                 
                 # 启动新线程
@@ -687,7 +688,7 @@ class RabbitMQClient:
                 try:
                     if self.channel and not self.channel.is_closed:
                         self.channel.stop_consuming()
-                except:
+                except Exception:
                     pass
                 
                 # 等待线程结束

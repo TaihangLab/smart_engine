@@ -186,7 +186,7 @@ class SkillManager:
         try:
             # 获取LLM技能类信息
             llm_skill_class = self.db.query(LLMSkillClass).filter(
-                and_(LLMSkillClass.id == llm_skill_class_id, LLMSkillClass.enabled == True)
+                and_(LLMSkillClass.id == llm_skill_class_id, LLMSkillClass.enabled)
             ).first()
             
             if not llm_skill_class:
@@ -230,7 +230,7 @@ class SkillManager:
         try:
             # 从数据库获取所有已启用的LLM技能类
             enabled_llm_classes = self.db.query(LLMSkillClass).filter(
-                LLMSkillClass.enabled == True
+                LLMSkillClass.enabled
             ).all()
             
             # 构建LLM技能类信息

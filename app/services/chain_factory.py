@@ -7,15 +7,13 @@ from typing import Dict, Any, Optional, List, Callable, Union
 from enum import Enum
 
 from langchain_core.runnables import (
-    Runnable, RunnablePassthrough, RunnableParallel, RunnableLambda,
-    RunnableConfig, ConfigurableField
+    Runnable, RunnableParallel, RunnableLambda
 )
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.prompts import ChatPromptTemplate, MessagesPlaceholder
-from langchain_core.output_parsers import StrOutputParser, JsonOutputParser, PydanticOutputParser
+from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
 from langchain_core.messages import BaseMessage, HumanMessage, SystemMessage
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.callbacks import BaseCallbackHandler
 
 from app.services.llm_service import llm_service
 

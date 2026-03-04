@@ -1,9 +1,9 @@
 """
 LLM技能类数据访问对象
 """
-from typing import List, Optional, Dict, Any
+from typing import List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import and_, or_, desc
+from sqlalchemy import and_
 from app.models.llm_skill import LLMSkillClass
 from app.models.llm_task import LLMTask
 
@@ -38,7 +38,7 @@ class LLMSkillClassDAO:
     @staticmethod
     def get_all_enabled(db: Session) -> List[LLMSkillClass]:
         """获取所有已启用的LLM技能类"""
-        return db.query(LLMSkillClass).filter(LLMSkillClass.status == True).all()
+        return db.query(LLMSkillClass).filter(LLMSkillClass.status).all()
     
     @staticmethod
     def get_paginated(db: Session, skip: int = 0, limit: int = 100, 
@@ -115,12 +115,12 @@ class LLMTaskDAO:
     def get_by_camera(db: Session, camera_id: int) -> List[LLMTask]:
         """根据摄像头ID获取LLM任务"""
         return db.query(LLMTask).filter(
-            and_(LLMTask.camera_id == camera_id, LLMTask.status == True)
+            and_(LLMTask.camera_id == camera_id, LLMTask.status)
         ).all()
     
     @staticmethod
     def get_all_enabled(db: Session) -> List[LLMTask]:
         """获取所有已启用的LLM任务"""
-        return db.query(LLMTask).filter(LLMTask.status == True).all()
+        return db.query(LLMTask).filter(LLMTask.status).all()
 
  

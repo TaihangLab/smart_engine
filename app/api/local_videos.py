@@ -12,7 +12,7 @@ import uuid
 
 from app.db.session import get_db
 from app.models.local_video import (
-    LocalVideo, LocalVideoCreate, LocalVideoUpdate, LocalVideoResponse,
+    LocalVideo, LocalVideoUpdate, LocalVideoResponse,
     StreamControlRequest, StreamStatusResponse
 )
 from app.core.config import settings
@@ -472,7 +472,7 @@ def stop_stream(video_id: int, db: Session = Depends(get_db)):
         logger.info(f"视频推流已停止: {video.name}")
         
         if not success:
-            logger.warning(f"推流管理器报告停止失败，但已更新数据库状态")
+            logger.warning("推流管理器报告停止失败，但已更新数据库状态")
         
     except Exception as e:
         logger.error(f"停止推流失败: {str(e)}", exc_info=True)

@@ -6,7 +6,7 @@ RBAC部门管理API
 处理部门相关的增删改查操作及树形结构管理
 """
 
-from typing import List, Optional
+from typing import Optional
 from fastapi import APIRouter, Depends, Query, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -72,7 +72,7 @@ async def get_dept(
     """根据部门ID获取部门详情"""
     # 从用户态获取并验证租户ID
     from app.services.user_context_service import user_context_service
-    validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
+    user_context_service.get_validated_tenant_id(request, tenant_id)
 
     # 获取部门信息
     dept = await RbacService.get_dept_by_id(db, dept_id)
@@ -162,7 +162,7 @@ async def update_dept(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
+        user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 直接使用部门ID调用更新方法
         update_data = dept_update.model_dump(exclude_unset=True)
@@ -209,7 +209,7 @@ async def delete_dept(
     try:
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
-        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
+        user_context_service.get_validated_tenant_id(request, tenant_id)
 
         # 直接使用部门ID调用删除方法
         success = await RbacService.delete_dept(db, dept_id)

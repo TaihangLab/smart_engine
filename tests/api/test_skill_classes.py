@@ -42,7 +42,7 @@ def test_get_skill_class_types(client):
     """测试获取技能类型列表"""
     response = client.get("/api/v1/skill-classes/get_types")
     
-    print(f"\n测试: 获取技能类型列表")
+    print("\n测试: 获取技能类型列表")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问
@@ -53,7 +53,7 @@ def test_reload_skills(client):
     """测试重新加载技能"""
     response = client.post("/api/v1/skill-classes/reload")
     
-    print(f"\n测试: 重新加载技能")
+    print("\n测试: 重新加载技能")
     print(f"Response status: {response.status_code}")
     
     # 端点可访问

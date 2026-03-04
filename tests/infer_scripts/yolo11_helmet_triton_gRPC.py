@@ -3,7 +3,6 @@ import numpy as np
 
 import tritonclient.grpc as grpcclient  # 为grpc模块
 
-from typing import List, Dict, Any
 
 class YOLOv11TritonClient:
     def __init__(self, url="192.168.1.111:8001", conf_thres=0.5, iou_thres=0.5):

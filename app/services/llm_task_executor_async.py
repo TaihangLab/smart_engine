@@ -5,9 +5,8 @@ LLM任务执行器（异步化版本）
 import logging
 import threading
 import time
-import uuid
 import asyncio
-from datetime import datetime, timezone, timedelta
+from datetime import datetime
 from typing import Dict, Any, Optional, List
 
 import cv2
@@ -17,17 +16,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 
 from app.core.config import settings
-from app.db.async_session import AsyncSessionLocal, get_async_db_session
+from app.db.async_session import get_async_db_session
 from app.db.llm_skill_dao import LLMTaskDAO
 from app.models.llm_skill import LLMSkillClass
 from app.models.llm_task import LLMTask
 from app.services.adaptive_frame_reader import AdaptiveFrameReader
-from app.services.alert_service import alert_service
 from app.services.alert_merge_manager import alert_merge_manager
 from app.services.camera_service import CameraService
 from app.services.llm_service import llm_service
 from app.services.minio_client import minio_client
-from app.services.rabbitmq_client import rabbitmq_client
 
 logger = logging.getLogger(__name__)
 
@@ -738,7 +735,7 @@ class LLMTaskExecutor:
             result = await db.execute(
                 select(LLMSkillClass).filter(
                     LLMSkillClass.skill_id == task.skill_id,
-                    LLMSkillClass.status == True
+                    LLMSkillClass.status
                 )
             )
             skill_class = result.scalars().first()

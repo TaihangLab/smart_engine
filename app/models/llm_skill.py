@@ -1,11 +1,11 @@
 """
 多模态LLM技能相关数据模型
 """
-from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, ForeignKey, Text, Enum as SQLEnum, BigInteger, Float
+from sqlalchemy import Column, Integer, String, Boolean, JSON, DateTime, Text, Enum as SQLEnum, Float
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 from pydantic import BaseModel, Field, validator
-from typing import Optional, Dict, Any, List
+from typing import Optional, Any, List
 from datetime import datetime, timezone, timedelta
 from enum import Enum
 import re

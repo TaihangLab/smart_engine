@@ -6,14 +6,10 @@ import logging
 import json
 import threading
 import time
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, Any
+from datetime import datetime
 
-from app.db.session import get_db
 from app.models.ai_task import AITask
-from app.models.llm_skill import LLMSkillClass
 from app.services.alert_review_service import alert_review_service
 from app.services.redis_client import get_redis_client
 from app.core.config import settings
@@ -278,7 +274,7 @@ class AlertReviewQueueService:
                 task = json.loads(task_data)
                 self._handle_task_failure(task, str(e))
                 self.redis_client.lrem(self.processing_queue_key, 1, task_data)
-            except:
+            except Exception:
                 # 如果连解析都失败，移入失败队列
                 self.redis_client.lpush(self.failed_queue_key, task_data)
                 self.redis_client.lrem(self.processing_queue_key, 1, task_data)
