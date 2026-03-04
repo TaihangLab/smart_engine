@@ -93,7 +93,7 @@ curl -X POST http://localhost:8000/api/v1/login \
   -d '{
     "username": "admin",
     "password": "your_password",
-    "tenantCode": "1"
+    "tenant_id": "1"
   }'
 ```
 

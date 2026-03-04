@@ -118,6 +118,7 @@ app/
 │   ├── camera_service.py               # 摄像头服务
 │   ├── 🆕 llm_service.py               # 多模态大模型服务
 │   ├── minio_client.py                 # MinIO客户端
+│   ├── 🆕 minio_compensation_queue.py  # MinIO补偿队列服务（SQLite持久化）
 │   ├── 🆕 multimodal_review_service.py # 多模态复判服务
 │   ├── rabbitmq_client.py              # RabbitMQ客户端
 │   ├── 🆕 redis_client.py              # Redis客户端服务
@@ -370,6 +371,71 @@ curl -X POST "http://localhost:8000/api/v1/llm-skills/skill-classes/connection-t
 > - 采用「形容词+名词」形式描述目标，提高准确性
 > - 当大模型分析结果为「是」时，系统输出任务结果
 > - 更多专业场景示例请参考：`docs/llm_skill_examples.md`
+
+### 🆕 MinIO 补偿队列系统
+
+系统采用基于 SQLite 的本地补偿队列机制，确保 MinIO 文件操作的可靠性：
+
+#### 1. 为什么使用 SQLite？
+
+补偿队列使用独立的 SQLite 数据库（而非 MySQL）存储失败任务的技术考虑：
+
+| 考虑点 | 说明 |
+|--------|------|
+| **数据隔离** | 补偿队列是独立的本地服务，与主业务数据库（MySQL）隔离 |
+| **容错性** | 即使 MySQL 服务挂掉，本地补偿队列仍可正常工作 |
+| **性能隔离** | 大文本（图片 base64）操作不影响主数据库性能 |
+| **简化部署** | 不需要在 MySQL 中创建额外的表和索引 |
+
+**为什么不使用 MySQL？**
+
+| 问题 | MySQL 方案的问题 |
+|------|------------------|
+| **存储浪费** | payload 包含 base64 图片数据（2MB → 2.7MB），会占用大量 MySQL 空间 |
+| **性能影响** | 大 TEXT 字段会拖慢查询速度，影响主业务 |
+| **备份缓慢** | 备份数据库时需传输大量无用数据 |
+| **网络开销** | 查询补偿任务时会传输所有 base64 数据 |
+| **耦合度高** | 与主业务数据库耦合，无法独立扩展 |
+
+#### 2. SQLite 数据库配置
+
+- **数据库位置**：`data/compensation/minio_compensation.db`
+- **表结构**：包含 id、task_type、status、payload（base64 数据）、retry_count 等字段
+- **索引**：status、next_retry_at、priority 索引优化查询性能
+
+#### 3. 任务类型和状态
+
+**任务类型**：
+- `UPLOAD_IMAGE` - 上传图片补偿
+- `UPLOAD_VIDEO` - 上传视频补偿
+- `DELETE_FILE` - 删除文件补偿
+- `DOWNLOAD_FILE` - 下载文件补偿
+
+**任务状态**：
+- `pending` - 待处理
+- `processing` - 处理中
+- `completed` - 已完成
+- `failed` - 永久失败（超过最大重试次数）
+- `cancelled` - 已取消
+
+#### 4. 重试策略
+
+- **指数退避**：重试间隔指数增长（60s, 120s, 240s...最大 1 小时）
+- **最大重试次数**：默认 5 次
+- **优先级队列**：按优先级（1=高, 2=中, 3=低）和创建时间排序
+- **自动清理**：自动清理 7 天前已完成的任务
+
+#### 5. 维护说明
+
+**数据清理**：
+- 自动清理 7 天前已完成的任务
+- 自动清理永久失败的任务
+
+**备份**：
+- SQLite 数据库文件：`data/compensation/minio_compensation.db`
+- 定期备份到：`data/compensation/backup/`
+
+> **详细设计文档**：完整的技术说明请参考 [`.wiki/design/compensation_queue_design.md`](.wiki/design/compensation_queue_design.md)
 
 ### 🆕 分级视频录制系统
 
