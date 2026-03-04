@@ -81,7 +81,7 @@ class RealUserContextService:
         return None
 
     @staticmethod
-    def get_current_user_tenant_id(request: Request) -> Optional[int]:
+    def get_current_user_tenant_id(request: Request) -> Optional[str]:
         """
         获取当前用户的租户ID
 
@@ -95,7 +95,7 @@ class RealUserContextService:
         return user.tenantId if user else None
 
     @staticmethod
-    def get_current_user_accessible_tenants(request: Request) -> List[int]:
+    def get_current_user_accessible_tenants(request: Request) -> List[str]:
         """
         获取当前用户可访问的租户ID列表
 
@@ -125,8 +125,8 @@ class RealUserContextService:
     @staticmethod
     def get_validated_tenant_id(
         request: Request,
-        tenant_id: Optional[int] = None
-    ) -> int:
+        tenant_id: Optional[str] = None
+    ) -> str:
         """
         获取并验证租户ID
 
@@ -228,7 +228,7 @@ class UserContextServiceWrapper:
             detail="无法获取用户租户信息"
         )
 
-    def get_current_user_accessible_tenants(self, user_id: Optional[int] = None) -> List[int]:
+    def get_current_user_accessible_tenants(self, user_id: Optional[int] = None) -> List[str]:
         """向后兼容方法（使用当前用户）"""
         request = self._get_request_from_context()
         if request:
