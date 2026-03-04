@@ -56,7 +56,7 @@ async def get_permission_tree(
 @permission_tree_router.get("/permission-nodes/{id}", response_model=UnifiedResponse, summary="获取权限节点详情")
 async def get_permission_node(
     id: int,
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """根据权限ID获取权限节点详情"""
@@ -138,7 +138,7 @@ async def update_permission_node(
     id: int,
     request: Request,
     permission_update: PermissionNodeResponse,
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """更新权限节点信息"""
@@ -199,7 +199,7 @@ async def update_permission_node_status(
     id: int,
     request: Request,
     status: int = Query(..., description="状态: 0(启用)、1(禁用)", ge=0, le=1),
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """启用/禁用权限节点"""
@@ -247,7 +247,7 @@ async def update_permission_node_status(
 @permission_tree_router.delete("/permission-nodes/{id}", response_model=UnifiedResponse, summary="删除权限节点")
 async def delete_permission_node(
     id: int,
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     force: bool = Query(False, description="是否强制删除（含子节点），默认 false"),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -311,7 +311,7 @@ async def delete_permission_node(
 @permission_tree_router.get("/permission-nodes/{id}/roles", response_model=UnifiedResponse, summary="获取权限关联的角色")
 async def get_permission_roles(
     id: int,
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取拥有指定权限的角色列表"""
@@ -347,7 +347,7 @@ async def get_permission_roles(
 
 @permission_tree_router.get("/permission-nodes/validate-code", response_model=UnifiedResponse, summary="验证权限码唯一性")
 async def validate_permission_code(
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     code: str = Query(..., description="权限码"),
     exclude_id: int = Query(None, description="排除的节点 ID（编辑时使用）"),
     db: AsyncSession = Depends(get_async_db)

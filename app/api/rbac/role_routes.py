@@ -33,7 +33,7 @@ role_router = APIRouter()
 async def get_role(
     id: int,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """根据角色ID获取角色详情（异步）"""
@@ -41,6 +41,7 @@ async def get_role(
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
         validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
+        is_super_admin = user_context_service.is_super_admin(request)
 
         # 获取角色
         role = await RbacService.get_role_by_id(db, id)
@@ -52,13 +53,11 @@ async def get_role(
                 data=None
             )
 
-        # 验证角色的租户ID是否与用户可访问的租户ID匹配
-        if role.tenant_id != validated_tenant_id:
-            return UnifiedResponse(
-                success=False,
-                code=403,
-                message="无权限访问此角色",
-                data=None
+        # 验证角色的租户ID是否与用户可访问的租户ID匹配（超管可以访问任何租户的角色）
+        if not is_super_admin and role.tenant_id != validated_tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="无权限访问此角色"
             )
 
         return UnifiedResponse(
@@ -81,7 +80,7 @@ async def get_role(
 @role_router.get("/roles", response_model=UnifiedResponse, summary="获取角色列表")
 async def get_roles(
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
     role_name: str = Query(None, description="角色名称过滤条件（模糊查询）"),
@@ -159,7 +158,7 @@ async def update_role(
     id: int,
     role_update: RoleUpdate,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """更新角色信息（异步）"""
@@ -167,6 +166,7 @@ async def update_role(
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
         validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
+        is_super_admin = user_context_service.is_super_admin(request)
 
         # 获取原始角色信息以验证租户ID
         original_role = await RbacService.get_role_by_id(db, id)
@@ -178,13 +178,11 @@ async def update_role(
                 data=None
             )
 
-        # 验证角色的租户ID是否与用户可访问的租户ID匹配
-        if original_role.tenant_id != validated_tenant_id:
-            return UnifiedResponse(
-                success=False,
-                code=403,
-                message="无权限更新此角色",
-                data=None
+        # 验证角色的租户ID是否与用户可访问的租户ID匹配（超管可以更新任何租户的角色）
+        if not is_super_admin and original_role.tenant_id != validated_tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="无权限更新此角色"
             )
 
         # 不允许修改租户ID
@@ -226,7 +224,7 @@ async def update_role(
 async def delete_role(
     id: int,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """删除角色（异步）"""
@@ -234,6 +232,7 @@ async def delete_role(
         # 从用户态获取并验证租户ID
         from app.services.user_context_service import user_context_service
         validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
+        is_super_admin = user_context_service.is_super_admin(request)
 
         # 获取原始角色信息以验证租户ID
         original_role = await RbacService.get_role_by_id(db, id)
@@ -245,13 +244,11 @@ async def delete_role(
                 data=None
             )
 
-        # 验证角色的租户ID是否与用户可访问的租户ID匹配
-        if original_role.tenant_id != validated_tenant_id:
-            return UnifiedResponse(
-                success=False,
-                code=403,
-                message="无权限删除此角色",
-                data=None
+        # 验证角色的租户ID是否与用户可访问的租户ID匹配（超管可以删除任何租户的角色）
+        if not is_super_admin and original_role.tenant_id != validated_tenant_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="无权限删除此角色"
             )
 
         # 删除角色
@@ -281,40 +278,14 @@ async def delete_role(
 # ===========================================
 # 角色权限关联管理API
 # ===========================================
-
-@role_router.post("/role-permissions", response_model=UnifiedResponse, summary="为角色分配权限")
-async def assign_permission_to_role(
-    assignment: RolePermissionAssign,
-    request: Request,
-    db: AsyncSession = Depends(get_async_db)
-):
-    """为角色分配权限（异步）"""
-    # 从用户态获取并验证租户ID
-    from app.services.user_context_service import user_context_service
-    assignment.tenant_id = user_context_service.get_validated_tenant_id(request, assignment.tenant_id)
-
-    success = await RbacService.assign_permission_to_role_by_ids(
-        db,
-        assignment.role_id,
-        assignment.permission_id,
-        assignment.tenant_id
-    )
-    if success:
-        return UnifiedResponse(
-            success=True,
-            code=201,
-            message="权限分配成功",
-            data=None
-        )
-    else:
-        raise HTTPException(status_code=400, detail="权限分配失败")
-
+# 注意: 角色权限分配的 POST /role-permissions API 已移至 relation_routes.py
+# 以避免路径冲突，使用 BatchRolePermissionAssignById 模型支持批量分配
 
 @role_router.get("/role-permissions/roles/{id}", response_model=UnifiedResponse, summary="获取拥有指定权限的角色")
 async def get_roles_by_permission(
     id: int,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取拥有指定权限的角色列表（异步）"""

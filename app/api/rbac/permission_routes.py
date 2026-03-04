@@ -32,43 +32,22 @@ permission_router = APIRouter()
 
 @permission_router.get("/permissions/tree", response_model=UnifiedResponse, summary="获取权限树结构")
 async def get_permission_tree(
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     permission_name: str = Query(None, description="权限名称过滤条件（模糊查询）"),
     permission_code: str = Query(None, description="权限编码过滤条件（模糊查询）"),
-    lazy_load: bool = Query(False, description="是否懒加载（只加载根节点，点击展开时再加载子节点），默认False返回完整树"),
-    parent_id: Optional[int] = Query(None, description="父节点ID（用于懒加载子节点）"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """
     获取权限树结构，支持按名称和编码模糊查询
-
-    默认模式（lazy_load=False）：
-    - 全量查询所有权限数据，在内存中构建完整的树结构，前端直接使用
-
-    懒加载模式（lazy_load=True）：
-    - 首次请求：lazy_load=True，不传 parent_id，返回根节点列表
-    - 展开子节点：lazy_load=True，传入 parent_id，返回该节点的直接子节点
     """
     try:
         from app.services.rbac.permission_service import PermissionService
 
-        # 使用完整树模式作为默认行为
-        if not lazy_load:
-            # 全量查询后在内存中构建完整的树结构
-            permission_tree = await PermissionService.get_permission_tree_full(
-                db,
-                permission_name=permission_name,
-                permission_code=permission_code
-            )
-        else:
-            # 懒加载模式
-            permission_tree = await PermissionService.get_permission_tree(
-                db,
-                permission_name=permission_name,
-                permission_code=permission_code,
-                lazy_load=True,
-                parent_id=parent_id
-            )
+        permission_tree = await PermissionService.get_permission_tree_full(
+            db,
+            permission_name=permission_name,
+            permission_code=permission_code
+        )
 
         if not permission_tree:
             # 空列表也是有效的响应
@@ -91,6 +70,42 @@ async def get_permission_tree(
             success=False,
             code=500,
             message="获取权限树失败",
+            data=None
+        )
+
+
+@permission_router.get("/permissions/role/{id}", response_model=UnifiedResponse, summary="获取角色权限列表")
+async def get_role_permissions(
+    id: int,
+    request: Request,
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """获取角色的权限列表（通过角色ID）"""
+    try:
+        from app.services.user_context_service import user_context_service
+        validated_tenant_id = user_context_service.get_validated_tenant_id(request, tenant_id)
+
+        permissions = await RbacService.get_role_permissions_by_id(db, id, str(validated_tenant_id))
+
+        # 将 SQLAlchemy 模型转换为 Pydantic 模型
+        permission_list = [
+            PermissionListResponse.model_validate(permission).model_dump(by_alias=True)
+            for permission in permissions
+        ]
+
+        return UnifiedResponse(
+            success=True,
+            code=200,
+            message="获取角色权限列表成功",
+            data=permission_list
+        )
+    except Exception as e:
+        logger.error(f"获取角色权限列表失败: {str(e)}", exc_info=True)
+        return UnifiedResponse(
+            success=False,
+            code=500,
+            message="获取角色权限列表失败",
             data=None
         )
 
@@ -172,7 +187,7 @@ async def get_permission(
 
 @permission_router.get("/permissions", response_model=UnifiedResponse, summary="获取权限列表")
 async def get_permissions(
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
     permission_name: str = Query(None, description="权限名称过滤条件（模糊查询）"),
@@ -386,7 +401,7 @@ async def check_permission(
 @permission_router.get("/permissions/user/{user_name}", response_model=UnifiedResponse, summary="获取用户权限列表")
 async def get_user_permissions(
     user_name: str,
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取用户的完整权限列表"""
@@ -508,7 +523,7 @@ async def update_permission_status(
 @permission_router.get("/permissions/{id}/roles", response_model=UnifiedResponse, summary="获取拥有指定权限的角色列表")
 async def get_roles_by_permission_id(
     id: int,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取拥有指定权限的角色列表（通过权限ID）"""

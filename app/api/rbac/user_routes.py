@@ -70,7 +70,7 @@ async def get_user(
 @user_router.get("/users", response_model=UnifiedResponse, summary="获取用户列表")
 async def get_users(
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     skip: int = Query(0, ge=0, description="跳过的记录数"),
     limit: int = Query(100, ge=1, le=1000, description="返回的最大记录数"),
     user_name: str = Query(None, description="用户名过滤条件（模糊查询）"),
@@ -317,7 +317,6 @@ async def get_user_roles(
         result = []
         for role in roles:
             result.append(UserRoleResponse(
-                id=user.id,  # 这里应该是关联表的ID，但我们简化了
                 user_name=user.user_name,
                 role_code=role.role_code,
                 tenant_id=user.tenant_id,
@@ -472,7 +471,7 @@ async def remove_role_from_user(
 async def get_users_by_role(
     role_code: str,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """获取拥有指定角色的用户列表"""
@@ -726,7 +725,7 @@ async def reset_user_password(
 async def batch_delete_users_api(
     http_request: Request,
     delete_request: BatchDeleteUserRequest,
-    tenant_id: Optional[int] = Query(None, description="租户编码（可选，用于验证权限）"),
+    tenant_id: Optional[str] = Query(None, description="租户编码（可选，用于验证权限）"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """批量删除用户"""
@@ -808,7 +807,7 @@ async def download_user_template():
 async def import_users(
     file: UploadFile,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """导入用户数据"""
@@ -923,7 +922,7 @@ async def import_users(
 @user_router.get("/users/export", summary="导出用户数据")
 async def export_users(
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户编码"),
+    tenant_id: Optional[str] = Query(None, description="租户编码"),
     user_name: str = Query(None, description="用户名过滤条件（模糊查询）"),
     nick_name: str = Query(None, description="用户昵称过滤条件（模糊查询）"),
     phone: str = Query(None, description="手机号过滤条件（模糊查询）"),

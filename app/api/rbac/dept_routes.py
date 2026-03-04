@@ -35,7 +35,7 @@ dept_router = APIRouter()
 @dept_router.get("/depts/tree", response_model=UnifiedResponse, summary="获取部门树结构")
 async def get_dept_tree(
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     name: str = Query(None, description="部门名称过滤条件（模糊查询）"),
     status: int = Query(None, description="状态过滤条件，为空时返回所有状态的部门"),
     db: AsyncSession = Depends(get_async_db)
@@ -66,7 +66,7 @@ async def get_dept_tree(
 async def get_dept(
     dept_id: int,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """根据部门ID获取部门详情"""
@@ -89,7 +89,7 @@ async def get_dept(
 @dept_router.get("/depts", response_model=UnifiedResponse, summary="获取部门列表")
 async def get_depts(
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     parent_id: Optional[int] = Query(None, description="父部门ID，为空表示获取根部门"),
     name: str = Query(None, description="部门名称模糊查询条件"),
     status: Optional[int] = Query(None, description="状态"),
@@ -155,7 +155,7 @@ async def update_dept(
     dept_id: int,
     dept_update: DeptUpdate,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """更新部门信息"""
@@ -202,7 +202,7 @@ async def update_dept(
 async def delete_dept(
     dept_id: int,
     request: Request,
-    tenant_id: Optional[int] = Query(None, description="租户ID"),
+    tenant_id: Optional[str] = Query(None, description="租户ID"),
     db: AsyncSession = Depends(get_async_db)
 ):
     """删除部门"""
