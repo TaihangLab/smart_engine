@@ -92,7 +92,7 @@ class PaginatedResponse(BaseModel):
 
 class TenantBase(BaseModel):
     """租户基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户唯一标识（已弃用，请使用id）", max_length=32)
+    tenant_id: Optional[str] = Field(None, description="租户唯一标识（已弃用，请使用id）", max_length=32)
     tenant_name: str = Field(..., description="租户名称", max_length=64)
     company_name: Optional[str] = Field(None, description="企业名称", max_length=128)
     contact_person: Optional[str] = Field(None, description="联系人", max_length=64)
@@ -148,8 +148,7 @@ class TenantUpdate(BaseModel):
 
 class TenantResponse(BaseModel):
     """租户响应模型"""
-    id: int
-    tenant_id: int
+    tenant_id: str
     tenant_name: str
     company_name: Optional[str] = None
     contact_person: Optional[str] = None
@@ -223,7 +222,7 @@ class TenantResponse(BaseModel):
 
 class UserBase(BaseModel):
     """用户基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户ID", max_length=32)
+    tenant_id: Optional[str] = Field(None, description="租户ID", max_length=32)
     user_name: str = Field(..., description="用户名", max_length=64)
     dept_id: Optional[int] = Field(None, description="部门id")
     nick_name: str = Field(..., description="昵称", max_length=64)
@@ -273,7 +272,7 @@ class UserResponse(UserBase, BaseResponse):
 class UserListResponse(BaseModel):
     """用户列表响应模型"""
     id: int
-    tenant_id: int
+    tenant_id: str
     user_name: str
     nick_name: str
     email: Optional[EmailStr]
@@ -308,7 +307,7 @@ class UserListResponse(BaseModel):
 
 class RoleBase(BaseModel):
     """角色基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户ID", max_length=32)
+    tenant_id: Optional[str] = Field(None, description="租户ID", max_length=32)
     role_name: str = Field(..., description="角色名称", max_length=64)
     role_code: str = Field(..., description="角色编码", max_length=64)
     status: bool = Field(True, description="角色状态")
@@ -348,7 +347,7 @@ class RoleResponse(RoleBase, BaseResponse):
 class RoleListResponse(BaseModel):
     """角色列表响应模型"""
     id: int
-    tenant_id: int
+    tenant_id: str
     role_name: str
     role_code: str
     status: bool
@@ -393,7 +392,7 @@ class UserRoleAssign(BaseModel):
     role_code: Optional[str] = Field(None, description="角色编码")
     user_id: Optional[int] = Field(None, description="用户ID")
     role_ids: Optional[List[int]] = Field(None, description="角色ID列表")
-    tenant_id: Optional[int] = Field(None, description="租户ID", max_length=32)
+    tenant_id: Optional[str] = Field(None, description="租户ID", max_length=32)
 
     model_config = ConfigDict(
         populate_by_name=True
@@ -421,10 +420,9 @@ class UserRoleAssign(BaseModel):
 
 class UserRoleResponse(BaseModel):
     """用户角色关联响应模型"""
-    id: int
     user_name: str
     role_code: str
-    tenant_id: int
+    tenant_id: str
     role_name: str
 
     model_config = ConfigDict(
@@ -441,7 +439,18 @@ class RolePermissionAssign(BaseModel):
     """角色权限分配请求模型"""
     role_code: str = Field(..., description="角色编码")
     permission_code: str = Field(..., description="权限编码")
-    tenant_id: Optional[int] = Field(None, description="租户ID", max_length=32)
+    tenant_id: Optional[str] = Field(None, description="租户ID", max_length=32)
+
+    model_config = ConfigDict(
+        populate_by_name=True
+    )
+
+
+class BatchRolePermissionAssignById(BaseModel):
+    """批量角色权限分配请求模型（通过ID）"""
+    role_id: int = Field(..., description="角色ID")
+    permission_ids: List[int] = Field(..., description="权限ID列表")
+    tenant_id: Optional[str] = Field(None, description="租户ID（可选，从角色获取）")
 
     model_config = ConfigDict(
         populate_by_name=True
@@ -450,10 +459,9 @@ class RolePermissionAssign(BaseModel):
 
 class RolePermissionResponse(BaseModel):
     """角色权限关联响应模型"""
-    id: int
     role_code: str
     permission_code: str
-    tenant_id: int
+    tenant_id: str
     role_name: str
     permission_name: str
 
@@ -470,7 +478,7 @@ class RolePermissionResponse(BaseModel):
 class PermissionCheckRequest(BaseModel):
     """权限检查请求模型"""
     user_name: str = Field(..., description="用户名", max_length=64)
-    tenant_id: Optional[int] = Field(None, description="租户ID", max_length=32)
+    tenant_id: Optional[str] = Field(None, description="租户ID", max_length=32)
     url: str = Field(..., description="请求URL", max_length=255)
     method: str = Field(..., description="请求方法", max_length=16)
 
@@ -483,7 +491,7 @@ class PermissionCheckResponse(BaseModel):
     """权限检查响应模型"""
     has_permission: bool = Field(..., description="是否有权限")
     user_name: str = Field(..., description="用户名")
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID")
     url: str = Field(..., description="请求URL")
     method: str = Field(..., description="请求方法")
 
@@ -499,7 +507,7 @@ class PermissionCheckResponse(BaseModel):
 class UserPermissionResponse(BaseModel):
     """用户权限列表响应模型"""
     user_id: str  # 保留为user_id，但实际对应用户名
-    tenant_id: int
+    tenant_id: str
     permissions: List[dict] = Field(default_factory=list, description="权限列表")
 
     model_config = ConfigDict(
@@ -514,7 +522,7 @@ class UserPermissionResponse(BaseModel):
 
 class DeptBase(BaseModel):
     """部门基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID")
     name: str = Field(..., description="部门名称", max_length=50)
     parent_id: Optional[int] = Field(None, description="父部门ID")
     sort_order: int = Field(0, description="部门顺序")
@@ -567,7 +575,7 @@ class DeptResponse(DeptBase, BaseResponse):
 
 class PositionBase(BaseModel):
     """岗位基础模型"""
-    tenant_id: Optional[int] = Field(None, description="租户ID")
+    tenant_id: Optional[str] = Field(None, description="租户ID")
     position_name: str = Field(..., description="岗位名称", max_length=128)
     department: str = Field(..., description="部门", max_length=64)
     order_num: int = Field(0, description="排序")
@@ -618,7 +626,7 @@ class PositionResponse(PositionBase, BaseResponse):
 
 class TenantStatsResponse(BaseModel):
     """租户统计信息响应模型"""
-    tenant_id: int
+    tenant_id: str
     tenant_name: str
     user_count: int = Field(0, description="用户数量")
     role_count: int = Field(0, description="角色数量")

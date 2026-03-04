@@ -167,8 +167,8 @@ class PermissionListResponse(BaseModel):
     tenant_id: Optional[str] = None
     permission_name: str
     permission_code: str
-    path: Optional[str]
-    method: Optional[str]
+    path: Optional[str] = None
+    method: Optional[str] = None
     status: int
     sort_order: int = Field(0, description="显示顺序")
     create_time: Optional[datetime] = None

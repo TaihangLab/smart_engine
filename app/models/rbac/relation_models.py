@@ -30,7 +30,6 @@ class UserRoleAssign(BaseModel):
 
 class UserRoleResponse(BaseModel):
     """用户角色关联响应模型"""
-    id: int
     user_name: str
     role_code: str
     tenant_id: str
@@ -69,7 +68,6 @@ class BatchRolePermissionAssignById(BaseModel):
 
 class RolePermissionResponse(BaseModel):
     """角色权限关联响应模型"""
-    id: int
     role_code: str
     permission_code: str
     tenant_id: str

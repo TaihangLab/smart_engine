@@ -70,7 +70,6 @@ class TenantUpdate(BaseModel):
 
 class TenantResponse(BaseModel):
     """租户响应模型"""
-    id: str
     tenant_name: str
     company_name: Optional[str] = None
     contact_person: Optional[str] = None
