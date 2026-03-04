@@ -3,24 +3,18 @@
 """
 from typing import List, Dict, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, status, Query, Body, File, UploadFile, Form
-from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 import logging
 from datetime import datetime
 import json
-import uuid
-import base64
 import cv2
 import numpy as np
-import time
 
 from app.db.session import get_db
-from app.db.llm_skill_dao import LLMSkillClassDAO, LLMTaskDAO
 from app.models.llm_skill import (
     LLMSkillClass, 
     LLMSkillClassCreate, LLMSkillClassUpdate,
-    LLMProviderType, LLMSkillType, ApplicationScenario,
-    OutputParameter, AlertCondition, AlertConditionGroup, AlertConditions
+    LLMProviderType, LLMSkillType, ApplicationScenario
 )
 from app.models.llm_task import (
     LLMTask, LLMTaskCreate, LLMTaskUpdate
@@ -1039,7 +1033,7 @@ async def preview_test_llm_skill(
         
         try:
             # 创建临时的LLM配置用于测试
-            test_api_config = {
+            {
                 "api_key": settings.PRIMARY_LLM_API_KEY or "ollama",
                 "base_url": settings.PRIMARY_LLM_BASE_URL,
                 "temperature": smart_config["temperature"],
@@ -1059,7 +1053,7 @@ async def preview_test_llm_skill(
             # 解析响应并提取输出参数
             analysis_result, extracted_params = _parse_json_response(response_text, parsed_output_params)
             
-            logger.info(f"LLM技能预览测试成功")
+            logger.info("LLM技能预览测试成功")
             return {
                 "success": True,
                 "message": "预览测试成功",
@@ -1143,7 +1137,7 @@ async def test_llm_connection(
         smart_config = _get_smart_default_config(task_type)
         
         # 创建测试用的LLM配置
-        test_api_config = {
+        {
             "api_key": settings.PRIMARY_LLM_API_KEY or "ollama",
             "base_url": settings.PRIMARY_LLM_BASE_URL,
             "temperature": smart_config["temperature"],
@@ -1266,7 +1260,7 @@ def unpublish_llm_skill(skill_id: str, db: Session = Depends(get_db)):
             )
         
         # 检查是否有关联的任务正在运行
-        running_tasks = [task for task in skill_class.llm_tasks if task.status == True]
+        running_tasks = [task for task in skill_class.llm_tasks if task.status]
         if running_tasks:
             task_names = [task.name for task in running_tasks]
             raise HTTPException(

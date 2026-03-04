@@ -4,10 +4,8 @@
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
 import logging
-import json
 
 from app.db.skill_class_dao import SkillClassDAO
-from app.models.skill import SkillClass, SkillClassModel
 from app.services.minio_client import minio_client
 from app.db.ai_task_dao import AITaskDAO
 from app.services.camera_service import CameraService

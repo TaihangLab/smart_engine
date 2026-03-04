@@ -1,11 +1,9 @@
 import logging
-from typing import Dict, Any, Optional
 from fastapi import APIRouter, Request, Response, HTTPException
 from fastapi.responses import StreamingResponse
 import httpx
 from app.services.wvp_client import wvp_client
 from app.core.config import settings
-import json
 
 logger = logging.getLogger(__name__)
 

@@ -20,7 +20,6 @@ import asyncio
 import logging
 from typing import Set, Optional, Dict, Any
 from datetime import datetime
-from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
 
@@ -55,7 +54,7 @@ class SSEConnectionManager:
     
     def __init__(self):
         if not SSE_ENABLED:
-            logger.info(f"⏭️ SSE连接管理器已禁用")
+            logger.info("⏭️ SSE连接管理器已禁用")
             return
             
         self.connected_clients: Set[asyncio.Queue] = set()
@@ -72,7 +71,7 @@ class SSEConnectionManager:
         self.ack_timeout_seconds = getattr(settings, 'SSE_ACK_TIMEOUT', 30)
         self.auto_log_notifications = getattr(settings, 'SSE_AUTO_LOG_NOTIFICATIONS', True)
         
-        logger.info(f"🎯 企业级SSE连接管理器启动 - 补偿机制已启用")
+        logger.info("🎯 企业级SSE连接管理器启动 - 补偿机制已启用")
         logger.info(f"   队列大小: {self.max_queue_size}")
         logger.info(f"   发送超时: {self.send_timeout}s")
         logger.info(f"   ACK超时: {self.ack_timeout_seconds}s")

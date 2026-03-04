@@ -86,10 +86,10 @@ def test_timestamp_extraction():
         print(f"  实际结果: {result}")
         
         if result == expected:
-            print(f"  ✅ 通过")
+            print("  ✅ 通过")
             passed += 1
         else:
-            print(f"  ❌ 失败")
+            print("  ❌ 失败")
     
     print("\n" + "=" * 60)
     print(f"测试结果: {passed}/{total} 通过")

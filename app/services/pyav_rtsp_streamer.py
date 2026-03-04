@@ -7,7 +7,7 @@ import numpy as np
 import time
 import logging
 import threading
-from typing import Optional, Dict, Any
+from typing import Dict, Any
 import cv2
 from fractions import Fraction
 

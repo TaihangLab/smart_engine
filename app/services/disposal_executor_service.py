@@ -2,7 +2,7 @@
 自动处置执行服务 - 第7层
 """
 import logging
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 import time
 
 logger = logging.getLogger(__name__)

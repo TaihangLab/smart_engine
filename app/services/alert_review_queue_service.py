@@ -6,14 +6,10 @@ import logging
 import json
 import threading
 import time
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
-from sqlalchemy.orm import Session
-from concurrent.futures import ThreadPoolExecutor
+from typing import Dict, Any
+from datetime import datetime
 
-from app.db.session import get_db
 from app.models.ai_task import AITask
-from app.models.llm_skill import LLMSkillClass
 from app.services.alert_review_service import alert_review_service
 from app.services.redis_client import get_redis_client
 from app.core.config import settings

@@ -17,7 +17,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.id == id,
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             )
         )
         return result.scalars().first()
@@ -27,7 +27,7 @@ class TenantDao:
         """获取所有租户（异步）"""
         result = await db.execute(
             select(SysTenant).filter(
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             ).order_by(desc(SysTenant.update_time)).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
@@ -38,7 +38,7 @@ class TenantDao:
         result = await db.execute(
             select(func.count()).select_from(
                 select(SysTenant).filter(
-                    SysTenant.is_deleted == False
+                    not SysTenant.is_deleted
                 ).subquery()
             )
         )
@@ -71,7 +71,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.id == id,
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             )
         )
         tenant = result.scalars().first()
@@ -133,7 +133,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.tenant_name.contains(tenant_name),
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             ).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
@@ -145,7 +145,7 @@ class TenantDao:
             select(func.count()).select_from(
                 select(SysTenant).filter(
                     SysTenant.tenant_name.contains(tenant_name),
-                    SysTenant.is_deleted == False
+                    not SysTenant.is_deleted
                 ).subquery()
             )
         )
@@ -157,7 +157,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.company_name.contains(company_name),
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             ).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
@@ -169,7 +169,7 @@ class TenantDao:
             select(func.count()).select_from(
                 select(SysTenant).filter(
                     SysTenant.company_name.contains(company_name),
-                    SysTenant.is_deleted == False
+                    not SysTenant.is_deleted
                 ).subquery()
             )
         )
@@ -181,7 +181,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.id.like(f"%{id_part}%"),
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             ).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
@@ -193,7 +193,7 @@ class TenantDao:
             select(func.count()).select_from(
                 select(SysTenant).filter(
                     SysTenant.id.like(f"%{id_part}%"),
-                    SysTenant.is_deleted == False
+                    not SysTenant.is_deleted
                 ).subquery()
             )
         )
@@ -205,7 +205,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.status == status,
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             ).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
@@ -217,7 +217,7 @@ class TenantDao:
             select(func.count()).select_from(
                 select(SysTenant).filter(
                     SysTenant.status == status,
-                    SysTenant.is_deleted == False
+                    not SysTenant.is_deleted
                 ).subquery()
             )
         )
@@ -228,7 +228,7 @@ class TenantDao:
         """获取所有租户数据用于导出（异步）"""
         result = await db.execute(
             select(SysTenant).filter(
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             )
         )
         return list(result.scalars().all())
@@ -239,7 +239,7 @@ class TenantDao:
                                        company_name: str = None,
                                        status: int = None) -> List[SysTenant]:
         """根据过滤条件获取租户数据用于导出（异步）"""
-        stmt = select(SysTenant).filter(SysTenant.is_deleted == False)
+        stmt = select(SysTenant).filter(not SysTenant.is_deleted)
 
         if tenant_name:
             stmt = stmt.filter(SysTenant.tenant_name.contains(tenant_name))
@@ -257,7 +257,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.id.in_(tenant_ids),
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             )
         )
         return list(result.scalars().all())
@@ -268,7 +268,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.company_code == company_code,
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             )
         )
         return result.scalars().first()
@@ -279,7 +279,7 @@ class TenantDao:
         result = await db.execute(
             select(SysTenant).filter(
                 SysTenant.id.in_(tenant_ids),
-                SysTenant.is_deleted == False
+                not SysTenant.is_deleted
             )
         )
         tenants = result.scalars().all()

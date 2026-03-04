@@ -5,12 +5,11 @@ import logging
 import json
 import asyncio
 import threading
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_
-from fastapi import Depends
 
 from app.db.session import get_db
 from app.models.alert import Alert, AlertCreate, AlertResponse, AlertUpdate, AlertStatus
@@ -82,7 +81,7 @@ class AlertService:
                 alert_data["status"] = AlertStatus.PENDING
             
             # 保存到数据库
-            logger.info(f"将报警数据保存到数据库")
+            logger.info("将报警数据保存到数据库")
             with next(get_db()) as db:
                 created_alert = self.create_alert(db, AlertCreate(**alert_data))
                 logger.info(f"✅ 报警数据已保存到数据库: ID={created_alert.alert_id}, 状态={created_alert.status}")
@@ -229,10 +228,10 @@ class AlertService:
                 db_alert.process = alert.process
             
             db.add(db_alert)
-            logger.debug(f"报警记录已添加到数据库会话")
+            logger.debug("报警记录已添加到数据库会话")
             
             db.commit()
-            logger.debug(f"数据库事务已提交")
+            logger.debug("数据库事务已提交")
             
             db.refresh(db_alert)
             logger.info(f"已创建报警记录: ID={db_alert.alert_id}, 时间={alert.alert_time}, 名称={alert.alert_name}, 状态={db_alert.status}")
@@ -972,24 +971,20 @@ class AlertService:
         # 根据时间粒度确定分组格式
         if granularity == "hour":
             # 按小时分组
-            date_format = "%Y-%m-%d %H:00"
             date_trunc = func.date_format(Alert.alert_time, "%Y-%m-%d %H:00")
-            delta = timedelta(hours=1)
+            timedelta(hours=1)
         elif granularity == "week":
             # 按周分组
-            date_format = "%Y-%u"
             date_trunc = func.date_format(Alert.alert_time, "%Y-%u")
-            delta = timedelta(weeks=1)
+            timedelta(weeks=1)
         elif granularity == "month":
             # 按月分组
-            date_format = "%Y-%m"
             date_trunc = func.date_format(Alert.alert_time, "%Y-%m")
-            delta = timedelta(days=30)
+            timedelta(days=30)
         else:  # default: day
             # 按天分组
-            date_format = "%Y-%m-%d"
             date_trunc = func.date_format(Alert.alert_time, "%Y-%m-%d")
-            delta = timedelta(days=1)
+            timedelta(days=1)
         
         # 查询趋势数据
         trend_stats = (
@@ -1104,9 +1099,9 @@ def publish_test_alert() -> bool:
     
     success = get_rabbitmq_client().publish_alert(test_alert)
     if success:
-        logger.info(f"✅ 测试报警消息已发送")
+        logger.info("✅ 测试报警消息已发送")
     else:
-        logger.error(f"❌ 发送测试报警消息失败")
+        logger.error("❌ 发送测试报警消息失败")
     return success
 
 # 🚀 架构优化说明：

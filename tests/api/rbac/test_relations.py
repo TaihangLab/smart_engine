@@ -7,7 +7,6 @@ RBAC 角色权限分配 API 测试
 """
 
 import pytest
-import time
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
 from sqlalchemy import select
@@ -17,7 +16,7 @@ from app.core.config import settings
 from app.api.rbac.relation_routes import relation_router
 from app.db.async_session import get_async_db
 from app.models.rbac.sqlalchemy_models import (
-    SysTenant, SysRole, SysPermission, SysRolePermission
+    SysTenant, SysRole, SysPermission
 )
 
 
@@ -94,7 +93,7 @@ async def setup_test_data(db_session: AsyncSession):
             db_session.add(perm)
 
         await db_session.commit()
-        print(f"✓ 创建测试数据完成")
+        print("✓ 创建测试数据完成")
 
     return {
         "tenant_id": TEST_TENANT_ID_NUM,
@@ -149,7 +148,7 @@ async def test_batch_assign_permissions_to_role(client: AsyncClient, setup_test_
         json=request_data
     )
 
-    print(f"\n测试: 批量分配权限")
+    print("\n测试: 批量分配权限")
     print(f"Response: {response.json()}")
 
     assert response.status_code == 200
@@ -172,7 +171,7 @@ async def test_batch_assign_permissions_role_not_found(client: AsyncClient):
         json=request_data
     )
 
-    print(f"\n测试: 角色不存在的情况")
+    print("\n测试: 角色不存在的情况")
     print(f"Response: {response.json()}")
 
     assert response.status_code == 200
@@ -199,7 +198,7 @@ async def test_get_role_permissions(client: AsyncClient, setup_test_data: dict):
         f"/api/v1/rbac/role-permissions?role_id={role_id}&tenant_id={tenant_id}"
     )
 
-    print(f"\n测试: 获取角色权限列表")
+    print("\n测试: 获取角色权限列表")
     print(f"Response: {response.json()}")
 
     assert response.status_code == 200
@@ -226,7 +225,7 @@ async def test_remove_permission_from_role(client: AsyncClient, setup_test_data:
         f"/api/v1/rbac/role-permissions-by-id?role_id={role_id}&permission_id={permission_id}&tenant_id={tenant_id}"
     )
 
-    print(f"\n测试: 移除角色权限")
+    print("\n测试: 移除角色权限")
     print(f"Response status: {response.status_code}")
 
     assert response.status_code == 204

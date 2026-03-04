@@ -1,16 +1,14 @@
 """
 模型API端点模块，提供模型相关的REST API
 """
-from typing import List, Dict, Any, Optional
-from fastapi import APIRouter, Depends, HTTPException, status, Response, UploadFile, File, Form, Query, Body
+from typing import List, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Form, Query
 import shutil
 import os
 import tempfile
 import logging
 from sqlalchemy.orm import Session
 from app.db.session import get_db
-from app.models.model import Model
-from app.services.triton_client import triton_client
 from app.services.model_service import sync_models_from_triton, ModelService
 from pydantic import BaseModel, Field
 

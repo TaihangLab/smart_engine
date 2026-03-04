@@ -48,7 +48,7 @@ class PositionDao:
             select(SysPosition).filter(
                 and_(
                     SysPosition.id == position_id,
-                    SysPosition.is_deleted == False
+                    not SysPosition.is_deleted
                 )
             )
         )
@@ -71,7 +71,7 @@ class PositionDao:
             select(SysPosition).filter(
                 and_(
                     SysPosition.tenant_id == tenant_id,
-                    SysPosition.is_deleted == False
+                    not SysPosition.is_deleted
                 )
             ).offset(skip).limit(limit)
         )
@@ -93,7 +93,7 @@ class PositionDao:
             select(SysPosition).filter(
                 and_(
                     SysPosition.id == position_id,
-                    SysPosition.is_deleted == False
+                    not SysPosition.is_deleted
                 )
             )
         )
@@ -126,7 +126,7 @@ class PositionDao:
             select(SysPosition).filter(
                 and_(
                     SysPosition.id == position_id,
-                    SysPosition.is_deleted == False
+                    not SysPosition.is_deleted
                 )
             )
         )
@@ -156,7 +156,7 @@ class PositionDao:
                 select(SysPosition).filter(
                     and_(
                         SysPosition.tenant_id == tenant_id,
-                        SysPosition.is_deleted == False
+                        not SysPosition.is_deleted
                     )
                 ).subquery()
             )
@@ -182,7 +182,7 @@ class PositionDao:
                 and_(
                     SysPosition.tenant_id == tenant_id,
                     SysPosition.position_name.contains(position_name),
-                    SysPosition.is_deleted == False
+                    not SysPosition.is_deleted
                 )
             ).offset(skip).limit(limit)
         )
@@ -206,7 +206,7 @@ class PositionDao:
                     and_(
                         SysPosition.tenant_id == tenant_id,
                         SysPosition.position_name.contains(position_name),
-                        SysPosition.is_deleted == False
+                        not SysPosition.is_deleted
                     )
                 ).subquery()
             )

@@ -13,7 +13,7 @@
 """
 import logging
 import time
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from collections import deque
 import numpy as np
 

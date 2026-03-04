@@ -13,21 +13,19 @@ MinIO补偿队列服务 - 持久化重试机制
 作者: 企业架构师
 日期: 2024-01-01
 """
-import asyncio
 import json
 import logging
 import sqlite3
 import threading
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Callable
+from typing import Dict, Any, List, Optional
 import uuid
 import os
 
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -371,7 +369,7 @@ class MinIOCompensationQueue:
                 data = base64.b64decode(data)
             
             # 执行上传
-            result = enterprise_minio_client.upload_bytes_with_retry(
+            enterprise_minio_client.upload_bytes_with_retry(
                 data=data,
                 object_name=object_name,
                 content_type=content_type,

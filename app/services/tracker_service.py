@@ -3,7 +3,7 @@
 支持按类别分离的多跟踪器，避免跨类别的错误关联
 """
 import numpy as np
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any
 import logging
 from app.services.sort import Sort
 

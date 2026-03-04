@@ -2,9 +2,7 @@
 跟踪参数优化工具
 帮助调试和优化人员跟踪参数，特别是针对姿势变化场景
 """
-import numpy as np
-import itertools
-from typing import Dict, List, Any, Tuple
+from typing import Dict, List
 import logging
 
 logger = logging.getLogger(__name__)
@@ -335,7 +333,7 @@ def quick_optimization_test():
     print("=" * 50)
     
     optimizer = TrackingOptimizer()
-    scenarios = optimizer.generate_test_scenarios()
+    optimizer.generate_test_scenarios()
     
     # 推荐的参数配置
     recommended_configs = [
@@ -380,7 +378,7 @@ def quick_optimization_test():
         for param, value in config['params'].items():
             print(f"  {param}: {value}")
     
-    print(f"\n💡 调优建议:")
+    print("\n💡 调优建议:")
     print("1. 如果ID频繁切换：降低tracking_iou_threshold，增加center_distance_threshold")
     print("2. 如果跟踪经常丢失：降低min_confidence_for_track，增加max_disappeared") 
     print("3. 如果误检过多：降低size_change_tolerance，减少max_movement_distance")

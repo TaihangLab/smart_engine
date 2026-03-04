@@ -7,7 +7,6 @@ JWT 认证和自动创建用户功能测试
 """
 
 import pytest
-import base64
 import json
 from httpx import AsyncClient, ASGITransport
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
@@ -80,7 +79,7 @@ def test_decode_jwt_token_without_verify():
     # 解析 Token
     payload = decode_jwt_token_without_verify(TEST_TOKEN)
     
-    print(f"\n测试: JWT Token 解析")
+    print("\n测试: JWT Token 解析")
     print(f"Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
     
     # 验证解析结果
@@ -100,7 +99,7 @@ def test_parse_token():
     """测试 auth_center 中的 Token 解析函数"""
     payload = parse_token(TEST_TOKEN)
     
-    print(f"\n测试: auth_center Token 解析")
+    print("\n测试: auth_center Token 解析")
     print(f"Payload: {json.dumps(payload, indent=2, ensure_ascii=False)}")
     
     assert payload is not None, "Token 解析失败"
@@ -125,7 +124,7 @@ async def test_ensure_user_exists_creates_new_user(db_session: AsyncSession):
         "deptName": "测试部门",
     }
     
-    print(f"\n测试: 自动创建用户")
+    print("\n测试: 自动创建用户")
     print(f"用户信息: {json.dumps(user_info, indent=2, ensure_ascii=False)}")
     
     # 确保用户存在（自动创建）
@@ -162,7 +161,7 @@ async def test_full_auth_flow_with_token(db_session: AsyncSession):
     print("\n步骤 1: 解析 JWT Token")
     payload = decode_jwt_token_without_verify(TEST_TOKEN)
     assert payload is not None, "Token 解析失败"
-    print(f"✓ Token 解析成功")
+    print("✓ Token 解析成功")
     print(f"  用户: {payload.get('userName')} (ID: {payload.get('userId')})")
     print(f"  租户: {payload.get('tenantId')}")
     print(f"  部门: {payload.get('deptId')}")
@@ -178,10 +177,9 @@ async def test_full_auth_flow_with_token(db_session: AsyncSession):
         "tenantName": "默认租户",
     }
     
-    from app.models.user import UserInfo
     user = await ensure_user_exists(user_info, db_session)
     assert user is not None, "用户创建失败"
-    print(f"✓ 用户确保存在")
+    print("✓ 用户确保存在")
     print(f"  用户名: {user.userName}")
     print(f"  用户ID: {user.userId}")
     print(f"  租户: {user.tenantId}")
@@ -200,13 +198,13 @@ async def test_full_auth_flow_with_token(db_session: AsyncSession):
     db_user = result.scalar_one_or_none()
     
     if db_user:
-        print(f"✓ 数据库中找到用户记录")
+        print("✓ 数据库中找到用户记录")
         print(f"  本地ID: {db_user.id}")
         print(f"  用户名: {db_user.user_name}")
         print(f"  外部用户ID: {db_user.external_user_id}")
         print(f"  租户: {db_user.tenant_id}")
     else:
-        print(f"⚠ 数据库中未找到用户记录（可能使用用户名查找）")
+        print("⚠ 数据库中未找到用户记录（可能使用用户名查找）")
         result = await db_session.execute(
             select(SysUser).where(
                 SysUser.user_name == payload.get("userName"),
@@ -215,7 +213,7 @@ async def test_full_auth_flow_with_token(db_session: AsyncSession):
         )
         db_user = result.scalar_one_or_none()
         if db_user:
-            print(f"✓ 通过用户名找到用户记录")
+            print("✓ 通过用户名找到用户记录")
             print(f"  本地ID: {db_user.id}")
             print(f"  用户名: {db_user.user_name}")
 

@@ -1,5 +1,4 @@
 import numpy as np
-from collections import deque
 
 from .kalman_filter import KalmanFilter
 from . import matching
@@ -320,6 +319,6 @@ def remove_duplicate_stracks(stracksa, stracksb):
             dupb.append(q)
         else:
             dupa.append(p)
-    resa = [t for i, t in enumerate(stracksa) if not i in dupa]
-    resb = [t for i, t in enumerate(stracksb) if not i in dupb]
+    resa = [t for i, t in enumerate(stracksa) if i not in dupa]
+    resb = [t for i, t in enumerate(stracksb) if i not in dupb]
     return resa, resb

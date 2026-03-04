@@ -3,9 +3,6 @@ from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
 # 导入所有模型，确保在创建会话前所有模型类都已加载
-from app.db.base import Base
-import app.models.skill
-import app.models.model
 
 # 🚀 高性能数据库连接池配置
 engine = create_engine(

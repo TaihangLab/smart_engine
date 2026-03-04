@@ -1,9 +1,9 @@
 """
 任务管理API端点
 """
-from fastapi import APIRouter, Depends, HTTPException, Query, Path
+from fastapi import APIRouter, Depends, HTTPException, Path
 from sqlalchemy.orm import Session
-from typing import List, Dict, Any
+from typing import Dict, Any
 
 from app.db.session import get_db
 from app.db.ai_task_dao import AITaskDAO

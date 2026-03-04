@@ -9,7 +9,7 @@ import logging
 # 添加项目根目录到路径
 sys.path.insert(0, os.path.abspath(os.path.dirname(os.path.dirname(__file__))))
 
-from app.services.adaptive_frame_reader import AdaptiveFrameReader, ThreadedFrameReader
+from app.services.adaptive_frame_reader import AdaptiveFrameReader
 
 # 配置日志
 logging.basicConfig(
@@ -51,7 +51,7 @@ def test_adaptive_frame_reader():
                 if frame is not None:
                     print(f"    ✅ 成功获取帧，尺寸: {frame.shape}")
                 else:
-                    print(f"    ❌ 获取帧失败")
+                    print("    ❌ 获取帧失败")
                 time.sleep(2)
             
             # 显示统计信息

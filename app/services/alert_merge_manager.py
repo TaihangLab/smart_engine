@@ -4,9 +4,8 @@
 import time
 import threading
 import hashlib
-import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass, field
 from concurrent.futures import ThreadPoolExecutor
@@ -345,7 +344,7 @@ class AlertMergeManager:
         self.video_critical_pre_buffer = settings.ALERT_VIDEO_CRITICAL_PRE_BUFFER_SECONDS
         self.video_critical_post_buffer = settings.ALERT_VIDEO_CRITICAL_POST_BUFFER_SECONDS
         
-        logger.info(f"✅ 预警合并管理器已初始化（简化版）")
+        logger.info("✅ 预警合并管理器已初始化（简化版）")
         logger.info(f"📊 核心配置: 合并窗口={self.merge_window}s, 基础延迟={self.base_delay}s, 最大持续={self.max_duration}s")
         logger.info(f"🚀 智能策略: 等级延迟系数={self.level_delay_factor}, 快速发送阈值={self.quick_send_threshold}, 立即发送等级={self.immediate_levels}")
         logger.info(f"🎬 视频配置: {'启用' if self.video_enabled else '禁用'}, 编码={self.video_codec}, 码率={self.video_bitrate}bps")
@@ -721,8 +720,6 @@ class AlertMergeManager:
             expected_video_filename = f"alert_video_{task_id}_{timestamp_str}.mp4"
             
             # 构建预期的MinIO对象名（只返回文件名，保持与upload_bytes一致）
-            from app.core.config import settings
-            minio_prefix = f"{settings.MINIO_ALERT_VIDEO_PREFIX}{task_id}"
             expected_video_object_name = expected_video_filename  # 只使用文件名，保持与upload_bytes一致
             
             # 🖼️ 将图片数据缓存到 Redis（用于复判，5分钟过期）
@@ -850,7 +847,7 @@ class AlertMergeManager:
         """通知视频已准备就绪（可选功能）"""
         try:
             # 可以发送一个视频就绪的通知消息
-            video_ready_notification = {
+            {
                 "type": "video_ready",
                 "task_id": task_id,
                 "camera_id": alert_data.get("camera_id"),

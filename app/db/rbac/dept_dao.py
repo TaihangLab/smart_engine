@@ -1,6 +1,6 @@
 from typing import List, Optional, Dict, Any
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, or_, func, select
+from sqlalchemy import and_, func, select
 from app.models.rbac import SysDept
 from app.utils.id_generator import generate_id
 
@@ -33,7 +33,7 @@ class DeptDao:
         result = await db.execute(
             select(SysDept).filter(
                 SysDept.id == new_parent_id,
-                SysDept.is_deleted == False
+                not SysDept.is_deleted
             )
         )
         parent_dept = result.scalars().first()
@@ -47,7 +47,7 @@ class DeptDao:
         result = await db.execute(
             select(SysDept).filter(
                 SysDept.id == dept_id,
-                SysDept.is_deleted == False
+                not SysDept.is_deleted
             )
         )
         current_dept = result.scalars().first()
@@ -77,7 +77,7 @@ class DeptDao:
         result = await db.execute(
             select(SysDept).filter(
                 SysDept.id == parent_id,
-                SysDept.is_deleted == False
+                not SysDept.is_deleted
             )
         )
         parent = result.scalars().first()
@@ -136,7 +136,7 @@ class DeptDao:
             # For a new department, we just need to make sure the parent isn't a child of the new department
             # But since the department doesn't exist yet, we only need to check if parent points to itself
             if parent_id == dept_data['id']:
-                raise ValueError(f"Cannot set department as its own parent")
+                raise ValueError("Cannot set department as its own parent")
 
         # Create department object with initial values
         dept = SysDept(
@@ -159,7 +159,7 @@ class DeptDao:
             result = await db.execute(
                 select(SysDept).filter(
                     SysDept.id == parent_id,
-                    SysDept.is_deleted == False
+                    not SysDept.is_deleted
                 )
             )
             parent = result.scalars().first()
@@ -182,7 +182,7 @@ class DeptDao:
         result = await db.execute(
             select(SysDept).filter(
                 SysDept.id == dept_id,
-                SysDept.is_deleted == False
+                not SysDept.is_deleted
             )
         )
         return result.scalars().first()
@@ -194,7 +194,7 @@ class DeptDao:
             select(SysDept).filter(
                 SysDept.name == name,
                 SysDept.tenant_id == tenant_id,
-                SysDept.is_deleted == False
+                not SysDept.is_deleted
             )
         )
         return result.scalars().first()
@@ -204,7 +204,7 @@ class DeptDao:
         """获取所有部门（异步）"""
         result = await db.execute(
             select(SysDept).filter(
-                SysDept.is_deleted == False
+                not SysDept.is_deleted
             ).order_by(SysDept.path, SysDept.sort_order)
         )
         return list(result.scalars().all())
@@ -214,7 +214,7 @@ class DeptDao:
         """获取所有激活的部门（异步）"""
         result = await db.execute(
             select(SysDept).filter(
-                SysDept.is_deleted == False,
+                not SysDept.is_deleted,
                 SysDept.status == 0
             ).order_by(SysDept.path, SysDept.sort_order)
         )
@@ -233,7 +233,7 @@ class DeptDao:
         """
         stmt = select(SysDept).filter(
             SysDept.parent_id == parent_id,
-            SysDept.is_deleted == False,
+            not SysDept.is_deleted,
             SysDept.status == 0  # 只返回激活的部门
         ).order_by(SysDept.sort_order)
 
@@ -256,7 +256,7 @@ class DeptDao:
         result = await db.execute(
             select(SysDept).filter(
                 SysDept.id == dept_id,
-                SysDept.is_deleted == False
+                not SysDept.is_deleted
             )
         )
         dept = result.scalars().first()
@@ -266,7 +266,7 @@ class DeptDao:
         # 构建查询
         stmt = select(SysDept).filter(
             SysDept.path.like(f"{dept.path}%"),
-            SysDept.is_deleted == False,
+            not SysDept.is_deleted,
             SysDept.status == 0  # 只返回激活的部门
         ).order_by(SysDept.path, SysDept.sort_order)
 
@@ -299,7 +299,7 @@ class DeptDao:
         if new_parent_id != old_parent_id:
             # 检查是否会产生循环引用
             if await DeptDao.check_circular_reference(db, dept_id, new_parent_id):
-                raise ValueError(f"Updating department would result in a circular reference")
+                raise ValueError("Updating department would result in a circular reference")
 
             # 获取当前部门及其所有子部门
             dept_with_children = await DeptDao.get_dept_subtree(db, dept_id)
@@ -354,7 +354,7 @@ class DeptDao:
         result = await db.execute(
             select(SysDept).filter(
                 SysDept.parent_id == dept_id,
-                SysDept.is_deleted == False
+                not SysDept.is_deleted
             )
         )
         has_children = result.scalars().first() is not None
@@ -381,7 +381,7 @@ class DeptDao:
         """
         # 构建查询
         stmt = select(SysDept).filter(
-            SysDept.is_deleted == False
+            not SysDept.is_deleted
         )
 
         # 添加租户过滤
@@ -447,7 +447,7 @@ class DeptDao:
         """
         # 获取所有部门
         stmt = select(SysDept).filter(
-            SysDept.is_deleted == False
+            not SysDept.is_deleted
         )
 
         if tenant_id:
@@ -510,7 +510,7 @@ class DeptDao:
         """
         stmt = select(SysDept).filter(
             SysDept.tenant_id == tenant_id,
-            SysDept.is_deleted == False,
+            not SysDept.is_deleted,
             SysDept.status == 0  # 只返回激活的部门
         )
 
@@ -545,7 +545,7 @@ class DeptDao:
         """
         stmt = select(SysDept).filter(
             SysDept.tenant_id == tenant_id,
-            SysDept.is_deleted == False,
+            not SysDept.is_deleted,
             SysDept.status == 0  # 只返回激活的部门
         )
 
@@ -584,7 +584,7 @@ class DeptDao:
         """
         stmt = select(SysDept).filter(
             SysDept.tenant_id == tenant_id,
-            SysDept.is_deleted == False,
+            not SysDept.is_deleted,
             SysDept.status == status  # 只返回指定状态的部门
         )
 
@@ -623,7 +623,7 @@ class DeptDao:
             select(SysDept).filter(
                 and_(
                     SysDept.tenant_id == tenant_id,
-                    SysDept.is_deleted == False,
+                    not SysDept.is_deleted,
                     SysDept.status == status
                 )
             ).subquery()
@@ -635,7 +635,7 @@ class DeptDao:
             base_stmt = select(SysDept).filter(
                 and_(
                     SysDept.tenant_id == tenant_id,
-                    SysDept.is_deleted == False,
+                    not SysDept.is_deleted,
                     SysDept.status == status
                 )
             )
@@ -664,7 +664,7 @@ class DeptDao:
             select(SysDept).filter(
                 and_(
                     SysDept.tenant_id == tenant_id,
-                    SysDept.is_deleted == False,
+                    not SysDept.is_deleted,
                     SysDept.status == 0  # 只计算激活的部门
                 )
             ).subquery()

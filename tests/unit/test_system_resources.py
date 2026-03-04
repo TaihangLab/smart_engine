@@ -9,9 +9,8 @@
 
 import os
 import sys
-import pytest
 import unittest
-from unittest.mock import patch, MagicMock, Mock
+from unittest.mock import MagicMock
 from fastapi.testclient import TestClient
 
 # 添加项目根目录到Python路径

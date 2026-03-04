@@ -925,7 +925,6 @@ class PersonTrackSkill(BaseSkill):
                 size_similarity = self._calculate_size_similarity(det_bbox, last_bbox)
                 
                 # 计算外观相似度
-                appearance_similarity = 0.0
                 if (current_features and track_id in self.track_appearances 
                     and self.track_appearances[track_id]):
                     # 与历史外观特征进行匹配
@@ -935,7 +934,7 @@ class PersonTrackSkill(BaseSkill):
                         similarities.append(sim)
                     
                     if similarities:
-                        appearance_similarity = max(similarities)  # 取最佳匹配
+                        max(similarities)  # 取最佳匹配
                 
                 # 简化的综合相似度计算
                 total_similarity = (position_similarity * 0.7 + 

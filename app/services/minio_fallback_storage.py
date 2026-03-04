@@ -16,14 +16,13 @@ MinIO降级存储服务 - 本地备份机制
 import json
 import logging
 import os
-import shutil
 import threading
 import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Dict, Any, List, Optional, Tuple
+from typing import Dict, Any, Optional
 import hashlib
 import sqlite3
 
@@ -394,7 +393,7 @@ class MinIOFallbackStorage:
                 return False
             
             # 上传到MinIO
-            result = enterprise_minio_client.upload_bytes_with_retry(
+            enterprise_minio_client.upload_bytes_with_retry(
                 data=data,
                 object_name=fallback_file.object_name,
                 content_type=fallback_file.content_type,

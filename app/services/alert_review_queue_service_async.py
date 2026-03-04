@@ -5,15 +5,10 @@
 import logging
 import json
 import asyncio
-import time
-from typing import Dict, Any, Optional
-from datetime import datetime, timedelta
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from typing import Dict, Any
+from datetime import datetime
 
-from app.db.async_session import AsyncSessionLocal, get_async_db_session
 from app.models.ai_task import AITask
-from app.models.llm_skill import LLMSkillClass
 from app.services.alert_review_service import alert_review_service
 from app.services.redis_client import get_redis_client
 from app.core.config import settings
@@ -154,7 +149,7 @@ class AsyncAlertReviewQueueService:
             loop = asyncio.get_event_loop()
             if loop.is_running():
                 # 如果事件循环正在运行，创建任务
-                future = asyncio.ensure_future(self.enqueue_review_task_async(alert_data, ai_task, review_skill_class_id))
+                asyncio.ensure_future(self.enqueue_review_task_async(alert_data, ai_task, review_skill_class_id))
                 # 不等待结果，直接返回True
                 return True
             else:

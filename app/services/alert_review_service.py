@@ -1,16 +1,13 @@
 # noinspection PyUnreachableCode
 import logging
-import asyncio
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 from sqlalchemy.orm import Session
 from app.db.session import get_db
 from app.models.alert import Alert
-from app.models.ai_task import AITask
 from app.models.review_llm_skill import ReviewSkillClass
 from app.services.llm_service import llm_service, LLMServiceResult
 from app.services.minio_client import minio_client
-from app.core.config import settings
 
 logger = logging.getLogger(__name__)
 

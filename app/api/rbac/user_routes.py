@@ -6,8 +6,8 @@ RBAC用户管理API
 处理用户相关的增删改查操作
 """
 
-from typing import Optional, List
-from fastapi import APIRouter, Depends, Query, UploadFile, Body, Request, HTTPException, status
+from typing import Optional
+from fastapi import APIRouter, Depends, Query, UploadFile, Body, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
@@ -813,7 +813,6 @@ async def import_users(
     """导入用户数据"""
     try:
         import pandas as pd
-        import uuid
         from io import BytesIO
         
         # 从用户态获取并验证租户ID

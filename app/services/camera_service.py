@@ -1,12 +1,10 @@
 """
 摄像头服务模块，负责摄像头相关的业务逻辑
 """
-from typing import List, Dict, Any, Optional
+from typing import Dict, Any, Optional
 from sqlalchemy.orm import Session
 from app.services.wvp_client import wvp_client
-import json
 import logging
-from fastapi import HTTPException
 
 
 logger = logging.getLogger(__name__)

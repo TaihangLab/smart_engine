@@ -7,10 +7,7 @@ RBAC SQLAlchemy数据库模型
 """
 
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Date, Text, func, UniqueConstraint, BigInteger
-from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from sqlalchemy.ext.hybrid import hybrid_property
-import json
 from app.db.base import Base
 
 

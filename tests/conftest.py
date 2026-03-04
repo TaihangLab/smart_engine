@@ -1,5 +1,4 @@
 import sys
-import os
 from pathlib import Path
 
 # 将项目根目录添加到 Python 路径
@@ -8,14 +7,13 @@ sys.path.insert(0, str(project_root))
 
 import pytest
 import asyncio
-from unittest.mock import patch
 
 # ============================================
 # 真实数据库连接 Fixtures
 # ============================================
 
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
 
 # 创建真实的数据库引擎

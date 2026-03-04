@@ -5,7 +5,7 @@
 import json
 import hashlib
 from functools import wraps
-from typing import List, Dict, Any, Optional, Callable, Union
+from typing import List, Dict, Any, Optional, Callable
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_

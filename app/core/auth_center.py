@@ -8,19 +8,18 @@ import json
 import logging
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from fastapi import Request, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from app.models.user import UserInfo
 from app.services.rbac_service import RbacService
-from app.db.session import get_db
 from app.db.async_session import AsyncSessionLocal
 from app.core.config import settings
 
 # 类型检查时导入，避免循环导入
 if TYPE_CHECKING:
-    from app.models.rbac import SysRole
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -147,15 +146,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
     Returns:
         完整用户态信息
     """
-    from app.models.rbac import (
-        UserCreate,
-        SysRole,
-        SysPermission,
-        SysRolePermission,
-        SysUserRole,
-    )
     from app.services.rbac.relation_service import RelationService
-    from app.services.rbac.permission_copy_service import PermissionCopyService
     from app.models.rbac.rbac_constants import RoleConstants
     from app.models.rbac.sqlalchemy_models import SysUser
 
@@ -239,7 +230,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         if external_tenant_id and existing_user.external_tenant_id:
             update_data["external_tenant_id"] = str(external_tenant_id)
 
-        updated_user = await RbacService.update_user_by_id(
+        await RbacService.update_user_by_id(
             db, int(existing_user.id), update_data
         )
 
@@ -249,10 +240,10 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         )
 
         # 获取该用户当前的部门
-        current_dept = await RbacService.get_dept_by_id(db, dept_id)
+        await RbacService.get_dept_by_id(db, dept_id)
 
         # 获取该用户当前的部门的子部门
-        sub_depts = await RbacService.get_dept_subtree(db, dept_id)
+        await RbacService.get_dept_subtree(db, dept_id)
 
         # ========== 检查并分配角色（支持超管配置） ==========
         # 检查是否为超管用户
@@ -331,7 +322,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         # 尝试创建用户，处理并发冲突
         try:
             created_user = await RbacService.create_user(db, user_data)
-        except IntegrityError as e:
+        except IntegrityError:
             # 唯一键冲突：可能是并发请求导致用户已被创建
             logger.warning(f"创建用户时遇到唯一键冲突: {user_name}@{tenant_id}，重新查询用户")
             # 回滚当前事务
@@ -451,7 +442,7 @@ async def _build_user_state(
                 )
                 .filter(
                     SysRolePermission.role_id == role.id,
-                    SysPermission.is_deleted == False,
+                    not SysPermission.is_deleted,
                     SysPermission.status == 0,
                 )
             )
@@ -595,7 +586,7 @@ async def ensure_role_exists(tenant_id: str, db):
         return
 
     # 确保租户的ROLE_ACCESS角色有权限，没有则从租户0复制
-    role = await PermissionCopyService.ensure_role_has_permissions(db, str(tenant_id))
+    await PermissionCopyService.ensure_role_has_permissions(db, str(tenant_id))
 
 
 async def ensure_dept_exists(dept_info: Dict[str, Any], db):
@@ -724,7 +715,7 @@ async def authenticate_request(request: Request) -> Optional[UserInfo]:
         # 处理 deptId（可选，为空时使用默认值）
         if "deptId" not in user_info or user_info["deptId"] is None:
             user_info["deptId"] = 0
-            logger.debug(f"JWT中缺少deptId，使用默认值0")
+            logger.debug("JWT中缺少deptId，使用默认值0")
 
         # 处理 deptName（可选）
         if "deptName" not in user_info or not user_info["deptName"]:
@@ -901,7 +892,7 @@ async def auth_middleware(request: Request, call_next):
             return response
 
         # ========== 步骤2: 不在用户权限中，检查租户0权限 ==========
-        logger.debug(f"[鉴权步骤1] ❌ 用户权限中未找到，继续检查租户0权限")
+        logger.debug("[鉴权步骤1] ❌ 用户权限中未找到，继续检查租户0权限")
 
         db: AsyncSession = AsyncSessionLocal()
 
@@ -924,7 +915,7 @@ async def auth_middleware(request: Request, call_next):
                 )
                 .filter(
                     SysRolePermission.role_id == template_role.id,
-                    SysPermission.is_deleted == False,
+                    not SysPermission.is_deleted,
                     SysPermission.status == 0,
                 )
             )

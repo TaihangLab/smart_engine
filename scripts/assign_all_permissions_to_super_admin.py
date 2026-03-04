@@ -38,7 +38,7 @@ def assign_all_permissions_to_super_admin():
 
         # 获取所有权限
         all_permissions = db.query(SysPermission).filter(
-            SysPermission.is_deleted == False,
+            not SysPermission.is_deleted,
             SysPermission.status == 0
         ).all()
 

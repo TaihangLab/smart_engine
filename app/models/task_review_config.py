@@ -2,11 +2,11 @@
 任务复判配置数据模型
 统一管理AI任务和LLM任务的复判配置
 """
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, JSON, ForeignKey, Index
+from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from app.db.base import Base
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, Any
+from typing import Optional
 from datetime import datetime
 
 

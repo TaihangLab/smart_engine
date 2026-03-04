@@ -12,12 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_
 from app.db.async_session import get_async_db
 from app.models.rbac import (
-    PermissionTreeResponse, UnifiedResponse
+    UnifiedResponse
 )
 from app.models.rbac import PermissionNodeResponse
 from app.services.rbac_service import RbacService
 import logging
-from typing import List, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -269,7 +268,7 @@ async def delete_permission_node(
             .where(
                 and_(
                     permission.__class__.parent_id == id,
-                    permission.__class__.is_deleted == False
+                    not permission.__class__.is_deleted
                 )
             )
         )

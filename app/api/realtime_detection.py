@@ -2,10 +2,9 @@
 实时检测结果推送API
 通过WebSocket向前端推送AI任务的实时检测框数据
 """
-from typing import Optional, Dict, Any, Set
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from typing import Dict, Set
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 import logging
-import json
 import asyncio
 
 logger = logging.getLogger(__name__)

@@ -7,17 +7,14 @@
 """
 
 import sys
-import os
 from pathlib import Path
 
 # 添加项目根目录到 Python 路径
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from sqlalchemy.orm import Session
-from app.db.session import engine, SessionLocal
+from app.db.session import SessionLocal
 from app.models.rbac.sqlalchemy_models import SysPermission
 from app.utils.id_generator import generate_id
-from datetime import datetime
 
 
 def init_permissions():

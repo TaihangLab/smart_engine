@@ -7,7 +7,7 @@
 
 from typing import List, Optional, Dict, Any, Union
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Float, JSON, BigInteger, Integer, Text, ForeignKey, Index, Boolean
+from sqlalchemy import Column, String, DateTime, JSON, BigInteger, Integer, ForeignKey, Index, Boolean
 from sqlalchemy.orm import relationship
 
 # 使用 Integer 作为状态类型，确保在所有数据库环境下兼容

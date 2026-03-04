@@ -4,10 +4,10 @@
 """
 
 import logging
-from typing import List, Dict, Any, Optional, Tuple
-from datetime import datetime, timedelta
-from sqlalchemy.orm import Session, joinedload, aliased
-from sqlalchemy import and_, or_, desc, asc, func, text
+from typing import List, Dict, Any, Optional
+from datetime import datetime
+from sqlalchemy.orm import Session
+from sqlalchemy import and_, desc, func
 from sqlalchemy.exc import IntegrityError
 
 from app.db.session import SessionLocal
@@ -82,7 +82,7 @@ class AlertArchiveLinkDAO:
                 # 子查询：获取已归档的预警ID - 使用select()构造避免SAWarning
                 from sqlalchemy import select
                 archived_alert_ids_subquery = select(AlertArchiveLink.alert_id).where(
-                    AlertArchiveLink.is_active == True
+                    AlertArchiveLink.is_active
                 )
                 
                 # 排除已归档的预警
@@ -141,7 +141,7 @@ class AlertArchiveLinkDAO:
                 archived_link = self.db.query(AlertArchiveLink).filter(
                     and_(
                         AlertArchiveLink.alert_id == alert.alert_id,
-                        AlertArchiveLink.is_active == True
+                        AlertArchiveLink.is_active
                     )
                 ).first()
                 
@@ -248,7 +248,7 @@ class AlertArchiveLinkDAO:
                     existing_active_link = self.db.query(AlertArchiveLink).filter(
                         and_(
                             AlertArchiveLink.alert_id == alert_id,
-                            AlertArchiveLink.is_active == True
+                            AlertArchiveLink.is_active
                         )
                     ).first()
                     
@@ -269,7 +269,7 @@ class AlertArchiveLinkDAO:
                         and_(
                             AlertArchiveLink.archive_id == archive_id,
                             AlertArchiveLink.alert_id == alert_id,
-                            AlertArchiveLink.is_active == False
+                            not AlertArchiveLink.is_active
                         )
                     ).first()
                     
@@ -358,7 +358,7 @@ class AlertArchiveLinkDAO:
                 and_(
                     AlertArchiveLink.archive_id == archive_id,
                     AlertArchiveLink.alert_id == alert_id,
-                    AlertArchiveLink.is_active == True
+                    AlertArchiveLink.is_active
                 )
             ).first()
             
@@ -405,7 +405,7 @@ class AlertArchiveLinkDAO:
             links = self.db.query(AlertArchiveLink).filter(
                 and_(
                     AlertArchiveLink.archive_id == archive_id,
-                    AlertArchiveLink.is_active == True
+                    AlertArchiveLink.is_active
                 )
             ).all()
             
@@ -484,7 +484,7 @@ class AlertArchiveLinkDAO:
                 and_(
                     Alert.alert_id == AlertArchiveLink.alert_id,
                     AlertArchiveLink.archive_id == archive_id,
-                    AlertArchiveLink.is_active == True
+                    AlertArchiveLink.is_active
                 )
             )
             
@@ -587,7 +587,7 @@ class AlertArchiveLinkDAO:
                 and_(
                     Alert.alert_id == AlertArchiveLink.alert_id,
                     AlertArchiveLink.archive_id == archive_id,
-                    AlertArchiveLink.is_active == True
+                    AlertArchiveLink.is_active
                 )
             ).first()
             
@@ -647,7 +647,7 @@ class AlertArchiveLinkDAO:
                 and_(
                     Alert.alert_id == AlertArchiveLink.alert_id,
                     AlertArchiveLink.archive_id == archive_id,
-                    AlertArchiveLink.is_active == True
+                    AlertArchiveLink.is_active
                 )
             ).first()
             
@@ -729,7 +729,7 @@ class AlertArchiveLinkDAO:
             query = self.db.query(AlertArchiveLink).filter(
                 and_(
                     AlertArchiveLink.alert_id == alert_id,
-                    AlertArchiveLink.is_active == True
+                    AlertArchiveLink.is_active
                 )
             )
             

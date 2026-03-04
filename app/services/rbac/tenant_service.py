@@ -64,7 +64,7 @@ class TenantService:
         # 如果 tenant_data 中没有 id，则生成新的 ID
         if 'id' not in tenant_data:
             # 使用默认值生成租户ID用于ID生成器
-            tenant_code_val = tenant_data.get('tenant_name', 'default')
+            tenant_data.get('tenant_name', 'default')
             # 生成新的租户ID
             from app.utils.id_generator import generate_id
             tenant_id_value = generate_id("tenant")

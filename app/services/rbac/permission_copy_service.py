@@ -72,7 +72,7 @@ class PermissionCopyService:
             select(SysRole).where(
                 SysRole.tenant_id == TenantConstants.TEMPLATE_TENANT_ID,
                 SysRole.role_code == RoleConstants.ROLE_ACCESS,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
             )
         )
         role = result.scalar_one_or_none()
@@ -112,7 +112,7 @@ class PermissionCopyService:
             )
             .where(
                 SysRolePermission.role_id == template_role.id,
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.status == 0,
             )
         )
@@ -132,7 +132,7 @@ class PermissionCopyService:
             )
             .where(
                 SysRolePermission.role_id == role.id,
-                SysPermission.is_deleted == False,
+                not SysPermission.is_deleted,
                 SysPermission.status == 0,
             )
         )
@@ -164,7 +164,7 @@ class PermissionCopyService:
             .where(
                 SysRole.tenant_id == tenant_id,
                 SysRole.role_code == RoleConstants.ROLE_ACCESS,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
             )
             .order_by(SysRole.id)  # 确保结果稳定，取ID最小的
         )
@@ -236,7 +236,7 @@ class PermissionCopyService:
                 .where(
                     SysRole.tenant_id == tenant_id,
                     SysRole.role_code == RoleConstants.ROLE_ACCESS,
-                    SysRole.is_deleted == False,
+                    not SysRole.is_deleted,
                 )
             )
             role = result.scalar_one_or_none()

@@ -1,7 +1,6 @@
-from typing import List
 import logging
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import and_, select, text, delete
+from sqlalchemy import select, delete
 from app.models.rbac import SysUserRole, SysRole, SysUser
 from app.utils.id_generator import generate_id
 
@@ -66,7 +65,7 @@ class UserRoleDao:
             select(SysRole).filter(
                 SysRole.role_code == role_code,
                 SysRole.tenant_id == tenant_id,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
                 SysRole.status == 0,
             )
         )
@@ -118,7 +117,7 @@ class UserRoleDao:
             .filter(
                 SysUserRole.user_id == user.id,
                 SysRole.tenant_id == tenant_id,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
                 SysRole.status == 0,
             )
         )
@@ -143,7 +142,7 @@ class UserRoleDao:
             .filter(
                 SysUserRole.user_id == user_id,
                 SysRole.tenant_id == tenant_id,
-                SysRole.is_deleted == False,
+                not SysRole.is_deleted,
                 SysRole.status == 0,
             )
         )
@@ -169,7 +168,7 @@ class UserRoleDao:
             .join(SysUserRole, SysUser.id == SysUserRole.user_id)
             .filter(
                 SysUserRole.role_id == role.id,
-                SysUser.is_deleted == False,
+                not SysUser.is_deleted,
                 SysUser.status == 0,
             )
         )
@@ -183,7 +182,7 @@ class UserRoleDao:
             .join(SysUserRole, SysUser.id == SysUserRole.user_id)
             .filter(
                 SysUserRole.role_id == role_id,
-                SysUser.is_deleted == False,
+                not SysUser.is_deleted,
                 SysUser.status == 0,
             )
         )
@@ -257,7 +256,7 @@ class UserRoleDao:
             db.add(user_role)
             await db.commit()
             return True
-        except Exception as e:
+        except Exception:
             return False
 
     @staticmethod
@@ -305,7 +304,7 @@ class UserRoleDao:
                 select(SysRole).filter(
                     SysRole.role_code == role_code,
                     SysRole.tenant_id == tenant_id,
-                    SysRole.is_deleted == False,
+                    not SysRole.is_deleted,
                     SysRole.status == 0,
                 )
             )

@@ -3,10 +3,9 @@
 用于管理预警档案和档案下的预警记录
 """
 
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Any
 from datetime import datetime
-from sqlalchemy import Column, String, DateTime, Integer, Text, ForeignKey, Index, Boolean, JSON
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, String, DateTime, Integer, Text, Index
 from pydantic import BaseModel, Field, validator
 from app.db.base import Base
 

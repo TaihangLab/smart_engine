@@ -6,7 +6,6 @@ from sqlalchemy.orm import Session
 from app.models.ai_task import AITask
 import json
 import logging
-from datetime import datetime
 from sqlalchemy import distinct
 
 logger = logging.getLogger(__name__)
@@ -213,7 +212,7 @@ class AITaskDAO:
         # 使用distinct直接获取去重的camera_id
         camera_ids = db.query(distinct(AITask.camera_id)).filter(
             AITask.skill_class_id == skill_class_id,
-            AITask.camera_id != None  # 排除camera_id为null的情况
+            AITask.camera_id is not None  # 排除camera_id为null的情况
         ).all()
         
         # 将结果从元组列表转换为整数列表

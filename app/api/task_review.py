@@ -4,7 +4,7 @@
 """
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional
 from pydantic import BaseModel, Field
 import json
 import logging
@@ -12,11 +12,10 @@ import logging
 from app.db.session import get_db
 from app.models.ai_task import AITask
 from app.models.llm_task import LLMTask
-from app.models.task_review_config import TaskReviewConfig, TaskReviewConfigCreate, TaskReviewConfigUpdate
+from app.models.task_review_config import TaskReviewConfig
 from app.models.review_llm_skill import ReviewSkillClass
 
 logger = logging.getLogger(__name__)
-from app.services.alert_review_service import alert_review_service
 
 router = APIRouter()
 
@@ -253,7 +252,7 @@ async def get_available_review_skills(
     """获取可用的复判技能列表"""
     
     review_skills = db.query(ReviewSkillClass).filter(
-        ReviewSkillClass.status == True  # 只显示已上线的技能
+        ReviewSkillClass.status  # 只显示已上线的技能
     ).order_by(ReviewSkillClass.created_at.desc()).all()
     
     skills = [
@@ -291,7 +290,7 @@ async def get_review_enabled_tasks(
     
     # 查询所有启用复判的配置
     review_configs = db.query(TaskReviewConfig).filter(
-        TaskReviewConfig.review_enabled == True
+        TaskReviewConfig.review_enabled
     ).all()
     
     ai_tasks = []

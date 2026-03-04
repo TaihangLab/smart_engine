@@ -6,9 +6,7 @@ RBAC租户管理API
 处理租户相关的增删改查操作
 """
 
-from typing import Optional
-from fastapi import APIRouter, Depends, Query, HTTPException, status
-from typing import Optional
+from fastapi import APIRouter, Depends, Query, status
 from fastapi.responses import StreamingResponse, JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db

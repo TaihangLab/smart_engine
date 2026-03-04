@@ -6,14 +6,13 @@
 处理用户登录、登出、令牌刷新等认证相关操作
 """
 
-from fastapi import APIRouter, Depends, HTTPException, status, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional
 import logging
-from datetime import datetime
 
 from app.db.async_session import get_async_db
-from app.models.auth import LoginRequest, LoginResponse, TokenRefreshRequest, PasswordChangeRequest, NewLoginResponse
+from app.models.auth import LoginRequest, TokenRefreshRequest, PasswordChangeRequest
 from app.services.auth_service import AuthenticationService
 from app.models.rbac import UnifiedResponse
 from app.core.config import settings
@@ -649,8 +648,7 @@ async def get_user_menu_tree(
 
         logger.info(
             f"获取用户菜单树成功: {user.user_name} (ID: {user.id}), "
-            f"用户权限数: {len(permission_codes)}, 可访问菜单数: {len(accessible_menu_codes)}, "
-            f"返回菜单节点数: {_count_tree_nodes(filtered_menu_tree)}"
+            f"返回菜单节点数: {len(menu_tree)}"
         )
 
         return UnifiedResponse(
@@ -660,7 +658,7 @@ async def get_user_menu_tree(
             data={
                 "user_id": user.id,
                 "user_name": user.user_name,
-                "menu_tree": filtered_menu_tree,
+                "menu_tree": menu_tree,
                 "is_super_admin": False
             }
         )

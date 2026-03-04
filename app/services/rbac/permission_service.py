@@ -143,7 +143,7 @@ class PermissionService:
             List[Dict[str, Any]]: 权限树节点列表
         """
         # 构建查询条件
-        stmt = select(SysPermission).filter(SysPermission.is_deleted == False)
+        stmt = select(SysPermission).filter(not SysPermission.is_deleted)
 
         if permission_name:
             stmt = stmt.filter(SysPermission.permission_name.contains(permission_name))
@@ -157,7 +157,7 @@ class PermissionService:
             # 非懒加载模式：获取根节点（parent_id 为 None）以及 ID=0 的特殊节点
             # 使用 or_ 条件来同时匹配 parent_id IS NULL 和 id=0
             stmt = stmt.filter(or_(
-                SysPermission.parent_id == None,
+                SysPermission.parent_id is None,
                 SysPermission.id == 0
             ))
 
@@ -174,7 +174,7 @@ class PermissionService:
                 child_stmt = select(func.count()).select_from(
                     select(SysPermission).filter(
                         SysPermission.parent_id == perm.id,
-                        SysPermission.is_deleted == False
+                        not SysPermission.is_deleted
                     ).subquery()
                 )
                 child_result = await db.execute(child_stmt)
@@ -185,7 +185,7 @@ class PermissionService:
                 child_stmt = select(func.count()).select_from(
                     select(SysPermission).filter(
                         SysPermission.parent_id == perm.id,
-                        SysPermission.is_deleted == False
+                        not SysPermission.is_deleted
                     ).subquery()
                 )
                 child_result = await db.execute(child_stmt)
@@ -212,7 +212,7 @@ class PermissionService:
         """
         # 获取所有符合条件的权限
         stmt = select(SysPermission).filter(
-            SysPermission.is_deleted == False
+            not SysPermission.is_deleted
         )
 
         if permission_name:
@@ -284,7 +284,7 @@ class PermissionService:
         """
         stmt = select(SysPermission).filter(
             SysPermission.parent_id == parent_id,
-            SysPermission.is_deleted == False
+            not SysPermission.is_deleted
         )
 
         if permission_name:
@@ -303,7 +303,7 @@ class PermissionService:
             child_stmt = select(func.count()).select_from(
                 select(SysPermission).filter(
                     SysPermission.parent_id == perm.id,
-                    SysPermission.is_deleted == False
+                    not SysPermission.is_deleted
                 ).subquery()
             )
             child_result = await db.execute(child_stmt)
@@ -443,7 +443,7 @@ class PermissionService:
         """获取租户下的权限列表（注：权限表无租户字段，返回所有权限）（异步）"""
         result = await db.execute(
             select(SysPermission).filter(
-                SysPermission.is_deleted == False
+                not SysPermission.is_deleted
             ).offset(skip).limit(limit)
         )
         return list(result.scalars().all())
@@ -454,7 +454,7 @@ class PermissionService:
         result = await db.execute(
             select(func.count()).select_from(
                 select(SysPermission).filter(
-                    SysPermission.is_deleted == False
+                    not SysPermission.is_deleted
                 ).subquery()
             )
         )
