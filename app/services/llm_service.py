@@ -41,10 +41,10 @@ if LLM_ENABLED:
 if LLM_ENABLED:
     try:
         from langchain_core.messages import HumanMessage, SystemMessage, AIMessage, BaseMessage
-        from langchain_core.prompts import ChatPromptTemplate
-        from langchain_core.output_parsers import StrOutputParser, JsonOutputParser
+        from langchain_core.prompts import ChatPromptTemplate  # noqa: F401
+        from langchain_core.output_parsers import StrOutputParser, JsonOutputParser  # noqa: F401
         from langchain_core.chat_history import BaseChatMessageHistory
-        from langchain_core.language_models import BaseChatModel
+        from langchain_core.language_models import BaseChatModel  # noqa: F401
         from langchain_openai import ChatOpenAI
     except ImportError:
         logging.warning("⚠️ 未安装langchain相关库，LLM功能将不可用")
@@ -54,7 +54,7 @@ if LLM_ENABLED:
 redis_client = None
 if LLM_ENABLED:
     try:
-        from app.services.redis_client import redis_client
+        from app.services.redis_client import redis_client  # noqa: F401
     except ImportError:
         logging.warning("⚠️ 未找到redis_client模块，LLM历史记录功能将不可用")
 

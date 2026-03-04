@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import JSONResponse
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, Field
 from app.db.async_session import get_async_db
 from app.models.rbac import (
     PermissionCreate, PermissionUpdate, PermissionResponse, PermissionListResponse,
@@ -431,8 +432,6 @@ async def get_user_permissions(
 # ===========================================
 # 权限辅助API（与前端对齐）
 # ===========================================
-
-from pydantic import BaseModel, Field
 
 class PermissionCodeValidationRequest(BaseModel):
     """权限码验证请求"""

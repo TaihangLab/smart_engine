@@ -7,8 +7,13 @@ RBAC用户管理API
 """
 
 from typing import Optional
+from io import BytesIO
+import logging
+
+import pandas as pd
 from fastapi import APIRouter, Depends, Query, UploadFile, Body, Request, status
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, StreamingResponse
+from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.async_session import get_async_db
 from app.models.rbac import (
@@ -16,10 +21,8 @@ from app.models.rbac import (
     UserRoleAssign, UserRoleResponse, UserPermissionResponse,
     PaginatedResponse, UnifiedResponse, BatchDeleteUserRequest
 )
-from pydantic import BaseModel, Field
 from app.services.rbac_service import RbacService
 from app.services.auth_service import AuthenticationService
-import logging
 
 logger = logging.getLogger(__name__)
 
@@ -763,11 +766,6 @@ async def batch_delete_users_api(
 # ===========================================
 # 用户导入导出API
 # ===========================================
-
-from fastapi.responses import StreamingResponse
-from io import BytesIO
-import pandas as pd
-
 
 @user_router.get("/users/template", summary="下载用户导入模板")
 async def download_user_template():

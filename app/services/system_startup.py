@@ -251,13 +251,13 @@ class SystemStartupService:
             # 确保所有模型都被导入，以便create_all能发现它们
             try:
                 # 导入现有模型
-                from app.models import alert, model, skill, ai_task, llm_skill
+                from app.models import alert, model, skill, ai_task, llm_skill  # noqa: F401
                 # 导入预警档案关联模型
-                from app.models import alert_archive_link
+                from app.models import alert_archive_link  # noqa: F401
                 # 导入复判记录模型
-                from app.models import review_record
+                from app.models import review_record  # noqa: F401
                 # 导入本地视频模型
-                from app.models import local_video
+                from app.models import local_video  # noqa: F401
                 logger.info("✅ 现有模型导入完成")
                 
                 # 导入预警重构模型（已替换原有模型）

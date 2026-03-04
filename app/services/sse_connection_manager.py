@@ -38,8 +38,10 @@ if SSE_ENABLED:
     try:
         from app.db.async_session import AsyncSessionLocal
         from app.models.compensation import (
-            AlertNotificationLog, AlertNotificationLogCreate,
-            NotificationStatus, NotificationChannel
+            AlertNotificationLog,  # noqa: F401
+            AlertNotificationLogCreate,  # noqa: F401
+            NotificationStatus,  # noqa: F401
+            NotificationChannel  # noqa: F401
         )
         from app.utils.message_id_generator import generate_message_id
     except ImportError as e:

@@ -13,10 +13,17 @@ from app.models.local_video import LocalVideo  # noqa: F401
 
 # 🎯 导入零配置补偿机制相关模型
 from app.models.compensation import (
-    AlertPublishLog, AlertNotificationLog, CompensationTaskLog,
-    PublishStatus, NotificationStatus, NotificationChannel, CompensationTaskType,
-    AlertPublishLogCreate, AlertNotificationLogCreate, CompensationTaskLogCreate,
-    CompensationStats
+    AlertPublishLog,  # noqa: F401
+    AlertNotificationLog,  # noqa: F401
+    CompensationTaskLog,  # noqa: F401
+    PublishStatus,  # noqa: F401
+    NotificationStatus,  # noqa: F401
+    NotificationChannel,  # noqa: F401
+    CompensationTaskType,  # noqa: F401
+    AlertPublishLogCreate,  # noqa: F401
+    AlertNotificationLogCreate,  # noqa: F401
+    CompensationTaskLogCreate,  # noqa: F401
+    CompensationStats  # noqa: F401
 )
 
 # 为避免循环导入问题，这里显式地设置所有相关关系
