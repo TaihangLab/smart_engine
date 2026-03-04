@@ -103,7 +103,7 @@ class SystemStartupService:
                 "display_name": "预警数据Mock服务",
                 "start_func": self._initialize_alert_data_mock,
                 "stop_func": None,
-                "enabled": getattr(settings, 'ALERT_MOCK_ENABLED', False),
+                "enabled": getattr(settings, 'MOCK_ENABLED', False),
                 "critical": False,
                 "startup_order": 4
             }

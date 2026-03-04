@@ -538,14 +538,9 @@ class Settings(BaseSettings):
     CACHE_MENU_TTL: int = Field(default=300, description="菜单缓存时间（秒）")
     CACHE_MAX_SIZE: int = Field(default=128, description="最大缓存条目数")
 
-    # ========== 预警数据Mock配置（开发/测试环境） ==========
-    ALERT_MOCK_ENABLED: bool = Field(default=False, description="是否启用预警数据Mock服务")
-    ALERT_MOCK_DAILY_TARGET: int = Field(default=50, description="每日目标预警数量（用于生成测试数据）")
-    ALERT_MOCK_LOOKBACK_DAYS: int = Field(default=8, description="回溯天数（补充最近N天的数据）")
-
-    # ========== 智能填充助手配置（测试场景专用） ==========
-    SMART_FILL_ENABLED: bool = Field(default=False, description="是否启用智能填充助手")
-    SMART_FILL_MOCK_DATA_PATH: str = Field(default="config/smart_fill_mock.json", description="Mock数据文件路径")
+    # ========== Mock服务统一配置（开发/测试环境） ==========
+    MOCK_ENABLED: bool = Field(default=False, description="是否启用Mock服务（开发/测试环境）")
+    MOCK_CONFIG_PATH: str = Field(default="config/mock.json", description="Mock配置文件路径")
 
     class Config:
         env_file = ".env"

@@ -85,16 +85,31 @@ class AlertDataMockService:
         self.lookback_days = 8  # 回溯天数
         self._image_counter = 0  # 图片循环计数器
 
-        # 检查是否启用
-        self.enabled = getattr(settings, 'ALERT_MOCK_ENABLED', False)
+        # 检查是否启用（使用统一配置）
+        self.enabled = getattr(settings, 'MOCK_ENABLED', False)
 
-        # 如果启用，从配置读取参数
+        # 如果启用，从配置文件读取参数
         if self.enabled:
-            self.daily_target = getattr(settings, 'ALERT_MOCK_DAILY_TARGET', 50)
-            self.lookback_days = getattr(settings, 'ALERT_MOCK_LOOKBACK_DAYS', 8)
+            self._load_mock_config()
             logger.info(f"📊 预警数据Mock服务已启用 (每日目标: {self.daily_target}, 回溯: {self.lookback_days}天)")
         else:
             logger.info("📊 预警数据Mock服务已禁用")
+
+    def _load_mock_config(self):
+        """从配置文件加载Mock配置"""
+        import json
+        from pathlib import Path
+
+        config_path = Path(getattr(settings, 'MOCK_CONFIG_PATH', 'config/mock.json'))
+        if config_path.exists():
+            try:
+                with open(config_path, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                    alert_config = config.get('alert_mock', {})
+                    self.daily_target = alert_config.get('daily_target', 50)
+                    self.lookback_days = alert_config.get('lookback_days', 8)
+            except Exception as e:
+                logger.warning(f"读取Mock配置文件失败，使用默认值: {e}")
 
     def _get_next_image_url(self) -> str:
         """

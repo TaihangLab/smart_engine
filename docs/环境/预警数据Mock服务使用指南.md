@@ -12,24 +12,43 @@
 
 ## 配置说明
 
+### 1. 环境变量配置
+
 在 `.env` 文件中添加以下配置：
 
 ```bash
-# 是否启用预警数据Mock服务（开发/测试环境使用）
-ALERT_MOCK_ENABLED=True
+# 是否启用Mock服务（开发/测试环境使用）
+MOCK_ENABLED=True
 
-# 每日目标预警数量（用于生成测试数据）
-ALERT_MOCK_DAILY_TARGET=50
-
-# 回溯天数（补充最近N天的数据）
-ALERT_MOCK_LOOKBACK_DAYS=8
+# Mock配置文件路径
+MOCK_CONFIG_PATH=config/mock.json
 ```
+
+### 2. Mock配置文件
+
+创建 `config/mock.json` 文件：
+
+```json
+{
+  "alert_mock": {
+    "daily_target": 50,
+    "lookback_days": 8
+  }
+}
+```
+
+### 配置项说明
+
+| 配置项 | 默认值 | 说明 |
+|--------|--------|------|
+| `daily_target` | 50 | 每日目标预警数量 |
+| `lookback_days` | 8 | 回溯天数（补充最近N天的数据） |
 
 ## 使用方法
 
 ### 方法1: 通过系统启动自动执行
 
-启用 `ALERT_MOCK_ENABLED=True` 后，服务会在系统启动时自动执行。
+启用 `MOCK_ENABLED=True` 后，服务会在系统启动时自动执行。
 
 ### 方法2: 手动执行
 
@@ -117,10 +136,13 @@ python -m app.mock.alert_service
 ## 故障排查
 
 ### 服务未执行
-检查 `ALERT_MOCK_ENABLED` 是否设置为 `True`
+检查 `MOCK_ENABLED` 是否设置为 `True`
 
 ### 数据未生成
 查看日志输出，确认是否有错误信息
 
+### 配置文件读取失败
+确认 `config/mock.json` 文件存在且格式正确
+
 ### 生成的数据不符合预期
-调整 `ALERT_MOCK_DAILY_TARGET` 和 `ALERT_MOCK_LOOKBACK_DAYS` 参数
+调整 `config/mock.json` 中的 `daily_target` 和 `lookback_days` 参数
