@@ -9,9 +9,9 @@ import logging
 from typing import Optional, Dict, Any, TYPE_CHECKING
 from fastapi import Request, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from app.models.user import UserInfo
 from app.services.rbac_service import RbacService
 from app.db.session import get_db
@@ -65,38 +65,6 @@ def _match_path_with_params(pattern: str, actual_path: str) -> bool:
     return True
 
 
-def _extract_tenant_id_from_path(request: Request) -> Optional[str]:
-    """
-    从请求路径中提取租户ID
-
-    支持的路径格式:
-    - /api/v1/tenants/123
-    - /api/v1/tenants/123/users
-    - /api/v1/tenants/123/departments
-
-    Args:
-        request: FastAPI 请求对象
-
-    Returns:
-        租户ID（字符串类型），如果路径中不包含租户ID则返回None
-    """
-    from typing import Optional
-
-    path = request.url.path
-
-    # 匹配 /api/v1/tenants/123 格式
-    if "/tenants/" in path:
-        parts = path.split("/")
-        try:
-            idx = parts.index("tenants")
-            if idx + 1 < len(parts):
-                return parts[idx + 1]  # 保持字符串类型
-        except (ValueError, IndexError):
-            pass
-
-    return None
-
-
 def validate_client_id(client_id: str) -> bool:
     """
     验证client_id是否在白名单中
@@ -137,58 +105,33 @@ def _is_super_admin_user(user_info: Dict[str, Any]) -> bool:
 
 def parse_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    解析Token，支持两种格式：
-    1. JWT token 格式（推荐）：header.payload.signature
-    2. Base64 编码的 JSON token（向后兼容）
+    解析JWT Token
 
     Args:
-        token: Token字符串
-              JWT格式: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiAiMCJ9..."
-              Base64格式: "eyJ1c2VySWQiOiAiMCJ9..."
+        token: JWT token 字符串（格式: header.payload.signature）
+              示例: "eyJ0eXAiOiJKV1QiLCJhbGciOiJIUzI1NiJ9.eyJ1c2VySWQiOiAiMCJ9..."
 
     Returns:
         解析后的用户信息字典，解析失败返回None
     """
     try:
-        logger.info(f"开始解析 token，长度: {len(token)}, 前50字符: {token[:50]}")
+        parts = token.split(".")
+        if len(parts) != 3:
+            logger.error(f"Token 格式错误: 期望3个部分（header.payload.signature），实际 {len(parts)} 个")
+            return None
 
-        # 尝试解析 JWT token（标准格式：header.payload.signature）
-        if "." in token:
-            parts = token.split(".")
-            if len(parts) == 3:
-                # JWT 格式
-                try:
-                    # 只解析 payload 部分（中间部分），不验证签名
-                    payload_b64 = parts[1]
-                    # 添加必要的 base64 padding（base64url 编码可能缺少 padding）
-                    payload_b64 += "=" * (4 - len(payload_b64) % 4)
-                    # 使用 urlsafe_b64decode 解码 base64url 格式
-                    decoded_bytes = base64.urlsafe_b64decode(
-                        payload_b64.encode("utf-8")
-                    )
-                    decoded_str = decoded_bytes.decode("utf-8")
-
-                    logger.info(f"JWT 解码成功，内容: {decoded_str}")
-
-                    user_info = json.loads(decoded_str)
-
-                    return user_info
-                except Exception as e:
-                    logger.debug(f"JWT Token解析失败: {str(e)}，尝试Base64格式")
-
-        # 尝试解析 Base64 编码的 JSON（向后兼容）
-        decoded_bytes = base64.b64decode(token.encode("utf-8"))
+        # 只解析 payload 部分（中间部分），不验证签名
+        payload_b64 = parts[1]
+        # 添加必要的 base64 padding（base64url 编码可能缺少 padding）
+        payload_b64 += "=" * (4 - len(payload_b64) % 4)
+        # 使用 urlsafe_b64decode 解码 base64url 格式
+        decoded_bytes = base64.urlsafe_b64decode(payload_b64.encode("utf-8"))
         decoded_str = decoded_bytes.decode("utf-8")
 
-        logger.info(f"Base64 解码成功，内容: {decoded_str}")
-
         user_info = json.loads(decoded_str)
-
         return user_info
     except Exception as e:
-        logger.error(
-            f"Token 解析失败: {str(e)}, token 长度: {len(token)}", exc_info=True
-        )
+        logger.error(f"Token 解析失败: {str(e)}, token 长度: {len(token)}", exc_info=True)
         return None
 
 
@@ -241,7 +184,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
             "tenantId": tenant_id,
         }
 
-        ensure_dept_exists(dept_info, db)
+        await ensure_dept_exists(dept_info, db)
 
         dept_id = default_dept_id
         dept_name = default_dept_name
@@ -353,14 +296,14 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
             "companyName": user_info.get("companyName", f"Company-{tenant_id}"),
             "companyCode": user_info.get("companyCode", f"COMP-{tenant_id}"),
         }
-        ensure_tenant_exists(tenant_info, db)
+        await ensure_tenant_exists(tenant_info, db)
 
         # 2. 确保部门存在
         dept_info = {"deptId": dept_id, "deptName": dept_name, "tenantId": tenant_id}
-        ensure_dept_exists(dept_info, db)
+        await ensure_dept_exists(dept_info, db)
 
         # 3. 确保角色存在（ROLE_ACCESS角色检查）
-        await ensure_role_exists(int(tenant_id), db)
+        await ensure_role_exists(tenant_id, db)
 
         # 4. 创建新用户（包含外部系统ID）
         from app.utils.password_utils import hash_password
@@ -385,7 +328,32 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         if external_tenant_id:
             user_data["external_tenant_id"] = str(external_tenant_id)
 
-        created_user = RbacService.create_user(db, user_data)
+        # 尝试创建用户，处理并发冲突
+        try:
+            created_user = await RbacService.create_user(db, user_data)
+        except IntegrityError as e:
+            # 唯一键冲突：可能是并发请求导致用户已被创建
+            logger.warning(f"创建用户时遇到唯一键冲突: {user_name}@{tenant_id}，重新查询用户")
+            # 回滚当前事务
+            await db.rollback()
+            # 重新查询用户
+            created_user = await RbacService.get_user_by_user_name_and_tenant_id(
+                db, user_name, tenant_id
+            )
+            if not created_user:
+                # 如果外部用户ID存在，尝试通过外部用户ID查询
+                if external_user_id:
+                    result = await db.execute(
+                        select(SysUser).where(
+                            SysUser.external_user_id == str(external_user_id),
+                            SysUser.tenant_id == tenant_id,
+                        )
+                    )
+                    created_user = result.scalar_one_or_none()
+                # 如果仍然找不到，抛出原始异常
+                if not created_user:
+                    logger.error(f"重新查询用户失败: {user_name}@{tenant_id}")
+                    raise
 
         # 5. 为新用户分配角色（支持超管配置）
         # 检查是否为超管用户
@@ -394,7 +362,7 @@ async def ensure_user_exists(user_info: Dict[str, Any], db) -> UserInfo:
         else:
             role_code = RoleConstants.ROLE_ACCESS
 
-        success = RelationService.assign_role_to_user(
+        success = await RelationService.assign_role_to_user(
             db, user_name, role_code, tenant_id
         )
         if success:
@@ -471,11 +439,12 @@ async def _build_user_state(
 
         # 非超管才需要查询权限详情
         if not is_super_admin:
-            # 获取权限详情
+            # 获取权限详情（使用异步查询）
             from app.models.rbac import SysPermission, SysRolePermission
+            from sqlalchemy import select
 
-            role_perms = (
-                db.query(SysPermission)
+            result = await db.execute(
+                select(SysPermission)
                 .join(
                     SysRolePermission,
                     SysPermission.id == SysRolePermission.permission_id,
@@ -485,8 +454,8 @@ async def _build_user_state(
                     SysPermission.is_deleted == False,
                     SysPermission.status == 0,
                 )
-                .all()
             )
+            role_perms = list(result.scalars().all())
 
             # 权限编码列表
             permission_codes = [
@@ -527,7 +496,7 @@ async def _build_user_state(
     )
 
 
-def ensure_tenant_exists(tenant_info: Dict[str, Any], db):
+async def ensure_tenant_exists(tenant_info: Dict[str, Any], db):
     """
     确保租户存在，如果不存在则创建
     租户0为模板租户，特殊处理
@@ -544,6 +513,10 @@ def ensure_tenant_exists(tenant_info: Dict[str, Any], db):
         raise ValueError("租户信息中缺少必需的 tenantId 字段")
     tenant_id = tenant_info["tenantId"]
 
+    # 确保 tenant_id 是字符串类型
+    if not isinstance(tenant_id, str):
+        raise ValueError(f"租户ID必须是字符串类型，当前类型: {type(tenant_id)}")
+
     # 租户0是模板租户，不需要创建
     if tenant_id == TenantConstants.TEMPLATE_TENANT_ID:
         return
@@ -553,12 +526,12 @@ def ensure_tenant_exists(tenant_info: Dict[str, Any], db):
     company_code = tenant_info.get("companyCode", f"COMP-{tenant_id}")
 
     # 检查租户是否已存在
-    existing_tenant = TenantService.get_tenant_by_id(db, tenant_id)
+    existing_tenant = await TenantService.get_tenant_by_id(db, tenant_id)
 
     # 如果租户不存在，再尝试创建
     if not existing_tenant:
         # 检查公司代码是否已存在（避免重复）
-        existing_tenant_by_code = TenantService.get_tenant_by_company_code(
+        existing_tenant_by_code = await TenantService.get_tenant_by_company_code(
             db, company_code
         )
         if existing_tenant_by_code:
@@ -583,7 +556,19 @@ def ensure_tenant_exists(tenant_info: Dict[str, Any], db):
                 "update_by": "system",
             }
 
-            TenantService.create_tenant(db, tenant_data)
+            # 尝试创建租户，处理并发冲突
+            try:
+                await TenantService.create_tenant(db, tenant_data)
+            except IntegrityError:
+                # 并发冲突：租户可能已被其他请求创建
+                logger.warning(f"创建租户时遇到唯一键冲突: {tenant_id}，重新查询租户")
+                await db.rollback()
+                # 重新查询租户
+                existing_tenant = await TenantService.get_tenant_by_id(db, tenant_id)
+                if not existing_tenant:
+                    # 如果仍然找不到，抛出原始异常
+                    logger.error(f"重新查询租户失败: {tenant_id}")
+                    raise
     else:
         # 如果租户已存在，记录日志
         logger.info(f"租户 {tenant_id} 已存在")
@@ -604,7 +589,7 @@ async def ensure_role_exists(tenant_id: str, db):
     from app.models.rbac.rbac_constants import TenantConstants
 
     # 租户0不需要检查角色
-    if tenant_id == TenantConstants.TEMPLATE_TENANT_ID:
+    if str(tenant_id) == TenantConstants.TEMPLATE_TENANT_ID:
         # 确保租户0的ROLE_ACCESS角色存在
         await PermissionCopyService.get_template_role(db)
         return
@@ -613,44 +598,7 @@ async def ensure_role_exists(tenant_id: str, db):
     role = await PermissionCopyService.ensure_role_has_permissions(db, str(tenant_id))
 
 
-def _get_or_create_role_all(db: Session, tenant_id: str):
-    """
-    获取或创建 ROLE_ALL 超管角色
-
-    Args:
-        db: 数据库会话
-        tenant_id: 租户ID（字符串类型）
-
-    Returns:
-        SysRole: 超管角色对象
-    """
-    from app.models.rbac.sqlalchemy_models import SysRole
-    from app.models.rbac.rbac_constants import RoleConstants
-
-    role = (
-        db.query(SysRole)
-        .filter(
-            SysRole.role_code == RoleConstants.ROLE_ALL, SysRole.tenant_id == tenant_id
-        )
-        .first()
-    )
-
-    if not role:
-        role = SysRole(
-            role_name="超管",
-            role_code=RoleConstants.ROLE_ALL,
-            tenant_id=tenant_id,
-            status=0,
-        )
-        db.add(role)
-        db.commit()
-        db.refresh(role)
-        logger.info(f"创建超管角色: {role.role_name} (租户: {tenant_id})")
-
-    return role
-
-
-def ensure_dept_exists(dept_info: Dict[str, Any], db):
+async def ensure_dept_exists(dept_info: Dict[str, Any], db):
     """
     确保部门存在，如果不存在则创建
 
@@ -680,7 +628,7 @@ def ensure_dept_exists(dept_info: Dict[str, Any], db):
     parent_id = dept_info.get("parentId")  # 允许为None
 
     # 检查部门是否已存在
-    existing_dept = DeptService.get_dept_by_id(db, dept_id)
+    existing_dept = await DeptService.get_dept_by_id(db, dept_id)
 
     if not existing_dept:
         # 创建新部门
@@ -695,7 +643,7 @@ def ensure_dept_exists(dept_info: Dict[str, Any], db):
             "update_by": "system",
         }
 
-        DeptService.create_dept(db, dept_data)
+        await DeptService.create_dept(db, dept_data)
 
 
 async def authenticate_request(request: Request) -> Optional[UserInfo]:
@@ -806,7 +754,7 @@ async def authenticate_request(request: Request) -> Optional[UserInfo]:
             ),
             "companyCode": user_info.get("companyCode", f"COMP-{tenant_id_from_token}"),
         }
-        ensure_tenant_exists(tenant_info, db)
+        await ensure_tenant_exists(tenant_info, db)
 
         # 2. 确保部门存在
         dept_info = {
@@ -814,10 +762,10 @@ async def authenticate_request(request: Request) -> Optional[UserInfo]:
             "deptName": user_info.get("deptName", f"Dept-{user_info['deptId']}"),
             "tenantId": user_info["tenantId"],
         }
-        ensure_dept_exists(dept_info, db)
+        await ensure_dept_exists(dept_info, db)
 
         # 3. 确保角色存在（ROLE_ACCESS角色检查）
-        await ensure_role_exists(int(tenant_id_from_token), db)
+        await ensure_role_exists(tenant_id_from_token, db)
 
         # 4. 确保用户存在并关联角色，返回完整用户态
         user_state = await ensure_user_exists(user_info, db)
@@ -899,18 +847,6 @@ async def auth_middleware(request: Request, call_next):
             response = await call_next(request)
             return response
 
-        # ========== 水平权限检查：非超管用户只能访问自己租户的资源 ==========
-        path_tenant_id = _extract_tenant_id_from_path(request)
-        if path_tenant_id is not None and path_tenant_id != tenant_id:
-            logger.warning(
-                f"[水平权限拦截] 用户 {user_state.userName} (租户: {tenant_id}) "
-                f"尝试访问租户 {path_tenant_id} 的资源: {request_path} [{request_method}]"
-            )
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail=f"无权限访问租户 {path_tenant_id} 的资源",
-            )
-
         # 租户0不需要鉴权（但不是超管）
         if tenant_id == TenantConstants.TEMPLATE_TENANT_ID:
             logger.debug(f"[鉴权] 租户0跳过鉴权: {request_path} [{request_method}]")
@@ -972,7 +908,7 @@ async def auth_middleware(request: Request, call_next):
         try:
             from app.services.rbac.permission_copy_service import PermissionCopyService
 
-            template_role = PermissionCopyService.get_template_role(db)
+            template_role = await PermissionCopyService.get_template_role(db)
 
             logger.debug(f"[鉴权步骤2] 租户0的ROLE_ACCESS角色ID: {template_role.id}")
 
