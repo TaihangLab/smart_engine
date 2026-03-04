@@ -1,0 +1,99 @@
+# Git
+.git/
+.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.code-workspace
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+*.egg
+.venv/
+venv/
+env/
+
+# 测试和文档
+tests/
+docs/
+*.md
+!README.md
+
+# 数据文件（不打包到镜像）
+data/
+dataset/
+datasets/
+*.csv
+*.json
+!config/*.json
+
+# AI模型文件（体积大，应通过挂载加载）
+*.h5
+*.hdf5
+*.pkl
+*.onnx
+*.pb
+*.pth
+*.pt
+*.weights
+*.bin
+*.safetensors
+*.engine
+checkpoints/
+runs/
+triton-models/
+model-repository/
+
+# 媒体文件
+*.jpg
+*.jpeg
+*.png
+*.gif
+*.mp4
+*.avi
+*.mov
+
+# 日志
+*.log
+logs/
+app.log
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.dockerignore
+
+# 环境和密钥
+.env
+.env.*
+secrets/
+private/
+
+# 临时文件
+cache/
+tmp/
+temp/
+*.tmp
+*.bak
+*.backup
+
+# MinIO本地存储
+minio-data/
+storage/
+
+# 预警资源
+alerts/
+alert-images/
+alert-videos/
+
+# 系统文件
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# CLAUDE.md
+CLAUDE.md
