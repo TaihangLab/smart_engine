@@ -747,7 +747,7 @@ class AlertMergeManager:
                 "image_cache_key": image_cache_key,  # Redis 缓存 key，用于复判
 
                 # 更新描述
-                "alert_description": self._generate_merged_description(base_alert_data, merged_alert)
+                #"alert_description": self._generate_merged_description(base_alert_data, merged_alert)
             })
             
             # 发送到RabbitMQ（带重试机制）
