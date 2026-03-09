@@ -34,12 +34,11 @@ RUN pip install --no-cache-dir \
     torchvision==0.25.0+cu126 \
     --index-url https://download.pytorch.org/whl/cu126
 
-# 复制依赖清单并安装其余依赖
+# 复制依赖清单并安装其余依赖（torch 已在上一步安装，此处跳过）
 COPY requirements.txt .
 RUN pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cu126 \
-    -r requirements.txt \
-    || echo "部分可选依赖安装失败，继续构建..."
+    -r requirements.txt
 
 # ==================== 运行阶段 ====================
 FROM nvidia/cuda:12.6.3-cudnn-runtime-ubuntu22.04
