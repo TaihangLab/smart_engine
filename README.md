@@ -1181,7 +1181,7 @@ python -m app.main
 
 ### 生产模式
 ```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
+uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 1
 ```
 
 访问API文档：http://localhost:8000/docs
