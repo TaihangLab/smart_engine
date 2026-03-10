@@ -208,6 +208,7 @@ config/production_*
 config/.env*
 .env.*
 !.env.docker
+!.env.template
 secrets/
 private/
 
