@@ -430,6 +430,52 @@ class OptimizedAsyncProcessor:
                         cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2
                     )
             
+
+            
+                #绘制关键点
+                # 定义一个调色板数组，其中每个元素是一个包含RGB值的列表，用于表示不同的颜色
+                palette = np.array([[255, 128, 0], [255, 153, 51], [255, 178, 102],
+                                        [230, 230, 0], [255, 153, 255], [153, 204, 255],
+                                        [255, 102, 255], [255, 51, 255], [102, 178, 255],
+                                        [51, 153, 255], [255, 153, 153], [255, 102, 102],
+                                        [255, 51, 51], [153, 255, 153], [102, 255, 102],
+                                        [51, 255, 51], [0, 255, 0], [0, 0, 255], [255, 0, 0],
+                                        [255, 255, 255]])
+                # 定义人体17个关键点的连接顺序，每个子列表包含两个数字，代表要连接的关键点的索引, 1鼻子 2左眼 3右眼 4左耳 5右耳 6左肩 7右肩
+                # 8左肘 9右肘 10左手腕 11右手腕 12左髋 13右髋 14左膝 15右膝 16左踝 17右踝
+                skeleton = [[16, 14], [14, 12], [17, 15], [15, 13], [12, 13], [6, 12],
+                                [7, 13], [6, 7], [6, 8], [7, 9], [8, 10], [9, 11], [2, 3],
+                                [1, 2], [1, 3], [2, 4], [3, 5], [4, 6], [5, 7]]
+                # 通过索引从调色板中选择颜色，用于绘制人体骨架的线条，每个索引对应一种颜色
+                pose_limb_color = palette[[9, 9, 9, 9, 7, 7, 7, 0, 0, 0, 0, 0, 16, 16, 16, 16, 16, 16, 16]]
+                # 通过索引从调色板中选择颜色，用于绘制人体的关键点，每个索引对应一种颜色
+                pose_kpt_color = palette[[16, 16, 16, 16, 16, 0, 0, 0, 0, 0, 0, 9, 9, 9, 9, 9, 9]]
+            
+                
+                kpt =  detection.get("kpts", [])
+                if kpt !=[]:
+                    steps=3
+                    num_kpts = len(kpt) // steps  # 51 / 3 =17
+                    # 画点
+                    for kid in range(num_kpts):
+                        r, g, b = pose_kpt_color[kid]
+                        x_coord, y_coord = kpt[steps * kid], kpt[steps * kid + 1]
+                        conf = kpt[steps * kid + 2]
+                        if conf > 0.5:  # 关键点的置信度必须大于 0.5
+                            cv2.circle(frame, (int(x_coord), int(y_coord)), 10, (int(r), int(g), int(b)), -1)
+                    # 画骨架
+                    for sk_id, sk in enumerate(skeleton):
+                        r, g, b = pose_limb_color[sk_id]
+                        pos1 = (int(kpt[(sk[0] - 1) * steps]), int(kpt[(sk[0] - 1) * steps + 1]))
+                        pos2 = (int(kpt[(sk[1] - 1) * steps]), int(kpt[(sk[1] - 1) * steps + 1]))
+                        conf1 = kpt[(sk[0] - 1) * steps + 2]
+                        conf2 = kpt[(sk[1] - 1) * steps + 2]
+                        if conf1 > 0.5 and conf2 > 0.5:  # 对于肢体，相连的两个关键点置信度 必须同时大于 0.5
+                            cv2.line(frame, pos1, pos2, (int(r), int(g), int(b)), thickness=2)
+
+
+
+
             return frame
         except Exception as e:
             logger.error(f"绘制检测框时出错: {str(e)}")
