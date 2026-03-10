@@ -1544,15 +1544,16 @@ async def mark_alert_as_false_alarm(
                 detail=f"只有待处理状态的预警才能标记为误报，当前状态为：{current_status_name}"
             )
         
-        # 更新预警状态为误报
+        # 更新预警状态为误报（使用统一方法，避免process.steps重复）
         old_status = alert.status
-        alert.status = AlertStatus.FALSE_ALARM
-        alert.processed_at = datetime.utcnow()
+        false_alarm_desc = f"复判人员 {reviewer_name} 标记为误报：{review_notes}"
+        alert.update_status_with_process(
+            new_status=AlertStatus.FALSE_ALARM,
+            desc=false_alarm_desc,
+            operator=reviewer_name
+        )
         alert.processed_by = reviewer_name
         alert.processing_notes = f"标记为误报：{review_notes}"
-        
-        # 添加处理流程步骤
-        alert.add_process_step("标记误报", f"复判人员 {reviewer_name} 标记为误报：{review_notes}", reviewer_name)
         
         # 创建复判记录
         from app.db.review_record_dao import ReviewRecordDAO
@@ -1652,15 +1653,16 @@ async def batch_mark_alerts_as_false_alarm(
                 logger.warning(f"跳过非待处理状态的预警: alert_id={alert.alert_id}, status={alert.status}")
                 continue
                 
-            # 更新预警状态为误报
+            # 更新预警状态为误报（使用统一方法，避免process.steps重复）
             old_status = alert.status
-            alert.status = AlertStatus.FALSE_ALARM
-            alert.processed_at = datetime.utcnow()
+            false_alarm_desc = f"复判人员 {reviewer_name} 批量标记为误报：{review_notes}"
+            alert.update_status_with_process(
+                new_status=AlertStatus.FALSE_ALARM,
+                desc=false_alarm_desc,
+                operator=reviewer_name
+            )
             alert.processed_by = reviewer_name
             alert.processing_notes = f"批量标记为误报：{review_notes}"
-            
-            # 添加处理流程步骤
-            alert.add_process_step("批量标记误报", f"复判人员 {reviewer_name} 批量标记为误报：{review_notes}", reviewer_name)
             
             # 创建复判记录
             from app.db.review_record_dao import ReviewRecordDAO

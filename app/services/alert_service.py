@@ -338,50 +338,49 @@ class AlertService:
         """获取报警列表，支持多种过滤条件"""
         query = db.query(Alert)
         
-        # 🆕 按报警类型过滤
+        # 按报警类型过滤
         if alert_type:
             query = query.filter(Alert.alert_type == alert_type)
         
-        # 🆕 按摄像头ID过滤
+        # 按摄像头ID过滤
         if camera_id:
             query = query.filter(Alert.camera_id == camera_id)
         
-        # 🆕 按摄像头名称过滤 (模糊搜索)
+        # 按摄像头名称过滤 (模糊搜索)
         if camera_name:
             query = query.filter(Alert.camera_name.like(f"%{camera_name}%"))
         
-        # 🆕 按报警等级过滤
+        # 按报警等级过滤
         if alert_level:
             query = query.filter(Alert.alert_level == alert_level)
         
-        # 🆕 按报警名称过滤 (模糊搜索)
+        # 按报警名称过滤 (模糊搜索)
         if alert_name:
             query = query.filter(Alert.alert_name.like(f"%{alert_name}%"))
         
-        # 🆕 按任务ID过滤
+        # 按任务ID过滤
         if task_id:
             query = query.filter(Alert.task_id == task_id)
         
-        # 🆕 按位置过滤 (模糊搜索)
+        # 按位置过滤 (模糊搜索)
         if location:
             query = query.filter(Alert.location.like(f"%{location}%"))
         
         # 按状态过滤 - 支持整数值或字符串
         if status:
             try:
-                # 如果是字符串，尝试转换为整数
                 if isinstance(status, str):
                     status_value = int(status)
                 else:
-                    # 如果已经是整数，直接使用
                     status_value = status
                 query = query.filter(Alert.status == status_value)
             except ValueError:
-                # 转换失败时记录日志但不抛出异常
                 logger.warning(f"无效的状态值，无法转换为整数: {status}")
-                pass
+        else:
+            # 未指定状态时，排除已归档和误报的预警（归档仅在预警档案查看，误报仅在复判记录查看）
+            query = query.filter(Alert.status.notin_([AlertStatus.ARCHIVED, AlertStatus.FALSE_ALARM]))
         
-        # 🆕 按日期范围过滤（简单格式：YYYY-MM-DD）
+        # 按日期范围过滤（简单格式：YYYY-MM-DD）
         if start_date:
             try:
                 start_datetime = datetime.strptime(start_date, "%Y-%m-%d")
@@ -446,47 +445,40 @@ class AlertService:
         """获取报警总数，支持多种过滤条件"""
         query = db.query(Alert)
         
-        # 应用相同的过滤条件
         if alert_type:
             query = query.filter(Alert.alert_type == alert_type)
         
         if camera_id:
             query = query.filter(Alert.camera_id == camera_id)
         
-        # 按摄像头名称过滤
         if camera_name:
             query = query.filter(Alert.camera_name.like(f"%{camera_name}%"))
         
-        # 按报警等级过滤
         if alert_level:
             query = query.filter(Alert.alert_level == alert_level)
         
-        # 按报警名称过滤
         if alert_name:
             query = query.filter(Alert.alert_name.like(f"%{alert_name}%"))
         
-        # 按任务ID过滤
         if task_id:
             query = query.filter(Alert.task_id == task_id)
         
-        # 按位置过滤
         if location:
             query = query.filter(Alert.location.like(f"%{location}%"))
         
         # 按状态过滤 - 支持整数值或字符串
         if status:
             try:
-                # 如果是字符串，尝试转换为整数
                 if isinstance(status, str):
                     status_value = int(status)
                 else:
-                    # 如果已经是整数，直接使用
                     status_value = status
                 query = query.filter(Alert.status == status_value)
             except ValueError:
-                # 转换失败时记录日志但不抛出异常
                 logger.warning(f"无效的状态值，无法转换为整数: {status}")
-                pass
+        else:
+            # 未指定状态时，排除已归档和误报的预警（归档仅在预警档案查看，误报仅在复判记录查看）
+            query = query.filter(Alert.status.notin_([AlertStatus.ARCHIVED, AlertStatus.FALSE_ALARM]))
         
         if start_date:
             try:

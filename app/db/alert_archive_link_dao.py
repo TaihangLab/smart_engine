@@ -290,6 +290,15 @@ class AlertArchiveLinkDAO:
                         self.db.add(new_link)
                         success_alerts.append(alert_id)
                     
+                    # 更新预警状态为已归档，使其从实时预警和预警管理页面中移除
+                    if alert.status != AlertStatus.ARCHIVED:
+                        alert.update_status_with_process(
+                            new_status=AlertStatus.ARCHIVED,
+                            desc=f"预警已归档到档案：{archive.name}",
+                            operator=linked_by
+                        )
+                        alert.updated_at = current_time
+                    
                 except IntegrityError as e:
                     self.db.rollback()
                     failed_alerts.append({
@@ -365,6 +374,20 @@ class AlertArchiveLinkDAO:
             link.extra_data["unlinked_by"] = unlinked_by
             link.extra_data["unlinked_at"] = datetime.utcnow().isoformat()
             
+            # 恢复预警状态：从已归档恢复为已处理，使其重新出现在预警管理页面
+            alert = self.db.query(Alert).filter(Alert.alert_id == alert_id).first()
+            if alert and alert.status == AlertStatus.ARCHIVED:
+                archive = self.db.query(AlertArchive).filter(
+                    AlertArchive.archive_id == archive_id
+                ).first()
+                archive_name = archive.name if archive else f"档案{archive_id}"
+                alert.update_status_with_process(
+                    new_status=AlertStatus.RESOLVED,
+                    desc=f"预警已从档案移除：{archive_name}，状态恢复为已处理",
+                    operator=unlinked_by
+                )
+                alert.updated_at = datetime.utcnow()
+            
             self.db.commit()
             
             # 更新档案统计信息
@@ -411,7 +434,14 @@ class AlertArchiveLinkDAO:
             processed_count = 0
             current_time = datetime.utcnow()
             
-            # 批量更新关联记录状态
+            # 获取档案名称用于日志
+            archive = self.db.query(AlertArchive).filter(
+                AlertArchive.archive_id == archive_id
+            ).first()
+            archive_name = archive.name if archive else f"档案{archive_id}"
+            
+            # 批量更新关联记录状态，并恢复预警状态
+            alert_ids = [link.alert_id for link in links]
             for link in links:
                 link.is_active = False
                 link.archived_status = 2  # 移除归档
@@ -421,6 +451,22 @@ class AlertArchiveLinkDAO:
                 link.extra_data["unlinked_at"] = current_time.isoformat()
                 link.extra_data["unlink_reason"] = "档案删除时自动取消关联"
                 processed_count += 1
+            
+            # 批量恢复这些预警的状态
+            if alert_ids:
+                archived_alerts = self.db.query(Alert).filter(
+                    and_(
+                        Alert.alert_id.in_(alert_ids),
+                        Alert.status == AlertStatus.ARCHIVED
+                    )
+                ).all()
+                for alert in archived_alerts:
+                    alert.update_status_with_process(
+                        new_status=AlertStatus.RESOLVED,
+                        desc=f"档案已删除：{archive_name}，状态恢复为已处理",
+                        operator=unlinked_by
+                    )
+                    alert.updated_at = current_time
             
             # 根据auto_commit参数决定是否提交事务
             if auto_commit:
