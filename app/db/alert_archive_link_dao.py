@@ -13,8 +13,7 @@ from sqlalchemy.exc import IntegrityError
 from app.db.session import SessionLocal
 from app.models.alert_archive import AlertArchive
 from app.models.alert_archive_link import AlertArchiveLink
-from app.models.alert import Alert, AlertStatus
-# from app.core.config import get_minio_config  # 暂时注释掉
+from app.models.alert import Alert, AlertStatus, AlertResponse
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +29,7 @@ class AlertArchiveLinkDAO:
             db: 数据库会话，如果不提供则自动创建
         """
         self.db = db or SessionLocal()
-        # self.minio_config = get_minio_config()  # 暂时注释掉
-        self._auto_close = db is None  # 标记是否需要自动关闭会话
+        self._auto_close = db is None
     
     def __del__(self):
         """析构函数，确保数据库会话被正确关闭"""
@@ -41,21 +39,31 @@ class AlertArchiveLinkDAO:
             except:
                 pass  # 忽略关闭时的错误
     
-    def _build_minio_url(self, object_name: str, is_video: bool = False) -> str:
-        """构建MinIO文件URL"""
-        # 暂时返回空字符串，MinIO功能待实现
-        return ""
-        # if not object_name:
-        #     return ""
-        # 
-        # bucket = self.minio_config.get("video_bucket") if is_video else self.minio_config.get("image_bucket")
-        # endpoint = self.minio_config.get("endpoint", "localhost:9000")
-        # 
-        # # 处理endpoint格式
-        # if not endpoint.startswith(('http://', 'https://')):
-        #     endpoint = f"http://{endpoint}"
-        # 
-        # return f"{endpoint}/{bucket}/{object_name}"
+    @staticmethod
+    def _alert_to_dict(alert: Alert) -> Dict[str, Any]:
+        """将 Alert ORM 对象通过 AlertResponse 转换为字典，自动生成 presigned URL"""
+        try:
+            return AlertResponse.model_validate(alert).model_dump()
+        except Exception as e:
+            logger.warning(f"AlertResponse转换失败(alert_id={alert.alert_id}): {e}")
+            return {
+                "alert_id": alert.alert_id,
+                "alert_time": alert.alert_time,
+                "alert_type": alert.alert_type,
+                "alert_level": alert.alert_level,
+                "alert_name": alert.alert_name,
+                "alert_description": alert.alert_description,
+                "location": alert.location,
+                "camera_id": alert.camera_id,
+                "camera_name": alert.camera_name,
+                "task_id": alert.task_id,
+                "skill_name_zh": alert.skill_name_zh,
+                "status": alert.status,
+                "status_display": getattr(alert, 'status_display', ''),
+                "minio_frame_url": "",
+                "minio_video_url": "",
+                "created_at": alert.created_at,
+            }
 
     # ======================== 获取可用预警列表 ========================
     
@@ -152,26 +160,9 @@ class AlertArchiveLinkDAO:
                     ).first()
                     archived_archive_name = archive.name if archive else None
                 
-                alert_data = {
-                    "alert_id": alert.alert_id,
-                    "alert_time": alert.alert_time,
-                    "alert_type": alert.alert_type,
-                    "alert_level": alert.alert_level,
-                    "alert_name": alert.alert_name,
-                    "alert_description": alert.alert_description,
-                    "location": alert.location,
-                    "camera_id": alert.camera_id,
-                    "camera_name": alert.camera_name,
-                    "task_id": alert.task_id,
-                    "skill_name_zh": alert.skill_name_zh,
-                    "status": alert.status,
-                    "status_display": alert.status_display,
-                    "minio_frame_url": self._build_minio_url(alert.minio_frame_object_name, False),
-                    "minio_video_url": self._build_minio_url(alert.minio_video_object_name, True),
-                    "created_at": alert.created_at,
-                    "is_already_archived": archived_link is not None,
-                    "archived_in_archive_name": archived_archive_name
-                }
+                alert_data = self._alert_to_dict(alert)
+                alert_data["is_already_archived"] = archived_link is not None
+                alert_data["archived_in_archive_name"] = archived_archive_name
                 alert_list.append(alert_data)
             
             # 计算分页信息
@@ -523,30 +514,7 @@ class AlertArchiveLinkDAO:
             alerts = query.offset(offset).limit(limit).all()
             
             # 转换为响应格式
-            alert_list = []
-            for alert in alerts:
-                alert_data = {
-                    "alert_id": alert.alert_id,
-                    "alert_time": alert.alert_time,
-                    "alert_type": alert.alert_type,
-                    "alert_level": alert.alert_level,
-                    "alert_name": alert.alert_name,
-                    "alert_description": alert.alert_description,
-                    "location": alert.location,
-                    "camera_id": alert.camera_id,
-                    "camera_name": alert.camera_name,
-                    "task_id": alert.task_id,
-                    "skill_name_zh": alert.skill_name_zh,
-                    "status": alert.status,
-                    "status_display": alert.status_display,
-                    "minio_frame_url": self._build_minio_url(alert.minio_frame_object_name, False),
-                    "minio_video_url": self._build_minio_url(alert.minio_video_object_name, True),
-                    "created_at": alert.created_at,
-                    "processed_at": alert.processed_at,
-                    "processed_by": alert.processed_by,
-                    "processing_notes": alert.processing_notes
-                }
-                alert_list.append(alert_data)
+            alert_list = [self._alert_to_dict(alert) for alert in alerts]
             
             # 计算分页信息
             pages = (total + limit - 1) // limit
@@ -688,27 +656,7 @@ class AlertArchiveLinkDAO:
             if not alert:
                 return None
             
-            return {
-                "alert_id": alert.alert_id,
-                "alert_time": alert.alert_time,
-                "alert_type": alert.alert_type,
-                "alert_level": alert.alert_level,
-                "alert_name": alert.alert_name,
-                "alert_description": alert.alert_description,
-                "location": alert.location,
-                "camera_id": alert.camera_id,
-                "camera_name": alert.camera_name,
-                "task_id": alert.task_id,
-                "skill_name_zh": alert.skill_name_zh,
-                "status": alert.status,
-                "status_display": alert.status_display,
-                "minio_frame_url": self._build_minio_url(alert.minio_frame_object_name, False),
-                "minio_video_url": self._build_minio_url(alert.minio_video_object_name, True),
-                "created_at": alert.created_at,
-                "processed_at": alert.processed_at,
-                "processed_by": alert.processed_by,
-                "processing_notes": alert.processing_notes
-            }
+            return self._alert_to_dict(alert)
             
         except Exception as e:
             logger.error(f"获取预警{alert_id}详情失败: {e}")
