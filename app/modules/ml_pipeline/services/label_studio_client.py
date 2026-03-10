@@ -44,14 +44,12 @@ class LabelStudioClient:
             self._auth_ready = True
         # 没有配 API Key，延迟到第一次请求时自动登录
 
-    def _login_and_get_token(self):
-        """通过账号密码登录 Label Studio，自动获取 Legacy Token"""
+    def _session_login(self) -> requests.Session:
+        """通过账号密码登录 Label Studio，返回已认证的 Session"""
         login_session = requests.Session()
-        # 1. 访问登录页获取 CSRF token
-        login_page = login_session.get(f"{self.url}/user/login", timeout=10)
+        login_session.get(f"{self.url}/user/login", timeout=10)
         csrf_token = login_session.cookies.get("csrftoken", "")
 
-        # 2. 提交登录
         resp = login_session.post(
             f"{self.url}/user/login",
             data={
@@ -71,34 +69,77 @@ class LabelStudioClient:
                 f"Label Studio 登录失败 (HTTP {resp.status_code})，"
                 f"请检查账号密码: {self._username}"
             )
+        return login_session
 
-        # 3. 用登录后的 session 获取 API token
-        token_resp = login_session.get(
-            f"{self.url}/api/current-user/token",
-            timeout=10,
-        )
-        if token_resp.status_code != 200:
-            raise RuntimeError(
-                f"获取 Label Studio Token 失败 (HTTP {token_resp.status_code}): "
-                f"{token_resp.text[:200]}"
-            )
+    def _login_and_get_token(self):
+        """通过账号密码登录 Label Studio，自动选择最佳认证方式"""
+        login_session = self._session_login()
 
-        token_data = token_resp.json()
-        token = token_data.get("token", "")
-        if not token:
-            raise RuntimeError(f"Label Studio 返回的 Token 为空: {token_data}")
+        # 尝试 1: JWT token (LS >= 1.22.0)
+        try:
+            jwt_resp = login_session.post(f"{self.url}/api/token/", json={}, timeout=10)
+            if jwt_resp.status_code in (200, 201):
+                data = jwt_resp.json()
+                refresh_token = data.get("token") or data.get("refresh", "")
+                if refresh_token and refresh_token.startswith("eyJ"):
+                    # 用 refresh token 换取 access token
+                    access_resp = requests.post(
+                        f"{self.url}/api/token/refresh/",
+                        json={"refresh": refresh_token},
+                        headers={"Content-Type": "application/json"},
+                        timeout=10,
+                    )
+                    if access_resp.status_code == 200:
+                        access_token = access_resp.json().get("access", "")
+                        if access_token:
+                            self.api_key = refresh_token
+                            self._is_jwt = True
+                            self._access_token = access_token
+                            self._access_token_expires = time.time() + 240
+                            self.session.headers["Authorization"] = f"Bearer {access_token}"
+                            self._auth_ready = True
+                            logger.info("Label Studio JWT 认证成功")
+                            return
+        except Exception as e:
+            logger.debug(f"JWT 认证失败: {e}")
 
-        self.api_key = token
+        # 尝试 2: Legacy Token (旧版 LS)
+        try:
+            token_resp = login_session.get(f"{self.url}/api/current-user/token", timeout=10)
+            if token_resp.status_code == 200:
+                token = token_resp.json().get("token", "")
+                if token:
+                    # 验证 legacy token 是否真的可用
+                    test_resp = requests.get(
+                        f"{self.url}/api/current-user/whoami",
+                        headers={"Authorization": f"Token {token}"},
+                        timeout=5,
+                    )
+                    if test_resp.status_code == 200:
+                        self.api_key = token
+                        self._is_jwt = False
+                        self.session.headers["Authorization"] = f"Token {token}"
+                        self._auth_ready = True
+                        logger.info("Label Studio Legacy Token 认证成功")
+                        return
+                    else:
+                        logger.debug(f"Legacy Token 不可用 (HTTP {test_resp.status_code})，跳过")
+        except Exception as e:
+            logger.debug(f"Legacy Token 获取失败: {e}")
+
+        # 尝试 3: Session Cookie（兜底，适用所有版本）
+        self.session.cookies.update(login_session.cookies)
+        if "Authorization" in self.session.headers:
+            del self.session.headers["Authorization"]
         self._is_jwt = False
-        self.session.headers["Authorization"] = f"Token {token}"
         self._auth_ready = True
-        logger.info(f"通过账号密码自动获取 Label Studio Token 成功: {token[:8]}...")
+        logger.info("Label Studio Session Cookie 认证成功")
 
     def _refresh_access_token(self):
         """用 refresh token 换取短期 access token（约 5 分钟有效）"""
         try:
             resp = requests.post(
-                f"{self.url}/api/token/refresh",
+                f"{self.url}/api/token/refresh/",
                 json={"refresh": self.api_key},
                 headers={"Content-Type": "application/json"},
                 timeout=10,
@@ -110,8 +151,10 @@ class LabelStudioClient:
             self.session.headers["Authorization"] = f"Bearer {self._access_token}"
             logger.info("Label Studio JWT access token 已刷新")
         except Exception as e:
-            logger.error(f"刷新 Label Studio access token 失败: {e}")
-            raise
+            logger.warning(f"刷新 Label Studio access token 失败，重新登录: {e}")
+            self._auth_ready = False
+            self._is_jwt = False
+            self._login_and_get_token()
 
     def _ensure_auth(self):
         """每次请求前确保认证就绪"""
